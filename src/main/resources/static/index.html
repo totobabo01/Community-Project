@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html
+    lang="ko"
+    ng-app="busApp"
+>
+    <head>
+        <meta charset="UTF-8" />
+        <title>대구 버스 노선 정보 시스템</title>
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1"
+        />
+
+        <!-- AngularJS -->
+        <script src="/lib/angular.js"></script>
+        <script src="/lib/angular-route.js"></script>
+        <!-- App -->
+        <script src="/app.js"></script>
+
+        <style>
+            [ng-cloak] {
+                display: none;
+            }
+
+            :root {
+                --blue: #3478f6;
+                --blue-600: #2c63ca;
+                --gray-100: #f5f7fb;
+                --gray-200: #edf0f5;
+                --gray-400: #cfd7e3;
+                --text-600: #2c3e50;
+                --green: #2ecc71;
+                --danger: #e74c3c;
+            }
+
+            html,
+            body {
+                height: 100%;
+            }
+            body {
+                font-family: 'Segoe UI', system-ui, -apple-system, Roboto, Apple SD Gothic Neo, Malgun Gothic, sans-serif;
+                background: #f7f9fc;
+                margin: 0;
+                color: #1f2d3d;
+            }
+
+            /* Top bar */
+            .topbar {
+                background: #3498db;
+                color: #fff;
+                padding: 12px 16px;
+            }
+            .topbar .inner {
+                max-width: 1100px;
+                margin: 0 auto;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+            }
+            .brand {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                font-weight: 700;
+                font-size: 18px;
+            }
+            .brand .logo {
+                font-size: 20px;
+                line-height: 1;
+            }
+            .nav-right {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                font-size: 14px;
+            }
+            .btn-link {
+                color: #fff;
+                text-decoration: none;
+                border: 1px solid rgba(255, 255, 255, 0.6);
+                padding: 6px 10px;
+                border-radius: 10px;
+                transition: 0.15s;
+            }
+            .btn-link:hover {
+                background: rgba(255, 255, 255, 0.12);
+            }
+
+            main {
+                max-width: 980px;
+                margin: 28px auto 40px;
+                padding: 20px;
+                background: #fff;
+                border-radius: 16px;
+                box-shadow: 0 10px 30px rgba(31, 38, 135, 0.08);
+            }
+
+            .search-box {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 16px;
+            }
+            .search-box input {
+                padding: 10px 12px;
+                width: 60%;
+                font-size: 16px;
+                border: 1px solid var(--gray-400);
+                border-radius: 10px;
+            }
+            .search-box button {
+                padding: 10px 16px;
+                background: var(--green);
+                color: #fff;
+                border: 0;
+                border-radius: 10px;
+                cursor: pointer;
+            }
+
+            .generate-button {
+                display: flex;
+                justify-content: center;
+                margin-bottom: 16px;
+            }
+            .generate-button button {
+                padding: 10px 20px;
+                background: #3498db;
+                color: #fff;
+                border: 0;
+                border-radius: 10px;
+                font-size: 16px;
+                cursor: pointer;
+            }
+
+            .status-box {
+                margin-bottom: 16px;
+                text-align: center;
+                font-size: 15px;
+                padding: 10px;
+                border-radius: 10px;
+            }
+            .status-success {
+                background: #e8f5e9;
+                color: #2e7d32;
+                border: 1px solid #c8e6c9;
+            }
+            .status-error {
+                background: #ffebee;
+                color: #c62828;
+                border: 1px solid #ef9a9a;
+            }
+            .status-info {
+                background: #e3f2fd;
+                color: #1565c0;
+                border: 1px solid #90caf9;
+            }
+
+            #output {
+                max-height: 400px;
+                overflow-y: auto;
+                padding: 15px;
+                border: 1px solid #edf0f5;
+                border-radius: 12px;
+                background: #fbfdff;
+            }
+            ul {
+                list-style: none;
+                padding: 0;
+                margin: 0;
+            }
+            li {
+                margin-bottom: 8px;
+                font-size: 16px;
+                line-height: 1.4;
+            }
+            strong {
+                color: #2c3e50;
+            }
+
+            .user-table {
+                width: 100%;
+                border-collapse: collapse;
+                background: #fff;
+                border-radius: 12px;
+                overflow: hidden;
+                border: 1px solid #edf0f5;
+            }
+            .user-table th,
+            .user-table td {
+                border-bottom: 1px solid #eee;
+                padding: 10px 12px;
+                text-align: left;
+                font-size: 14px;
+                vertical-align: middle;
+            }
+            .user-table thead th {
+                background: #f5f7fb;
+                font-weight: 600;
+            }
+            .user-table tbody tr:hover td {
+                background: #fbfdff;
+            }
+
+            .inline-input {
+                width: 95%;
+                padding: 6px 8px;
+                border: 1px solid #d6dbe7;
+                border-radius: 8px;
+            }
+
+            .section-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin: 6px 0 14px;
+            }
+            .section-title {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                color: var(--text-600);
+            }
+            .section-title .dot {
+                width: 10px;
+                height: 10px;
+                border-radius: 50%;
+                background: var(--blue);
+                box-shadow: 0 0 0 3px rgba(52, 120, 246, 0.15);
+            }
+            .actions {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+
+            .btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 9px 14px;
+                border-radius: 10px;
+                border: 1px solid var(--gray-400);
+                background: #fff;
+                color: #263238;
+                cursor: pointer;
+                font-weight: 600;
+                transition: 0.15s;
+            }
+            .btn:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 3px 10px rgba(0, 0, 0, 0.06);
+            }
+            .btn-primary {
+                border-color: var(--blue);
+                background: var(--blue);
+                color: #fff;
+            }
+            .btn-primary:hover {
+                background: var(--blue-600);
+                border-color: var(--blue-600);
+            }
+            .btn-ghost {
+                background: #fff;
+                color: #2c3e50;
+                border-color: var(--gray-400);
+            }
+            .btn-danger {
+                border-color: var(--danger);
+                background: var(--danger);
+                color: #fff;
+            }
+
+            .empty-card {
+                display: flex;
+                align-items: center;
+                gap: 14px;
+                padding: 16px;
+                border: 1px dashed var(--gray-400);
+                border-radius: 12px;
+                background: #fcfdff;
+            }
+            .empty-emoji {
+                font-size: 20px;
+                line-height: 1;
+                width: 36px;
+                height: 36px;
+                border-radius: 10px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: #eef4ff;
+                color: var(--blue);
+            }
+            .empty-text strong {
+                color: #1f2d3d;
+            }
+        </style>
+    </head>
+
+    <body
+        ng-controller="RootCtrl"
+        ng-cloak
+    >
+        <!-- Top bar -->
+        <div class="topbar">
+            <div class="inner">
+                <div class="brand">
+                    <div class="logo">🚌</div>
+                    <span>대구버스노선정보시스템</span>
+                </div>
+                <div class="nav-right">
+                    <span id="whoami"></span>
+                    <a
+                        href="/logout"
+                        class="btn-link"
+                        >로그아웃</a
+                    >
+                </div>
+            </div>
+        </div>
+
+        <main>
+            <!-- 목록 화면(/users) -->
+            <div
+                ng-show="isListView()"
+                ng-controller="BusController"
+            >
+                <!-- 버스 정류장 조회 -->
+                <section>
+                    <div class="search-box">
+                        <input
+                            type="text"
+                            ng-model="keyword"
+                            placeholder="정류장 이름 검색"
+                        />
+                        <button
+                            type="button"
+                            ng-click="filterData()"
+                        >
+                            검색
+                        </button>
+                    </div>
+
+                    <div class="generate-button">
+                        <button
+                            type="button"
+                            ng-click="loadData()"
+                        >
+                            데이터 불러오기
+                        </button>
+                    </div>
+
+                    <div
+                        class="status-box"
+                        ng-if="statusMessage"
+                        ng-class="{'status-success': statusType==='success','status-error': statusType==='error','status-info': statusType==='info'}"
+                    >
+                        {{ statusMessage }}
+                    </div>
+
+                    <div id="output">
+                        <h3 ng-if="filteredItems.length">📋 조회 결과</h3>
+                        <ul>
+                            <li ng-repeat="item in filteredItems"><strong>{{ item.bsNm || '이름 없음' }}</strong> ({{ item.xPos }}, {{ item.yPos }})</li>
+                        </ul>
+                        <p ng-if="!filteredItems.length && items.length">🔍 검색 결과가 없습니다.</p>
+                        <p ng-if="!items.length">📭 데이터를 먼저 불러오세요.</p>
+                    </div>
+                </section>
+
+                <!-- 사용자: 목록/수정/삭제 -->
+                <section style="margin-top: 32px">
+                    <div class="section-header">
+                        <div class="section-title">
+                            <span class="dot"></span>
+                            <h2 style="margin: 0">사용자 정보</h2>
+                        </div>
+                        <div class="actions">
+                            <button
+                                type="button"
+                                class="btn btn-ghost"
+                                ng-click="loadUsers()"
+                            >
+                                <span>🔄</span> 사용자 목록 불러오기
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-primary"
+                                ng-click="goToNew()"
+                            >
+                                <span>➕</span> 새 사용자
+                            </button>
+                        </div>
+                    </div>
+
+                    <div
+                        class="status-box"
+                        ng-if="userStatusMessage"
+                        ng-class="{'status-success': userStatusType==='success','status-error': userStatusType==='error','status-info': userStatusType==='info'}"
+                        style="margin-top: 0"
+                    >
+                        {{ userStatusMessage }}
+                    </div>
+
+                    <div id="users-output">
+                        <table
+                            class="user-table"
+                            ng-if="users.length"
+                        >
+                            <thead>
+                                <tr>
+                                    <th style="width: 80px">ID</th>
+                                    <th style="width: 160px">이름</th>
+                                    <th>이메일</th>
+                                    <th style="width: 200px">생성시각</th>
+                                    <th style="width: 160px">수정</th>
+                                    <th style="width: 90px">삭제</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr ng-repeat="u in users track by u.id">
+                                    <td>{{ u.id }}</td>
+                                    <td>
+                                        <span ng-if="!u._editing">{{ u.name }}</span>
+                                        <input
+                                            ng-if="u._editing"
+                                            class="inline-input"
+                                            type="text"
+                                            ng-model="u._editName"
+                                        />
+                                    </td>
+                                    <td>
+                                        <span ng-if="!u._editing">{{ u.email }}</span>
+                                        <input
+                                            ng-if="u._editing"
+                                            class="inline-input"
+                                            type="email"
+                                            ng-model="u._editEmail"
+                                        />
+                                    </td>
+                                    <td>{{ u.created_at }}</td>
+                                    <td>
+                                        <button
+                                            type="button"
+                                            ng-if="!u._editing"
+                                            class="btn btn-ghost"
+                                            ng-click="startEdit(u)"
+                                        >
+                                            수정
+                                        </button>
+                                        <div
+                                            ng-if="u._editing"
+                                            style="display: flex; gap: 8px"
+                                        >
+                                            <button
+                                                type="button"
+                                                class="btn btn-primary"
+                                                ng-click="saveEdit(u)"
+                                            >
+                                                저장
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="btn"
+                                                ng-click="cancelEdit(u)"
+                                            >
+                                                취소
+                                            </button>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <button
+                                            type="button"
+                                            class="btn btn-danger"
+                                            ng-click="deleteUser(u)"
+                                        >
+                                            삭제
+                                        </button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <!-- 빈 상태 -->
+                        <div
+                            ng-if="!users.length"
+                            class="empty-card"
+                        >
+                            <div class="empty-emoji">🗂️</div>
+                            <div class="empty-text">
+                                <strong>아직 사용자 데이터가 없습니다.</strong><br />
+                                우측 상단의 <em>“새 사용자”</em> 버튼으로 추가하거나, <em>“사용자 목록 불러오기”</em>를 눌러 최신 데이터를 확인하세요.
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- 라우트 뷰(/users/new 등) -->
+            <div
+                ng-view
+                ng-show="!isListView()"
+            ></div>
+        </main>
+
+        <!-- 로그인된 사용자명 표시 -->
+        <script>
+            (function () {
+                fetch('/api/me', { credentials: 'same-origin' })
+                    .then(function (res) {
+                        if (res.status === 401) {
+                            // 인증 안되면 로그인으로 보냄
+                            window.location.href = '/login';
+                            return null;
+                        }
+                        return res.json();
+                    })
+                    .then(function (data) {
+                        if (!data) return;
+                        var el = document.getElementById('whoami');
+                        if (el && data.username) {
+                            el.textContent = '안녕하세요, ' + data.username + '님';
+                        }
+                    })
+                    .catch(function () {
+                        /* no-op */
+                    });
+            })();
+        </script>
+    </body>
+</html>

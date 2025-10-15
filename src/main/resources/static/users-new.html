@@ -1,0 +1,84 @@
+<section
+    class="card"
+    ng-controller="UsersNewCtrl"
+>
+    <div class="row">
+        <button
+            class="ghost"
+            ng-click="goBack()"
+        >
+            ← 뒤로
+        </button>
+        <h2 style="margin: 0">사용자 여러 명 추가</h2>
+    </div>
+
+    <form
+        name="frm"
+        novalidate
+        ng-submit="saveAll(frm)"
+    >
+        <table class="user-table">
+            <thead>
+                <tr>
+                    <th style="width: 44px">#</th>
+                    <th>이름,이메일 (예: 홍길동, hong@example.com)</th>
+                    <th style="width: 120px; text-align: center">
+                        <button
+                            type="button"
+                            class="primary"
+                            ng-click="addRow()"
+                        >
+                            +
+                        </button>
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr ng-repeat="r in rows track by $index">
+                    <td style="text-align: center">{{$index+1}}</td>
+                    <td>
+                        <input
+                            type="text"
+                            class="inline-input"
+                            name="line{{$index}}"
+                            ng-model="r.line"
+                            ng-change="touch($index)"
+                            required
+                            placeholder="이름, 이메일"
+                            ng-class="{'invalid': invalid($index)}"
+                        />
+                        <small
+                            class="error"
+                            ng-if="invalid($index)"
+                        >
+                            형식: 이름, 이메일 (예: 김영희, younghee@example.com)
+                        </small>
+                    </td>
+                    <td style="text-align: center">
+                        <button
+                            type="button"
+                            class="danger"
+                            ng-click="removeRow($index)"
+                        >
+                            −
+                        </button>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- 하단: 저장만 남김 (취소 버튼 제거) -->
+        <div
+            class="row"
+            style="margin-top: 12px"
+        >
+            <button
+                type="submit"
+                class="primary"
+                ng-disabled="frm.$invalid || !allValid() || saving"
+            >
+                {{ saving ? '저장 중...' : '한 번에 저장' }}
+            </button>
+        </div>
+    </form>
+</section>

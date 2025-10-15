@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html
+    xmlns:th="http://www.thymeleaf.org"
+    xmlns:sec="https://www.thymeleaf.org/thymeleaf-extras-springsecurity6"
+    lang="ko"
+>
+    <head>
+        <meta charset="UTF-8" />
+        <title>로그인 • 버스정보시스템</title>
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1"
+        />
+        <!-- 안전한 캐시무력화: #dates 유틸 사용 -->
+        <link
+            rel="stylesheet"
+            th:href="@{/css/main.css(v=${#dates.createNow().time})}"
+        />
+    </head>
+    <body>
+        <header class="topbar">
+            <div>
+                <div class="brand">
+                    <div class="logo">🚌</div>
+                    <span>대구버스노선정보시스템</span>
+                </div>
+            </div>
+        </header>
+
+        <main
+            class="card"
+            style="max-width: 440px"
+        >
+            <h1>로그인</h1>
+            <p class="hint">서비스 이용을 위해 계정으로 로그인하세요.</p>
+
+            <!-- 가입 성공 안내만 유지 -->
+            <div th:if="${param.registered}">
+                <p class="success">가입이 완료되었습니다. 로그인해 주세요.</p>
+            </div>
+
+            <!-- 실패 안내 -->
+            <div th:if="${param.error}">
+                <p class="error">아이디 또는 비밀번호가 올바르지 않습니다.</p>
+            </div>
+
+            <form
+                th:action="@{/login}"
+                method="post"
+                autocomplete="on"
+            >
+                <input
+                    type="hidden"
+                    th:name="${_csrf.parameterName}"
+                    th:value="${_csrf.token}"
+                />
+                <label>아이디</label>
+                <input
+                    type="text"
+                    name="username"
+                    placeholder="아이디"
+                    required
+                />
+                <label>비밀번호</label>
+                <input
+                    type="password"
+                    name="password"
+                    placeholder="비밀번호"
+                    required
+                />
+                <div style="margin-top: 14px">
+                    <button
+                        type="submit"
+                        class="btn-primary"
+                    >
+                        로그인
+                    </button>
+                </div>
+            </form>
+
+            <p
+                class="hint"
+                style="margin-top: 12px"
+            >
+                계정이 없나요? <a th:href="@{/signup}">회원가입</a>
+            </p>
+        </main>
+    </body>
+</html>

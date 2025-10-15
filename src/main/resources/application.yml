@@ -1,0 +1,46 @@
+spring:
+    application:
+        name: user # 애플리케이션 이름(로그/Actuator 등에서 식별)
+    jackson: # JSON 직렬화/역직렬화 기본 설정
+        serialization:
+            indent-output: true # JSON 보기 좋게 들여쓰기(Pretty-Print)
+        date-format: yyyy-MM-dd HH:mm:ss # 날짜/시간 문자열 포맷(직렬화 시)
+        time-zone: Asia/Seoul # 날짜/시간 직렬화 기준 타임존(한국 표준시)
+    thymeleaf:
+        cache: false # 개발 중 템플릿 캐시 비활성화(즉시 반영)
+
+    # ✅ DataSource 표준 설정(스프링이 JdbcTemplate/트랜잭션 자동 구성)
+    datasource:
+        driver-class-name: org.mariadb.jdbc.Driver
+        url: jdbc:mariadb://localhost:3306/demo
+        username: demo_user
+        password: '0000'
+
+    # (선택) schema.sql / data.sql 자동 실행 원하면 주석 해제
+    # sql:
+    #   init:
+    #     mode: always
+
+    # ⛔️ 임시 내장 계정은 DB 인증과 충돌하니 제거/주석 유지!
+    # security:
+    #   user:
+    #     name: admin
+    #     password: '{noop}admin1234'
+
+server:
+    port: 8091 # 내장 서버(Undertow/Tomcat) 포트
+
+logging:
+    level:
+        org.springframework.security: DEBUG # 로그인/인증 문제 추적용 디버그 로그
+
+# 커스텀 네임스페이스(애플리케이션 내부에서 @ConfigurationProperties로 바인딩해 사용 가능)
+app:
+    db:
+        url: jdbc:mariadb://localhost:3306/demo # 참고용(실제 연결은 spring.datasource 사용)
+        username: demo_user
+        password: '0000'
+
+daegu:
+    base-url: 'https://apis.data.go.kr/6270000/dbmsapi02/getBasic02' # 공공데이터 API 엔드포인트
+    service-key: '5cedc5eab7543fd67b6d3bcc0d35d2851975c4577afae580e32f0ac0d391b255' # 발급받은 인증키(테스트용)
