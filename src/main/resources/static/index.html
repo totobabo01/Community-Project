@@ -5,7 +5,7 @@
 >
     <head>
         <meta charset="UTF-8" />
-        <title>대구 버스 노선 정보 시스템</title>
+        <title>실습 프로젝트</title>
         <meta
             name="viewport"
             content="width=device-width, initial-scale=1"
@@ -64,11 +64,36 @@
                 gap: 10px;
                 font-weight: 700;
                 font-size: 18px;
+                margin-left: 4px;
             }
-            .brand .logo {
-                font-size: 20px;
-                line-height: 1;
+
+            /* 가운데 탭 */
+            .tabs {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-left: auto;
+                margin-right: auto;
             }
+            .tab {
+                display: inline-block;
+                padding: 8px 12px;
+                border-radius: 8px;
+                text-decoration: none;
+                color: #fff;
+                border: 1px solid rgba(255, 255, 255, 0.35);
+                transition: 0.15s;
+                font-size: 14px;
+            }
+            .tab:hover {
+                background: rgba(255, 255, 255, 0.12);
+            }
+            .tab.active {
+                color: #111827;
+                background: #fff;
+                border-color: #fff;
+            }
+
             .nav-right {
                 display: flex;
                 align-items: center;
@@ -272,29 +297,38 @@
                 color: #fff;
             }
 
-            .empty-card {
+            .pill {
+                padding: 3px 8px;
+                border-radius: 999px;
+                font-size: 12px;
+                border: 1px solid var(--gray-400);
+            }
+            .pill.green {
+                background: #e8f5e9;
+                color: #2e7d32;
+                border-color: #c8e6c9;
+            }
+            .pill.gray {
+                background: #f1f1f1;
+                color: #555;
+            }
+
+            /* 탭 패널 표시/숨김 */
+            .tab-panel {
+                display: none;
+            }
+            .tab-panel.show {
+                display: block;
+            }
+
+            /* 활성/비활성 토글 */
+            .toggle-wrap {
                 display: flex;
                 align-items: center;
-                gap: 14px;
-                padding: 16px;
-                border: 1px dashed var(--gray-400);
-                border-radius: 12px;
-                background: #fcfdff;
+                gap: 8px;
             }
-            .empty-emoji {
-                font-size: 20px;
-                line-height: 1;
-                width: 36px;
-                height: 36px;
-                border-radius: 10px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                background: #eef4ff;
-                color: var(--blue);
-            }
-            .empty-text strong {
-                color: #1f2d3d;
+            .toggle-wrap input[type='checkbox'] {
+                transform: scale(1.2);
             }
         </style>
     </head>
@@ -306,12 +340,49 @@
         <!-- Top bar -->
         <div class="topbar">
             <div class="inner">
-                <div class="brand">
-                    <div class="logo">🚌</div>
-                    <span>대구버스노선정보시스템</span>
-                </div>
+                <div class="brand"><span>실습 프로젝트</span></div>
+
+                <nav
+                    class="tabs"
+                    role="tablist"
+                    aria-label="기능 탭"
+                >
+                    <a
+                        id="tablink-bus"
+                        href="#tab-bus"
+                        class="tab active"
+                        role="tab"
+                        aria-selected="true"
+                        >버스</a
+                    >
+                    <a
+                        id="tablink-dbusers"
+                        href="#tab-dbusers"
+                        class="tab"
+                        role="tab"
+                        aria-selected="false"
+                        >DB 사용자 관리</a
+                    >
+                    <a
+                        id="tablink-roles"
+                        href="#tab-roles"
+                        class="tab"
+                        role="tab"
+                        aria-selected="false"
+                        >권한</a
+                    >
+                </nav>
+
                 <div class="nav-right">
                     <span id="whoami"></span>
+                    <!-- ✅ 로그인 후 노출될 내 계정 탈퇴 버튼 -->
+                    <a
+                        href="#"
+                        id="btn-delete"
+                        class="btn-link"
+                        style="display: none"
+                        >계정 탈퇴</a
+                    >
                     <a
                         href="/logout"
                         class="btn-link"
@@ -322,196 +393,314 @@
         </div>
 
         <main>
-            <!-- 목록 화면(/users) -->
-            <div
-                ng-show="isListView()"
-                ng-controller="BusController"
+            <!-- 탭: 버스 -->
+            <section
+                id="tab-bus"
+                class="tab-panel show"
+                role="tabpanel"
             >
-                <!-- 버스 정류장 조회 -->
-                <section>
-                    <div class="search-box">
-                        <input
-                            type="text"
-                            ng-model="keyword"
-                            placeholder="정류장 이름 검색"
-                        />
-                        <button
-                            type="button"
-                            ng-click="filterData()"
-                        >
-                            검색
-                        </button>
-                    </div>
+                <div
+                    ng-show="isListView()"
+                    ng-controller="BusController"
+                >
+                    <section>
+                        <div class="search-box">
+                            <input
+                                type="text"
+                                ng-model="keyword"
+                                placeholder="정류장 이름 검색"
+                            />
+                            <button
+                                type="button"
+                                ng-click="filterData()"
+                            >
+                                검색
+                            </button>
+                        </div>
 
-                    <div class="generate-button">
-                        <button
-                            type="button"
-                            ng-click="loadData()"
-                        >
-                            데이터 불러오기
-                        </button>
-                    </div>
+                        <div class="generate-button">
+                            <button
+                                type="button"
+                                ng-click="loadData()"
+                            >
+                                데이터 불러오기
+                            </button>
+                        </div>
 
+                        <div
+                            class="status-box"
+                            ng-if="statusMessage"
+                            ng-class="{'status-success': statusType==='success','status-error': statusType==='error','status-info': statusType==='info'}"
+                        >
+                            {{ statusMessage }}
+                        </div>
+
+                        <div id="output">
+                            <h3 ng-if="filteredItems.length">📋 조회 결과</h3>
+                            <ul>
+                                <li ng-repeat="item in filteredItems"><strong>{{ item.bsNm || '이름 없음' }}</strong> ({{ item.xPos }}, {{ item.yPos }})</li>
+                            </ul>
+                            <p ng-if="!filteredItems.length && items.length">🔍 검색 결과가 없습니다.</p>
+                            <p ng-if="!items.length">📭 데이터를 먼저 불러오세요.</p>
+                        </div>
+                    </section>
+
+                    <!-- 라우트 뷰(/users/new 등)도 버스 탭에서 사용 -->
                     <div
-                        class="status-box"
-                        ng-if="statusMessage"
-                        ng-class="{'status-success': statusType==='success','status-error': statusType==='error','status-info': statusType==='info'}"
-                    >
-                        {{ statusMessage }}
+                        ng-view
+                        ng-show="!isListView()"
+                    ></div>
+                </div>
+            </section>
+
+            <!-- 탭: DB 사용자 관리 -->
+            <section
+                id="tab-dbusers"
+                class="tab-panel"
+                role="tabpanel"
+                hidden
+            >
+                <div ng-controller="BusController">
+                    <!-- 목록(리스트 경로에서만 노출) -->
+                    <div ng-show="isListView()">
+                        <section style="margin-top: 8px">
+                            <div class="section-header">
+                                <div class="section-title">
+                                    <span class="dot"></span>
+                                    <h2 style="margin: 0">사용자 정보</h2>
+                                </div>
+                                <div class="actions">
+                                    <button
+                                        type="button"
+                                        class="btn btn-ghost"
+                                        ng-click="loadUsers()"
+                                    >
+                                        <span>🔄</span> 사용자 목록 불러오기
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-primary"
+                                        ng-click="goToNew()"
+                                    >
+                                        <span>➕</span> 새 사용자
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div
+                                class="status-box"
+                                ng-if="userStatusMessage"
+                                ng-class="{'status-success': userStatusType==='success','status-error': userStatusType==='error','status-info': userStatusType==='info'}"
+                                style="margin-top: 0"
+                            >
+                                {{ userStatusMessage }}
+                            </div>
+
+                            <div id="users-output">
+                                <table
+                                    class="user-table"
+                                    ng-if="users.length"
+                                >
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 80px">ID</th>
+                                            <th style="width: 160px">이름</th>
+                                            <th>이메일</th>
+                                            <th style="width: 200px">생성시각</th>
+                                            <th style="width: 160px">수정</th>
+                                            <th style="width: 90px">삭제</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr ng-repeat="u in users track by u.id">
+                                            <td>{{ u.id }}</td>
+                                            <td>
+                                                <span ng-if="!u._editing">{{ u.name }}</span>
+                                                <input
+                                                    ng-if="u._editing"
+                                                    class="inline-input"
+                                                    type="text"
+                                                    ng-model="u._editName"
+                                                />
+                                            </td>
+                                            <td>
+                                                <span ng-if="!u._editing">{{ u.email }}</span>
+                                                <input
+                                                    ng-if="u._editing"
+                                                    class="inline-input"
+                                                    type="email"
+                                                    ng-model="u._editEmail"
+                                                />
+                                            </td>
+                                            <td>{{ u.created_at }}</td>
+                                            <td>
+                                                <button
+                                                    type="button"
+                                                    ng-if="!u._editing"
+                                                    class="btn btn-ghost"
+                                                    ng-click="startEdit(u)"
+                                                >
+                                                    수정
+                                                </button>
+                                                <div
+                                                    ng-if="u._editing"
+                                                    style="display: flex; gap: 8px"
+                                                >
+                                                    <button
+                                                        type="button"
+                                                        class="btn btn-primary"
+                                                        ng-click="saveEdit(u)"
+                                                    >
+                                                        저장
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="btn"
+                                                        ng-click="cancelEdit(u)"
+                                                    >
+                                                        취소
+                                                    </button>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-danger"
+                                                    ng-click="deleteUser(u)"
+                                                >
+                                                    삭제
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+
+                                <div
+                                    ng-if="!users.length"
+                                    class="empty-card"
+                                >
+                                    <div class="empty-emoji">🗂️</div>
+                                    <div class="empty-text">
+                                        <strong>아직 사용자 데이터가 없습니다.</strong><br />
+                                        우측 상단의 <em>“새 사용자”</em> 버튼으로 추가하거나, <em>“사용자 목록 불러오기”</em>를 눌러 최신 데이터를 확인하세요.
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
                     </div>
 
-                    <div id="output">
-                        <h3 ng-if="filteredItems.length">📋 조회 결과</h3>
-                        <ul>
-                            <li ng-repeat="item in filteredItems"><strong>{{ item.bsNm || '이름 없음' }}</strong> ({{ item.xPos }}, {{ item.yPos }})</li>
-                        </ul>
-                        <p ng-if="!filteredItems.length && items.length">🔍 검색 결과가 없습니다.</p>
-                        <p ng-if="!items.length">📭 데이터를 먼저 불러오세요.</p>
-                    </div>
-                </section>
+                    <!-- 폼/라우트 화면(리스트가 아닐 때만 노출) -->
+                    <div
+                        ng-view
+                        ng-show="!isListView()"
+                    ></div>
+                </div>
+            </section>
 
-                <!-- 사용자: 목록/수정/삭제 -->
-                <section style="margin-top: 32px">
+            <!-- 탭: 권한 -->
+            <section
+                id="tab-roles"
+                class="tab-panel"
+                role="tabpanel"
+                hidden
+                ng-controller="RoleCtrl"
+            >
+                <section>
                     <div class="section-header">
                         <div class="section-title">
                             <span class="dot"></span>
-                            <h2 style="margin: 0">사용자 정보</h2>
+                            <h2 style="margin: 0">권한 관리</h2>
                         </div>
                         <div class="actions">
                             <button
-                                type="button"
                                 class="btn btn-ghost"
-                                ng-click="loadUsers()"
+                                ng-click="load()"
+                                ng-disabled="loading"
                             >
-                                <span>🔄</span> 사용자 목록 불러오기
-                            </button>
-                            <button
-                                type="button"
-                                class="btn btn-primary"
-                                ng-click="goToNew()"
-                            >
-                                <span>➕</span> 새 사용자
+                                🔄 새로고침
                             </button>
                         </div>
                     </div>
 
                     <div
                         class="status-box"
-                        ng-if="userStatusMessage"
-                        ng-class="{'status-success': userStatusType==='success','status-error': userStatusType==='error','status-info': userStatusType==='info'}"
-                        style="margin-top: 0"
+                        ng-if="msg"
+                        ng-class="{'status-success': msgType==='success','status-error': msgType==='error','status-info': msgType==='info'}"
                     >
-                        {{ userStatusMessage }}
+                        {{ msg }}
                     </div>
 
-                    <div id="users-output">
-                        <table
-                            class="user-table"
-                            ng-if="users.length"
-                        >
-                            <thead>
-                                <tr>
-                                    <th style="width: 80px">ID</th>
-                                    <th style="width: 160px">이름</th>
-                                    <th>이메일</th>
-                                    <th style="width: 200px">생성시각</th>
-                                    <th style="width: 160px">수정</th>
-                                    <th style="width: 90px">삭제</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr ng-repeat="u in users track by u.id">
-                                    <td>{{ u.id }}</td>
-                                    <td>
-                                        <span ng-if="!u._editing">{{ u.name }}</span>
+                    <table
+                        class="user-table"
+                        ng-if="rows.length"
+                    >
+                        <thead>
+                            <tr>
+                                <th style="width: 260px">사용자</th>
+                                <th style="width: 220px">권한</th>
+                                <th style="width: 200px">상태</th>
+                                <th style="width: 120px">작업</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr ng-repeat="r in rows track by r.username">
+                                <td><strong>{{ r.username }}</strong></td>
+                                <td>
+                                    <select
+                                        ng-model="r.role"
+                                        ng-options="v for v in roleOptions"
+                                        class="inline-input"
+                                        style="width: 200px"
+                                    ></select>
+                                </td>
+                                <td>
+                                    <div class="toggle-wrap">
                                         <input
-                                            ng-if="u._editing"
-                                            class="inline-input"
-                                            type="text"
-                                            ng-model="u._editName"
+                                            id="en_{{::$index}}"
+                                            type="checkbox"
+                                            ng-model="r.enabled"
                                         />
-                                    </td>
-                                    <td>
-                                        <span ng-if="!u._editing">{{ u.email }}</span>
-                                        <input
-                                            ng-if="u._editing"
-                                            class="inline-input"
-                                            type="email"
-                                            ng-model="u._editEmail"
-                                        />
-                                    </td>
-                                    <td>{{ u.created_at }}</td>
-                                    <td>
-                                        <button
-                                            type="button"
-                                            ng-if="!u._editing"
-                                            class="btn btn-ghost"
-                                            ng-click="startEdit(u)"
+                                        <label for="en_{{::$index}}">{{ r.enabled ? '활성' : '비활성' }}</label>
+                                        <span
+                                            class="pill"
+                                            ng-class="r.enabled ? 'green' : 'gray'"
+                                            >{{ r.enabled ? 'ON' : 'OFF' }}</span
                                         >
-                                            수정
-                                        </button>
-                                        <div
-                                            ng-if="u._editing"
-                                            style="display: flex; gap: 8px"
-                                        >
-                                            <button
-                                                type="button"
-                                                class="btn btn-primary"
-                                                ng-click="saveEdit(u)"
-                                            >
-                                                저장
-                                            </button>
-                                            <button
-                                                type="button"
-                                                class="btn"
-                                                ng-click="cancelEdit(u)"
-                                            >
-                                                취소
-                                            </button>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <button
-                                            type="button"
-                                            class="btn btn-danger"
-                                            ng-click="deleteUser(u)"
-                                        >
-                                            삭제
-                                        </button>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
+                                    </div>
+                                </td>
+                                <td>
+                                    <button
+                                        class="btn btn-primary"
+                                        ng-click="save(r)"
+                                        ng-disabled="saving"
+                                    >
+                                        저장
+                                    </button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
 
-                        <!-- 빈 상태 -->
-                        <div
-                            ng-if="!users.length"
-                            class="empty-card"
-                        >
-                            <div class="empty-emoji">🗂️</div>
-                            <div class="empty-text">
-                                <strong>아직 사용자 데이터가 없습니다.</strong><br />
-                                우측 상단의 <em>“새 사용자”</em> 버튼으로 추가하거나, <em>“사용자 목록 불러오기”</em>를 눌러 최신 데이터를 확인하세요.
-                            </div>
+                    <div
+                        ng-if="!rows.length"
+                        class="empty-card"
+                    >
+                        <div class="empty-emoji">🛡️</div>
+                        <div class="empty-text">
+                            <strong>권한 탭 자리입니다.</strong><br />
+                            나중에 ROLE_USER / ROLE_ADMIN 관리 UI를 여기에 붙이면 됩니다.
                         </div>
                     </div>
                 </section>
-            </div>
-
-            <!-- 라우트 뷰(/users/new 등) -->
-            <div
-                ng-view
-                ng-show="!isListView()"
-            ></div>
+            </section>
         </main>
 
-        <!-- 로그인된 사용자명 표시 -->
+        <!-- 로그인된 사용자명/권한 탭 가시성 + 탈퇴 버튼 노출/동작 -->
         <script>
             (function () {
                 fetch('/api/me', { credentials: 'same-origin' })
                     .then(function (res) {
                         if (res.status === 401) {
-                            // 인증 안되면 로그인으로 보냄
                             window.location.href = '/login';
                             return null;
                         }
@@ -519,15 +708,157 @@
                     })
                     .then(function (data) {
                         if (!data) return;
-                        var el = document.getElementById('whoami');
-                        if (el && data.username) {
-                            el.textContent = '안녕하세요, ' + data.username + '님';
+                        var who = document.getElementById('whoami');
+                        if (who && data.username) who.textContent = '안녕하세요, ' + data.username + '님';
+
+                        // 관리자 여부: /api/me 의 isAdmin 플래그 또는 authorities 배열
+                        var isAdmin = !!(data && (data.isAdmin || (Array.isArray(data.authorities) && data.authorities.indexOf('ROLE_ADMIN') !== -1)));
+
+                        var rolesLink = document.getElementById('tablink-roles');
+                        var rolesPanel = document.getElementById('tab-roles');
+
+                        if (!isAdmin && rolesLink) {
+                            rolesLink.style.display = 'none';
+                            if (location.hash === '#tab-roles') {
+                                history.replaceState(null, '', '#tab-bus');
+                            }
+                            if (rolesPanel) rolesPanel.hidden = true;
                         }
+
+                        // ✅ 로그인 상태면 계정 탈퇴 버튼 노출
+                        var delBtn = document.getElementById('btn-delete');
+                        if (delBtn) delBtn.style.display = 'inline-block';
                     })
-                    .catch(function () {
-                        /* no-op */
-                    });
+                    .catch(function () {});
             })();
+
+            // ✅ 계정 탈퇴 클릭 핸들러
+            document.addEventListener('click', function (e) {
+                if (e.target && e.target.id === 'btn-delete') {
+                    e.preventDefault();
+                    if (!confirm('정말로 내 계정을 삭제하시겠어요? 이 동작은 되돌릴 수 없습니다.')) return;
+
+                    fetch('/api/me', { method: 'DELETE', credentials: 'same-origin' })
+                        .then(function (res) {
+                            if (res.status === 204 || res.status === 200) {
+                                alert('계정이 삭제되었습니다.');
+                                // 세션 종료를 위해 로그아웃 경로로 이동
+                                window.location.href = '/logout';
+                            } else if (res.status === 401) {
+                                window.location.href = '/login';
+                            } else {
+                                return res.text().then(function (t) {
+                                    throw new Error(t || '삭제 실패');
+                                });
+                            }
+                        })
+                        .catch(function (err) {
+                            alert(err.message || '삭제 중 오류가 발생했습니다.');
+                        });
+                }
+            });
+        </script>
+
+        <!-- 간단 탭 전환 스크립트 -->
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                const tabs = document.querySelectorAll('.tabs .tab');
+                const panels = document.querySelectorAll('.tab-panel');
+
+                function activate(hash) {
+                    tabs.forEach((a) => {
+                        if (a.style.display === 'none') return; // 숨겨진 탭은 제외
+                        const on = a.getAttribute('href') === hash;
+                        a.classList.toggle('active', on);
+                        a.setAttribute('aria-selected', String(on));
+                    });
+                    panels.forEach((p) => {
+                        const on = '#' + p.id === hash;
+                        p.classList.toggle('show', on);
+                        p.hidden = !on;
+                    });
+                }
+
+                tabs.forEach((a) => {
+                    a.addEventListener('click', function (e) {
+                        if (a.style.display === 'none') return;
+                        e.preventDefault();
+                        const hash = a.getAttribute('href');
+                        history.replaceState(null, '', hash);
+                        activate(hash);
+                    });
+                });
+
+                let initial = location.hash || '#tab-bus';
+                const rolesLink = document.getElementById('tablink-roles');
+                if (initial === '#tab-roles' && rolesLink && rolesLink.style.display === 'none') {
+                    initial = '#tab-bus';
+                    history.replaceState(null, '', initial);
+                }
+                activate(initial);
+            });
+        </script>
+
+        <!-- 권한 탭용 Angular 컨트롤러 -->
+        <script>
+            angular.module('busApp').controller('RoleCtrl', function ($scope, $http) {
+                $scope.rows = [];
+                $scope.roleOptions = ['ROLE_USER', 'ROLE_ADMIN'];
+                $scope.loading = false;
+                $scope.saving = false;
+                $scope.msg = '';
+                $scope.msgType = 'info';
+
+                function notify(type, text) {
+                    $scope.msgType = type;
+                    $scope.msg = text;
+                    setTimeout(function () {
+                        $scope.$applyAsync(function () {
+                            $scope.msg = '';
+                        });
+                    }, 2500);
+                }
+
+                $scope.load = function () {
+                    $scope.loading = true;
+                    $http
+                        .get('/api/roles')
+                        .then(function (res) {
+                            $scope.rows = res.data || [];
+                            notify('info', '권한 목록을 불러왔습니다.');
+                        })
+                        .catch(function () {
+                            notify('error', '권한 목록을 불러오지 못했습니다.');
+                        })
+                        .finally(function () {
+                            $scope.loading = false;
+                        });
+                };
+
+                $scope.save = function (row) {
+                    if (!row || !row.username || !row.role) return;
+                    $scope.saving = true;
+                    // role + enabled 모두 전송
+                    $http
+                        .put('/api/roles/' + encodeURIComponent(row.username), {
+                            role: row.role,
+                            enabled: row.enabled,
+                        })
+                        .then(function () {
+                            notify('success', '저장되었습니다.');
+                        })
+                        .catch(function (err) {
+                            var msg = err && err.data ? err.data : '저장 중 오류가 발생했습니다.';
+                            notify('error', msg);
+                        })
+                        .finally(function () {
+                            $scope.saving = false;
+                        });
+                };
+
+                // 초기 로드
+                $scope.load();
+            });
         </script>
     </body>
 </html>
