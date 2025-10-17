@@ -1,8 +1,13 @@
+<!-- /users-new.html -->
 <section
     class="card"
     ng-controller="UsersNewCtrl"
 >
-    <div class="row">
+    <!-- 헤더 -->
+    <div
+        class="row"
+        style="align-items: center; gap: 10px"
+    >
         <button
             class="ghost"
             ng-click="goBack()"
@@ -10,8 +15,15 @@
             ← 뒤로
         </button>
         <h2 style="margin: 0">사용자 여러 명 추가</h2>
+        <span
+            class="pill"
+            style="margin-left: 8px; background: #e8f2ff; border: 1px solid #cfe1ff; color: #2c63ca"
+        >
+            아이디·이름·전화번호·이메일
+        </span>
     </div>
 
+    <!-- 저장 폼 -->
     <form
         name="frm"
         novalidate
@@ -20,65 +32,126 @@
         <table class="user-table">
             <thead>
                 <tr>
-                    <th style="width: 44px">#</th>
-                    <th>이름,이메일 (예: 홍길동, hong@example.com)</th>
+                    <th style="width: 44px; text-align: center">#</th>
+                    <th style="width: 160px">아이디<span class="muted"> (최대 16자)</span></th>
+                    <th style="width: 200px">이름<span class="muted"> *</span></th>
+                    <th style="width: 220px">전화번호</th>
+                    <th>이메일<span class="muted"> *</span></th>
                     <th style="width: 120px; text-align: center">
                         <button
                             type="button"
                             class="primary"
                             ng-click="addRow()"
                         >
-                            +
+                            ＋
                         </button>
                     </th>
                 </tr>
             </thead>
+
             <tbody>
+                <!-- 한 행 -->
                 <tr ng-repeat="r in rows track by $index">
-                    <td style="text-align: center">{{$index+1}}</td>
+                    <td style="text-align: center">{{$index + 1}}</td>
+
+                    <!-- 아이디 -->
                     <td>
                         <input
                             type="text"
                             class="inline-input"
-                            name="line{{$index}}"
-                            ng-model="r.line"
-                            ng-change="touch($index)"
-                            required
-                            placeholder="이름, 이메일"
-                            ng-class="{'invalid': invalid($index)}"
+                            name="uid{{$index}}"
+                            ng-model="r.user_id"
+                            maxlength="16"
+                            placeholder="예: sam09"
+                            ng-pattern="/^[A-Za-z0-9_]{0,16}$/"
                         />
                         <small
                             class="error"
-                            ng-if="invalid($index)"
+                            ng-if="frm['uid' + $index].$invalid && frm['uid' + $index].$touched"
                         >
-                            형식: 이름, 이메일 (예: 김영희, younghee@example.com)
+                            영문/숫자/밑줄만 허용(최대 16자)
                         </small>
                     </td>
+
+                    <!-- 이름 -->
+                    <td>
+                        <input
+                            type="text"
+                            class="inline-input"
+                            name="name{{$index}}"
+                            ng-model="r.name"
+                            placeholder="예: 홍길동"
+                            required
+                        />
+                        <small
+                            class="error"
+                            ng-if="frm['name' + $index].$invalid && frm['name' + $index].$touched"
+                        >
+                            이름은 필수입니다.
+                        </small>
+                    </td>
+
+                    <!-- 전화번호 -->
+                    <td>
+                        <input
+                            type="text"
+                            class="inline-input"
+                            name="phone{{$index}}"
+                            ng-model="r.phone"
+                            placeholder="예: 010-1234-5678"
+                        />
+                    </td>
+
+                    <!-- 이메일 -->
+                    <td>
+                        <input
+                            type="email"
+                            class="inline-input"
+                            name="email{{$index}}"
+                            ng-model="r.email"
+                            placeholder="예: hong@example.com"
+                            required
+                        />
+                        <small
+                            class="error"
+                            ng-if="frm['email' + $index].$invalid && frm['email' + $index].$touched"
+                        >
+                            이메일 형식이 올바르지 않습니다.
+                        </small>
+                    </td>
+
+                    <!-- 삭제 -->
                     <td style="text-align: center">
                         <button
                             type="button"
                             class="danger"
                             ng-click="removeRow($index)"
+                            ng-disabled="rows.length <= 1"
                         >
-                            −
+                            －
                         </button>
                     </td>
                 </tr>
             </tbody>
         </table>
 
-        <!-- 하단: 저장만 남김 (취소 버튼 제거) -->
+        <!-- 저장 버튼 -->
         <div
             class="row"
-            style="margin-top: 12px"
+            style="margin-top: 12px; align-items: center; gap: 12px"
         >
             <button
                 type="submit"
                 class="primary"
-                ng-disabled="frm.$invalid || !allValid() || saving"
+                ng-disabled="frm.$invalid || saving"
             >
                 {{ saving ? '저장 중...' : '한 번에 저장' }}
             </button>
+            <span
+                class="muted"
+                ng-if="!saving"
+                >이름·이메일은 필수입니다. (아이디는 비워두면 서버에서 생성 가능)</span
+            >
         </div>
     </form>
 </section>

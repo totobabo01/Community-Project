@@ -1,45 +1,48 @@
-// DAO(데이터 접근 계층) 인터페이스: users 테이블에 대한 CRUD 메서드 규약
+// src/main/java/com/example/demo/dao/IUserDao.java
 package com.example.demo.dao;
 
 import java.util.List;
 import java.util.Optional;
 
-import com.example.demo.domain.User; // ✅ DAO는 엔티티/POJO만 다룸 (DTO 의존 X)
+import com.example.demo.domain.User;
 
 /**
- * 반환 규칙
- * - 조회(SELECT): 존재 여부가 불확실하므로 Optional<User> 사용 (다건은 빈 리스트 가능)
- * - 쓰기(INSERT/UPDATE/DELETE):
- *    - insert(...)  → 생성된 PK(long). 실패/미생성 시 0
- *    - update(...)  → 영향 행 수(int). 0=대상 없음(미존재), 1=성공
- *    - delete(...)  → 영향 행 수(int). 0=대상 없음(미존재), 1=성공
+ * users 테이블 DAO 규약
  *
- * 업데이트는 "부분 업데이트" 패턴을 가정합니다.
- * patch로 전달된 필드가 null이면 해당 컬럼은 기존 값을 유지합니다.
+ * 스키마
+ *  - PK: user_id (VARCHAR(16))  ← 애플리케이션에서는 String 사용
+ *  - cols: user_id, name, phone, email(UNIQUE), password
  */
 public interface IUserDao {
 
-  /** 전체 조회: 정책(보통 id DESC)대로 정렬된 모든 사용자 */
-  List<User> findAll();
+    /** 전체 조회 (정렬 정책은 구현체에서 처리) */
+    List<User> findAll();
 
-  /** 단건 조회: PK(id)로 사용자 조회 (없으면 Optional.empty()) */
-  Optional<User> findById(Long id);
+    /** PK(user_id)로 단건 조회 */
+    Optional<User> findById(String userId);
 
-  /**
-   * 생성(INSERT): 사용자 레코드 저장.
-   * @return 생성된 PK(성공) / 0(실패)
-   */
-  long insert(User user);
+    /** 이메일로 단건 조회(로그인/중복 체크) */
+    Optional<User> findByEmail(String email);
 
-  /**
-   * 수정(UPDATE, 부분 업데이트): null 필드는 유지.
-   * @return 영향 행 수 (0=대상 없음, 1=성공)
-   */
-  int update(Long id, User patch);
+    /**
+     * INSERT
+     * - user_id 는 애플리케이션에서 생성해 User.userId 로 전달
+     * - 성공 시 생성된 PK(user_id)를 그대로 반환, 실패 시 null
+     */
+    String insert(User user);
 
-  /**
-   * 삭제(DELETE)
-   * @return 영향 행 수 (0=대상 없음, 1=성공)
-   */
-  int delete(Long id);
+    /** 부분 업데이트(null 값은 유지: COALESCE 전략) — 반환: 영향 행 수(0/1) */
+    int update(String userId, User patch);
+
+    /** 삭제 — 반환: 영향 행 수(0/1) */
+    int delete(String userId);
+
+    // ---- 편의 메서드 ----
+    default boolean existsByEmail(String email) {
+        return findByEmail(email).isPresent();
+    }
+
+    default boolean existsById(String userId) {
+        return findById(userId).isPresent();
+    }
 }

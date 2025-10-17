@@ -21,7 +21,6 @@
             [ng-cloak] {
                 display: none;
             }
-
             :root {
                 --blue: #3478f6;
                 --blue-600: #2c63ca;
@@ -32,7 +31,6 @@
                 --green: #2ecc71;
                 --danger: #e74c3c;
             }
-
             html,
             body {
                 height: 100%;
@@ -43,8 +41,6 @@
                 margin: 0;
                 color: #1f2d3d;
             }
-
-            /* Top bar */
             .topbar {
                 background: #3498db;
                 color: #fff;
@@ -66,8 +62,6 @@
                 font-size: 18px;
                 margin-left: 4px;
             }
-
-            /* 가운데 탭 */
             .tabs {
                 display: flex;
                 align-items: center;
@@ -93,7 +87,6 @@
                 background: #fff;
                 border-color: #fff;
             }
-
             .nav-right {
                 display: flex;
                 align-items: center;
@@ -111,7 +104,6 @@
             .btn-link:hover {
                 background: rgba(255, 255, 255, 0.12);
             }
-
             main {
                 max-width: 980px;
                 margin: 28px auto 40px;
@@ -120,7 +112,6 @@
                 border-radius: 16px;
                 box-shadow: 0 10px 30px rgba(31, 38, 135, 0.08);
             }
-
             .search-box {
                 display: flex;
                 justify-content: center;
@@ -143,7 +134,6 @@
                 border-radius: 10px;
                 cursor: pointer;
             }
-
             .generate-button {
                 display: flex;
                 justify-content: center;
@@ -158,7 +148,6 @@
                 font-size: 16px;
                 cursor: pointer;
             }
-
             .status-box {
                 margin-bottom: 16px;
                 text-align: center;
@@ -181,7 +170,6 @@
                 color: #1565c0;
                 border: 1px solid #90caf9;
             }
-
             #output {
                 max-height: 400px;
                 overflow-y: auto;
@@ -203,7 +191,6 @@
             strong {
                 color: #2c3e50;
             }
-
             .user-table {
                 width: 100%;
                 border-collapse: collapse;
@@ -227,14 +214,12 @@
             .user-table tbody tr:hover td {
                 background: #fbfdff;
             }
-
             .inline-input {
                 width: 95%;
                 padding: 6px 8px;
                 border: 1px solid #d6dbe7;
                 border-radius: 8px;
             }
-
             .section-header {
                 display: flex;
                 align-items: center;
@@ -259,7 +244,6 @@
                 align-items: center;
                 gap: 10px;
             }
-
             .btn {
                 display: inline-flex;
                 align-items: center;
@@ -296,7 +280,6 @@
                 background: var(--danger);
                 color: #fff;
             }
-
             .pill {
                 padding: 3px 8px;
                 border-radius: 999px;
@@ -312,16 +295,12 @@
                 background: #f1f1f1;
                 color: #555;
             }
-
-            /* 탭 패널 표시/숨김 */
             .tab-panel {
                 display: none;
             }
             .tab-panel.show {
                 display: block;
             }
-
-            /* 활성/비활성 토글 */
             .toggle-wrap {
                 display: flex;
                 align-items: center;
@@ -375,7 +354,6 @@
 
                 <div class="nav-right">
                     <span id="whoami"></span>
-                    <!-- ✅ 로그인 후 노출될 내 계정 탈퇴 버튼 -->
                     <a
                         href="#"
                         id="btn-delete"
@@ -393,7 +371,7 @@
         </div>
 
         <main>
-            <!-- 탭: 버스 -->
+            <!-- 버스 -->
             <section
                 id="tab-bus"
                 class="tab-panel show"
@@ -445,7 +423,6 @@
                         </div>
                     </section>
 
-                    <!-- 라우트 뷰(/users/new 등)도 버스 탭에서 사용 -->
                     <div
                         ng-view
                         ng-show="!isListView()"
@@ -453,15 +430,24 @@
                 </div>
             </section>
 
-            <!-- 탭: DB 사용자 관리 -->
+            <!-- DB 사용자 관리 (비관리자 안내) -->
             <section
                 id="tab-dbusers"
                 class="tab-panel"
                 role="tabpanel"
                 hidden
             >
-                <div ng-controller="BusController">
-                    <!-- 목록(리스트 경로에서만 노출) -->
+                <div
+                    class="status-box status-info"
+                    ng-if="!__isAdmin"
+                >
+                    🙏 이 페이지는 <b>관리자 전용</b>입니다.
+                </div>
+
+                <div
+                    ng-if="__isAdmin"
+                    ng-controller="BusController"
+                >
                     <div ng-show="isListView()">
                         <section style="margin-top: 8px">
                             <div class="section-header">
@@ -475,14 +461,14 @@
                                         class="btn btn-ghost"
                                         ng-click="loadUsers()"
                                     >
-                                        <span>🔄</span> 사용자 목록 불러오기
+                                        🔄 사용자 목록 불러오기
                                     </button>
                                     <button
                                         type="button"
                                         class="btn btn-primary"
                                         ng-click="goToNew()"
                                     >
-                                        <span>➕</span> 새 사용자
+                                        ➕ 새 사용자
                                     </button>
                                 </div>
                             </div>
@@ -503,17 +489,18 @@
                                 >
                                     <thead>
                                         <tr>
-                                            <th style="width: 80px">ID</th>
+                                            <th style="width: 140px">User ID</th>
                                             <th style="width: 160px">이름</th>
+                                            <th style="width: 160px">전화번호</th>
                                             <th>이메일</th>
-                                            <th style="width: 200px">생성시각</th>
+                                            <th style="width: 120px">권한</th>
                                             <th style="width: 160px">수정</th>
                                             <th style="width: 90px">삭제</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <tr ng-repeat="u in users track by u.id">
-                                            <td>{{ u.id }}</td>
+                                        <tr ng-repeat="u in users track by (u.user_id || u.userId || u.id || $index)">
+                                            <td>{{ u.user_id || u.userId || u.id }}</td>
                                             <td>
                                                 <span ng-if="!u._editing">{{ u.name }}</span>
                                                 <input
@@ -521,6 +508,15 @@
                                                     class="inline-input"
                                                     type="text"
                                                     ng-model="u._editName"
+                                                />
+                                            </td>
+                                            <td>
+                                                <span ng-if="!u._editing">{{ (u.phone || u.tel || u.phoneNumber) }}</span>
+                                                <input
+                                                    ng-if="u._editing"
+                                                    class="inline-input"
+                                                    type="text"
+                                                    ng-model="u._editPhone"
                                                 />
                                             </td>
                                             <td>
@@ -532,7 +528,13 @@
                                                     ng-model="u._editEmail"
                                                 />
                                             </td>
-                                            <td>{{ u.created_at }}</td>
+                                            <td>
+                                                <span
+                                                    class="pill"
+                                                    ng-class="u._isAdmin ? 'green' : 'gray'"
+                                                    >{{ u._isAdmin ? '관리자' : '사용자' }}</span
+                                                >
+                                            </td>
                                             <td>
                                                 <button
                                                     type="button"
@@ -589,7 +591,6 @@
                         </section>
                     </div>
 
-                    <!-- 폼/라우트 화면(리스트가 아닐 때만 노출) -->
                     <div
                         ng-view
                         ng-show="!isListView()"
@@ -597,7 +598,7 @@
                 </div>
             </section>
 
-            <!-- 탭: 권한 -->
+            <!-- 권한 -->
             <section
                 id="tab-roles"
                 class="tab-panel"
@@ -606,101 +607,125 @@
                 ng-controller="RoleCtrl"
             >
                 <section>
-                    <div class="section-header">
-                        <div class="section-title">
-                            <span class="dot"></span>
-                            <h2 style="margin: 0">권한 관리</h2>
-                        </div>
-                        <div class="actions">
-                            <button
-                                class="btn btn-ghost"
-                                ng-click="load()"
-                                ng-disabled="loading"
-                            >
-                                🔄 새로고침
-                            </button>
-                        </div>
-                    </div>
-
                     <div
-                        class="status-box"
-                        ng-if="msg"
-                        ng-class="{'status-success': msgType==='success','status-error': msgType==='error','status-info': msgType==='info'}"
+                        class="status-box status-info"
+                        ng-if="!__isAdmin"
                     >
-                        {{ msg }}
+                        🙏 이 페이지는 <b>관리자 전용</b>입니다.
                     </div>
 
-                    <table
-                        class="user-table"
-                        ng-if="rows.length"
-                    >
-                        <thead>
-                            <tr>
-                                <th style="width: 260px">사용자</th>
-                                <th style="width: 220px">권한</th>
-                                <th style="width: 200px">상태</th>
-                                <th style="width: 120px">작업</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr ng-repeat="r in rows track by r.username">
-                                <td><strong>{{ r.username }}</strong></td>
-                                <td>
-                                    <select
-                                        ng-model="r.role"
-                                        ng-options="v for v in roleOptions"
-                                        class="inline-input"
-                                        style="width: 200px"
-                                    ></select>
-                                </td>
-                                <td>
-                                    <div class="toggle-wrap">
-                                        <input
-                                            id="en_{{::$index}}"
-                                            type="checkbox"
-                                            ng-model="r.enabled"
-                                        />
-                                        <label for="en_{{::$index}}">{{ r.enabled ? '활성' : '비활성' }}</label>
-                                        <span
-                                            class="pill"
-                                            ng-class="r.enabled ? 'green' : 'gray'"
-                                            >{{ r.enabled ? 'ON' : 'OFF' }}</span
+                    <div ng-if="__isAdmin">
+                        <div class="section-header">
+                            <div class="section-title">
+                                <span class="dot"></span>
+                                <h2 style="margin: 0">권한 관리</h2>
+                            </div>
+                            <div class="actions">
+                                <button
+                                    class="btn btn-ghost"
+                                    ng-click="load()"
+                                    ng-disabled="loading"
+                                >
+                                    🔄 새로고침
+                                </button>
+                            </div>
+                        </div>
+
+                        <div
+                            class="status-box"
+                            ng-if="msg"
+                            ng-class="{'status-success': msgType==='success','status-error': msgType==='error','status-info': msgType==='info'}"
+                        >
+                            {{ msg }}
+                        </div>
+
+                        <table
+                            class="user-table"
+                            ng-if="rows.length"
+                        >
+                            <thead>
+                                <tr>
+                                    <th style="width: 260px">사용자</th>
+                                    <th style="width: 220px">권한</th>
+                                    <th style="width: 200px">상태</th>
+                                    <th style="width: 120px">작업</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr ng-repeat="r in rows track by r.username">
+                                    <td><strong>{{ r.username }}</strong></td>
+                                    <td>
+                                        <select
+                                            ng-model="r.role"
+                                            ng-options="v for v in roleOptions"
+                                            class="inline-input"
+                                            style="width: 200px"
+                                        ></select>
+                                    </td>
+                                    <td>
+                                        <div class="toggle-wrap">
+                                            <input
+                                                id="en_{{::$index}}"
+                                                type="checkbox"
+                                                ng-model="r.enabled"
+                                            />
+                                            <label for="en_{{::$index}}">{{ r.enabled ? '활성' : '비활성' }}</label>
+                                            <span
+                                                class="pill"
+                                                ng-class="r.enabled ? 'green' : 'gray'"
+                                                >{{ r.enabled ? 'ON' : 'OFF' }}</span
+                                            >
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <button
+                                            class="btn btn-primary"
+                                            ng-click="save(r)"
+                                            ng-disabled="saving"
                                         >
-                                    </div>
-                                </td>
-                                <td>
-                                    <button
-                                        class="btn btn-primary"
-                                        ng-click="save(r)"
-                                        ng-disabled="saving"
-                                    >
-                                        저장
-                                    </button>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+                                            저장
+                                        </button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
 
-                    <div
-                        ng-if="!rows.length"
-                        class="empty-card"
-                    >
-                        <div class="empty-emoji">🛡️</div>
-                        <div class="empty-text">
-                            <strong>권한 탭 자리입니다.</strong><br />
-                            나중에 ROLE_USER / ROLE_ADMIN 관리 UI를 여기에 붙이면 됩니다.
+                        <div
+                            ng-if="!rows.length"
+                            class="empty-card"
+                        >
+                            <div class="empty-emoji">🛡️</div>
+                            <div class="empty-text">
+                                <strong>권한 탭 자리입니다.</strong><br />
+                                나중에 ROLE_USER / ROLE_ADMIN 관리 UI를 여기에 붙이면 됩니다.
+                            </div>
                         </div>
                     </div>
                 </section>
             </section>
         </main>
 
-        <!-- 로그인된 사용자명/권한 탭 가시성 + 탈퇴 버튼 노출/동작 -->
+        <!-- 로그인/권한/탈퇴 -->
         <script>
             (function () {
+                try {
+                    if (window.angular) {
+                        var body = document.querySelector('body[ng-controller]');
+                        var s = body ? angular.element(body).scope() : null;
+                        if (s)
+                            s.$applyAsync(function () {
+                                s.__isAdmin = false;
+                            });
+                    }
+                } catch (e) {}
+                window.__IS_ADMIN__ = false;
+
                 fetch('/api/me', { credentials: 'same-origin' })
                     .then(function (res) {
-                        if (res.status === 401) {
+                        const redirectedToLogin = res.redirected && /\/login(?:\?|$)/.test(res.url);
+                        const ct = (res.headers.get('content-type') || '').toLowerCase();
+                        const notJson = ct.indexOf('application/json') === -1;
+                        if (res.status === 401 || redirectedToLogin || notJson) {
                             window.location.href = '/login';
                             return null;
                         }
@@ -711,38 +736,36 @@
                         var who = document.getElementById('whoami');
                         if (who && data.username) who.textContent = '안녕하세요, ' + data.username + '님';
 
-                        // 관리자 여부: /api/me 의 isAdmin 플래그 또는 authorities 배열
                         var isAdmin = !!(data && (data.isAdmin || (Array.isArray(data.authorities) && data.authorities.indexOf('ROLE_ADMIN') !== -1)));
+                        window.__IS_ADMIN__ = isAdmin;
 
-                        var rolesLink = document.getElementById('tablink-roles');
-                        var rolesPanel = document.getElementById('tab-roles');
-
-                        if (!isAdmin && rolesLink) {
-                            rolesLink.style.display = 'none';
-                            if (location.hash === '#tab-roles') {
-                                history.replaceState(null, '', '#tab-bus');
+                        try {
+                            if (window.angular) {
+                                var body = document.querySelector('body[ng-controller]');
+                                var s = body ? angular.element(body).scope() : null;
+                                if (s)
+                                    s.$applyAsync(function () {
+                                        s.__isAdmin = window.__IS_ADMIN__;
+                                    });
                             }
-                            if (rolesPanel) rolesPanel.hidden = true;
-                        }
+                        } catch (e) {}
 
-                        // ✅ 로그인 상태면 계정 탈퇴 버튼 노출
                         var delBtn = document.getElementById('btn-delete');
                         if (delBtn) delBtn.style.display = 'inline-block';
                     })
-                    .catch(function () {});
+                    .catch(function () {
+                        window.location.href = '/login';
+                    });
             })();
 
-            // ✅ 계정 탈퇴 클릭 핸들러
             document.addEventListener('click', function (e) {
                 if (e.target && e.target.id === 'btn-delete') {
                     e.preventDefault();
                     if (!confirm('정말로 내 계정을 삭제하시겠어요? 이 동작은 되돌릴 수 없습니다.')) return;
-
                     fetch('/api/me', { method: 'DELETE', credentials: 'same-origin' })
                         .then(function (res) {
                             if (res.status === 204 || res.status === 200) {
                                 alert('계정이 삭제되었습니다.');
-                                // 세션 종료를 위해 로그아웃 경로로 이동
                                 window.location.href = '/logout';
                             } else if (res.status === 401) {
                                 window.location.href = '/login';
@@ -759,15 +782,13 @@
             });
         </script>
 
-        <!-- 간단 탭 전환 스크립트 -->
+        <!-- 탭 전환 -->
         <script>
             document.addEventListener('DOMContentLoaded', function () {
                 const tabs = document.querySelectorAll('.tabs .tab');
                 const panels = document.querySelectorAll('.tab-panel');
-
                 function activate(hash) {
                     tabs.forEach((a) => {
-                        if (a.style.display === 'none') return; // 숨겨진 탭은 제외
                         const on = a.getAttribute('href') === hash;
                         a.classList.toggle('active', on);
                         a.setAttribute('aria-selected', String(on));
@@ -778,28 +799,20 @@
                         p.hidden = !on;
                     });
                 }
-
                 tabs.forEach((a) => {
                     a.addEventListener('click', function (e) {
-                        if (a.style.display === 'none') return;
                         e.preventDefault();
                         const hash = a.getAttribute('href');
                         history.replaceState(null, '', hash);
                         activate(hash);
                     });
                 });
-
                 let initial = location.hash || '#tab-bus';
-                const rolesLink = document.getElementById('tablink-roles');
-                if (initial === '#tab-roles' && rolesLink && rolesLink.style.display === 'none') {
-                    initial = '#tab-bus';
-                    history.replaceState(null, '', initial);
-                }
                 activate(initial);
             });
         </script>
 
-        <!-- 권한 탭용 Angular 컨트롤러 -->
+        <!-- 권한 탭 컨트롤러 -->
         <script>
             angular.module('busApp').controller('RoleCtrl', function ($scope, $http) {
                 $scope.rows = [];
@@ -822,12 +835,17 @@
                 $scope.load = function () {
                     $scope.loading = true;
                     $http
+                        // ⬇⬇⬇ 변경: 목록 조회는 로그인 허용 엔드포인트 사용
                         .get('/api/roles')
                         .then(function (res) {
-                            $scope.rows = res.data || [];
+                            $scope.rows = Array.isArray(res.data) ? res.data : [];
                             notify('info', '권한 목록을 불러왔습니다.');
                         })
-                        .catch(function () {
+                        .catch(function (err) {
+                            if (err && err.status === 403) {
+                                notify('info', '이 페이지는 관리자 전용입니다.');
+                                return;
+                            }
                             notify('error', '권한 목록을 불러오지 못했습니다.');
                         })
                         .finally(function () {
@@ -838,7 +856,6 @@
                 $scope.save = function (row) {
                     if (!row || !row.username || !row.role) return;
                     $scope.saving = true;
-                    // role + enabled 모두 전송
                     $http
                         .put('/api/roles/' + encodeURIComponent(row.username), {
                             role: row.role,
@@ -856,7 +873,6 @@
                         });
                 };
 
-                // 초기 로드
                 $scope.load();
             });
         </script>

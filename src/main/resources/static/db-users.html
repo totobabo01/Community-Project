@@ -1,0 +1,37 @@
+<div ng-if="loading">로딩 중...</div>
+
+<div
+    ng-if="!loading && adminOnly"
+    class="alert alert-warning"
+    style="margin: 12px 0"
+>
+    🙏 이 페이지는 <b>관리자 전용입니다</b>.
+</div>
+
+<div ng-if="!loading && !adminOnly">
+    <h2>DB 사용자 관리</h2>
+    <table
+        border="1"
+        cellpadding="6"
+        cellspacing="0"
+        style="width: 100%"
+    >
+        <thead>
+            <tr>
+                <th>사용자</th>
+                <th>권한</th>
+                <th>작업</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr ng-repeat="u in users">
+                <td>{{ u.username }}</td>
+                <td>{{ u.role }}</td>
+                <td>
+                    <button ng-disabled="!me || !me.admin">권한 변경</button>
+                    <button ng-disabled="!me || !me.admin">삭제</button>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>

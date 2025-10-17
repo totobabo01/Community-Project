@@ -1,31 +1,103 @@
-package com.example.demo.dto; // DTO가 소속된 패키지 경로(모듈/네임스페이스 구분, 컴포넌트 스캔과 무관)
+// src/main/java/com/example/demo/dto/UserDTO.java
+package com.example.demo.dto;
 
-// JDBC TIMESTAMP와 매핑되는 자바 타입(타임존 정보 없음, DB의 TIMESTAMP 컬럼과 호환)
-import java.sql.Timestamp;
+import java.util.List;
+
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonProperty.Access;
 
 /**
- * 사용자 DTO (Controller ↔ Service 경계에서만 사용)
- * DAO/영속 계층은 이 DTO에 의존하지 않습니다.
- * - DTO(Data Transfer Object): 계층 간 데이터 전달을 위한 순수 값 객체
- * - 엔티티(User)와 분리해, 외부 노출 형태와 내부 도메인 모델을 독립적으로 유지
+ * 사용자 DTO
+ *
+ * DB 스키마
+ *  - users(user_id VARCHAR(16), name, phone, email, password)
+ *  - users_roles(user_id, role)  // ex) USER, ADMIN
  */
-public class UserDTO {            // public: 다른 패키지(컨트롤러/서비스)에서도 자유롭게 사용 가능
-  private Long id;               // PK 식별자. Long을 사용해 null(미생성/미할당 상태) 표현 가능
-  private String name;           // 사용자 이름. 형식/길이 검증은 보통 서비스/컨트롤러 레벨에서 수행
-  private String email;          // 이메일 주소. 중복/형식 검증은 서비스/DB 제약으로 처리
-  private Timestamp created_at;  // 생성 시각(DB TIMESTAMP 매핑). 서버 기준 시간으로 채우는 것이 일반적
+@JsonInclude(JsonInclude.Include.NON_NULL) // null 필드는 응답에서 제외
+public class UserDTO {
 
-  public UserDTO() {}            // 기본 생성자: 역직렬화(Jackson)/리플렉션/프레임워크 바인딩에 필수
+  /** 내부 표준 필드명은 userId, JSON 직렬화명은 user_id */
+  @JsonProperty("user_id")
+  @JsonAlias({"userId", "id"}) // 요청으로 들어올 때 이 별칭들도 허용
+  private String userId;
 
-  public Long getId() { return id; }                 // id 게터: 직렬화/뷰 변환 시 사용
-  public void setId(Long id) { this.id = id; }       // id 세터: 컨트롤러/서비스에서 값 주입
+  private String name;
 
-  public String getName() { return name; }           // name 게터
-  public void setName(String name) { this.name = name; } // name 세터
+  @JsonAlias({"tel", "phoneNumber"})
+  private String phone;
 
-  public String getEmail() { return email; }         // email 게터
-  public void setEmail(String email) { this.email = email; } // email 세터
+  private String email;
 
-  public Timestamp getCreated_at() { return created_at; } // created_at 게터
-  public void setCreated_at(Timestamp created_at) { this.created_at = created_at; } // created_at 세터
+  /** password는 요청에서만 받도록 하고 응답에는 절대 포함하지 않음 */
+  @JsonProperty(access = Access.WRITE_ONLY)
+  private String password;
+
+  /** 조회 시 필요하면 내려주는 권한 목록(예: ["USER","ADMIN"]) */
+  private List<String> roles;
+
+  public UserDTO() {}
+
+  public UserDTO(String userId, String name, String phone, String email, List<String> roles) {
+    this.userId = userId;
+    this.name = name;
+    this.phone = phone;
+    this.email = email;
+    this.roles = roles;
+  }
+
+  // ── getters / setters ──────────────────────────────────────────────
+  public String getUserId() {
+    return userId;
+  }
+  public void setUserId(String userId) {
+    this.userId = userId;
+  }
+
+  public String getName() {
+    return name;
+  }
+  public void setName(String name) {
+    this.name = name;
+  }
+
+  public String getPhone() {
+    return phone;
+  }
+  public void setPhone(String phone) {
+    this.phone = phone;
+  }
+
+  public String getEmail() {
+    return email;
+  }
+  public void setEmail(String email) {
+    this.email = email;
+  }
+
+  public String getPassword() {
+    return password;
+  }
+  public void setPassword(String password) {
+    this.password = password;
+  }
+
+  public List<String> getRoles() {
+    return roles;
+  }
+  public void setRoles(List<String> roles) {
+    this.roles = roles;
+  }
+
+  @Override
+  public String toString() {
+    return "UserDTO{" +
+        "userId='" + userId + '\'' +
+        ", name='" + name + '\'' +
+        ", phone='" + phone + '\'' +
+        ", email='" + email + '\'' +
+        ", roles=" + roles +
+        '}';
+  }
 }

@@ -1,0 +1,50 @@
+<div ng-if="loading">로딩 중...</div>
+
+<!-- 비관리자가 접근하면 -->
+<div
+    ng-if="!loading && adminOnly"
+    class="alert alert-warning"
+    style="margin: 12px 0"
+>
+    🙏 이 페이지는 <b>관리자 전용입니다</b>.
+</div>
+
+<!-- 관리자는 표가 보임 -->
+<div ng-if="!loading && !adminOnly">
+    <h2>권한 관리</h2>
+    <table
+        border="1"
+        cellpadding="6"
+        cellspacing="0"
+        style="width: 100%"
+    >
+        <thead>
+            <tr>
+                <th>사용자</th>
+                <th>권한</th>
+                <th>작업</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr ng-repeat="r in rows">
+                <td>{{ r.username }}</td>
+                <td>{{ r.role }}</td>
+                <td>
+                    <!-- 관리자만 '작업' 버튼 활성화 -->
+                    <button
+                        ng-click="grantAdmin(r)"
+                        ng-disabled="!me || !me.admin || r.role==='ROLE_ADMIN'"
+                    >
+                        관리자 부여
+                    </button>
+                    <button
+                        ng-click="revokeAdmin(r)"
+                        ng-disabled="!me || !me.admin || r.role!=='ROLE_ADMIN'"
+                    >
+                        관리자 해제
+                    </button>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
