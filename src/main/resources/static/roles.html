@@ -1,50 +1,103 @@
-<div ng-if="loading">로딩 중...</div>
+<!-- /roles.html -->
+<div style="background: #fff; border-radius: 16px; box-shadow: 0 10px 30px rgba(31, 38, 135, 0.08); padding: 18px">
+    <div style="background: #fbfdff; border: 1px solid #edf0f5; border-radius: 12px; padding: 18px">
+        <div class="section-header">
+            <div class="section-title">
+                <span class="dot"></span>
+                <h2 style="margin: 0">권한 관리</h2>
+            </div>
 
-<!-- 비관리자가 접근하면 -->
-<div
-    ng-if="!loading && adminOnly"
-    class="alert alert-warning"
-    style="margin: 12px 0"
->
-    🙏 이 페이지는 <b>관리자 전용입니다</b>.
-</div>
+            <!-- 관리자만 상단 버튼 노출 -->
+            <div
+                class="actions"
+                ng-if="isAdmin"
+            >
+                <button
+                    class="btn btn-ghost"
+                    ng-click="load()"
+                    ng-disabled="loading"
+                >
+                    새로 고침
+                </button>
+            </div>
+        </div>
 
-<!-- 관리자는 표가 보임 -->
-<div ng-if="!loading && !adminOnly">
-    <h2>권한 관리</h2>
-    <table
-        border="1"
-        cellpadding="6"
-        cellspacing="0"
-        style="width: 100%"
-    >
-        <thead>
-            <tr>
-                <th>사용자</th>
-                <th>권한</th>
-                <th>작업</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr ng-repeat="r in rows">
-                <td>{{ r.username }}</td>
-                <td>{{ r.role }}</td>
-                <td>
-                    <!-- 관리자만 '작업' 버튼 활성화 -->
-                    <button
-                        ng-click="grantAdmin(r)"
-                        ng-disabled="!me || !me.admin || r.role==='ROLE_ADMIN'"
-                    >
-                        관리자 부여
-                    </button>
-                    <button
-                        ng-click="revokeAdmin(r)"
-                        ng-disabled="!me || !me.admin || r.role!=='ROLE_ADMIN'"
-                    >
-                        관리자 해제
-                    </button>
-                </td>
-            </tr>
-        </tbody>
-    </table>
+        <!-- 안내/상태 메시지 -->
+        <div
+            class="status-box"
+            ng-if="msg"
+            ng-class="{
+           'status-success': msgType==='success',
+           'status-error':   msgType==='error',
+           'status-info':    msgType==='info'
+         }"
+        >
+            {{ msg }}
+        </div>
+
+        <!-- 비관리자 전용 안내 -->
+        <div
+            class="status-box status-info"
+            ng-if="!isAdmin"
+        >
+            🙏 이 페이지는 <strong>관리자 전용</strong>입니다.
+        </div>
+
+        <!-- 관리자 전용 테이블 -->
+        <div ng-if="isAdmin">
+            <table
+                class="user-table"
+                aria-label="권한 목록"
+            >
+                <thead>
+                    <tr>
+                        <th style="width: 35%">사용자</th>
+                        <th style="width: 35%">권한</th>
+                        <th style="width: 30%">작업</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr ng-repeat="row in rows">
+                        <td>{{ row.username }}</td>
+                        <td>
+                            <span
+                                class="pill"
+                                ng-class="{
+                      'green': (row.role || '').toUpperCase()==='ROLE_ADMIN',
+                      'gray' : (row.role || 'ROLE_USER').toUpperCase()!=='ROLE_ADMIN'
+                    }"
+                            >
+                                {{ (row.role || 'ROLE_USER') }}
+                            </span>
+                        </td>
+                        <td>
+                            <button
+                                class="btn btn-primary"
+                                ng-disabled="saving || (row.role||'').toUpperCase()==='ROLE_ADMIN'"
+                                ng-click="changeRole(row, 'ROLE_ADMIN')"
+                            >
+                                관리자 부여
+                            </button>
+                            <button
+                                class="btn btn-ghost"
+                                ng-disabled="saving || (row.role||'').toUpperCase()==='ROLE_USER'"
+                                ng-click="changeRole(row, 'ROLE_USER')"
+                            >
+                                관리자 해제
+                            </button>
+                        </td>
+                    </tr>
+
+                    <tr ng-if="!rows.length && !loading">
+                        <td
+                            colspan="3"
+                            style="text-align: center; color: #666"
+                        >
+                            표시할 데이터가 없습니다.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>

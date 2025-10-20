@@ -29,7 +29,8 @@ public class UserDao implements IUserDao {
   @Value("${app.db.username}") private String username;
   @Value("${app.db.password}") private String password;
 
-  // 공용 매핑
+  // ───────────────────────────────────────────────────────────────────────────
+  // 공용 매핑 (모든 컬럼 포함: password 포함)
   private static User mapRow(ResultSet rs) throws SQLException {
     User u = new User();
     u.setUserId(rs.getString("user_id"));
@@ -40,16 +41,59 @@ public class UserDao implements IUserDao {
     return u;
   }
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // 목록 전용 경량 DTO (비밀번호 제외)
+  public static class UserRow {
+    public final String user_id;
+    public final String name;
+    public final String phone;
+    public final String email;
+    public UserRow(String user_id, String name, String phone, String email) {
+      this.user_id = user_id;
+      this.name = name;
+      this.phone = phone;
+      this.email = email;
+    }
+  }
+
   // ───────────── CRUD ─────────────
 
   @Override
   public List<User> findAll() {
-    final String sql = UsersSql.selectAll();
+    final String sql = UsersSql.selectAll(); // SELECT * 또는 password 포함 컬럼
     List<User> list = new ArrayList<>();
     try (Connection c = DriverManager.getConnection(url, username, password);
          PreparedStatement ps = c.prepareStatement(sql);
          ResultSet rs = ps.executeQuery()) {
       while (rs.next()) list.add(mapRow(rs));
+    } catch (SQLException e) {
+      e.printStackTrace();
+    }
+    return list;
+  }
+
+  /**
+   * 관리자 목록 화면 등에서 사용하는 "비밀번호 제거된" 목록.
+   * 컬럼: user_id, name, phone, email
+   */
+  public List<UserRow> findAllForAdminList() {
+    final String sql = """
+        SELECT user_id, name, phone, email
+          FROM users
+         ORDER BY user_id
+        """;
+    List<UserRow> list = new ArrayList<>();
+    try (Connection c = DriverManager.getConnection(url, username, password);
+         PreparedStatement ps = c.prepareStatement(sql);
+         ResultSet rs = ps.executeQuery()) {
+      while (rs.next()) {
+        list.add(new UserRow(
+            rs.getString("user_id"),
+            rs.getString("name"),
+            rs.getString("phone"),
+            rs.getString("email")
+        ));
+      }
     } catch (SQLException e) {
       e.printStackTrace();
     }

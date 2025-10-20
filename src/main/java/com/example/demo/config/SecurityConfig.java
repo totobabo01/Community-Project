@@ -4,12 +4,14 @@ package com.example.demo.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 
 @Configuration
@@ -25,48 +27,58 @@ public class SecurityConfig {
   @Bean
   public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
     http
-      // 1) 인가 규칙
+      // ───────────────── 인가 규칙 ─────────────────
       .authorizeHttpRequests(auth -> auth
-        // 정적 리소스 & 공개 페이지(라우트 이동은 누구나 가능)
+        // 정적 리소스 & 공개 페이지
         .requestMatchers(
           "/", "/index.html",
           "/login", "/signup", "/logout",
-          "/error", "/error/**", "/favicon.ico",
+          "/error", "/error/**", "/favicon.ico"
+        ).permitAll()
+        .requestMatchers(
           "/css/**", "/js/**", "/images/**", "/lib/**",
-          "/angular-route.js", "/app.js",
-          // Angular 템플릿(예: roles/db-users 같은 라우트 파일)
-          "/users-new.html", "/roles.html", "/db-users.html"
+          // SPA 템플릿(Angular partials)
+          "/users-new.html", "/roles.html", "/db-users.html", "/tpl/**",
+          // 앱 스크립트(경로에 맞춰 유지)
+          "/app.js"
         ).permitAll()
 
-        // 외부 공개 API(예: 버스 조회)
+        // 외부 공개 API (버스 조회는 누구나)
         .requestMatchers("/api/bus/**").permitAll()
 
-        // 로그인 필요 리소스
+        // 인증 필요 API
         .requestMatchers("/api/me").authenticated()
+        .requestMatchers(HttpMethod.GET, "/api/menus").authenticated()
+        .requestMatchers("/api/boards/**", "/api/posts/**", "/api/comments/**").authenticated()
         .requestMatchers("/api/users/**", "/users/**", "/user/**").authenticated()
-
-        // 권한 API 정책
-        // - GET /api/roles : 로그인 사용자(권한 뱃지 표시 용도)
         .requestMatchers(HttpMethod.GET, "/api/roles").authenticated()
-        // - 그 외 /api/roles/** (POST/PUT/DELETE 등)와 /api/admin/** : 관리자만
+
+        // 관리자 전용
         .requestMatchers("/api/roles/**", "/api/admin/**").hasRole("ADMIN")
 
-        // 그 외 전부 공개(라우트/HTML 등). 필요 시 authenticated()로 조정 가능
-        .anyRequest().permitAll()
+        // 그 외는 인증 요구 (원치 않으면 .permitAll() 로 완화)
+        .anyRequest().authenticated()
       )
 
-      // 2) 폼 로그인
+      // ───────────────── 인증 진입점: /api/** 미인증 시 401 ─────────────────
+      .exceptionHandling(ex -> ex
+        .defaultAuthenticationEntryPointFor(
+          new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
+          new AntPathRequestMatcher("/api/**"))
+      )
+
+      // ───────────────── 폼 로그인 ─────────────────
       .formLogin(form -> form
-        .loginPage("/login")                     // GET: 로그인 페이지
-        .loginProcessingUrl("/login")            // POST: 스프링이 처리
+        .loginPage("/login")
+        .loginProcessingUrl("/login")
         .usernameParameter("username")
         .passwordParameter("password")
-        .defaultSuccessUrl("/index.html", true)  // 로그인 성공 시 항상 index로
+        .defaultSuccessUrl("/index.html", true) // 로그인 후 SPA 진입
         .failureUrl("/login?error")
         .permitAll()
       )
 
-      // 3) 로그아웃 (개발 편의상 GET 허용)
+      // ───────────────── 로그아웃 (개발 편의상 GET 허용) ─────────────────
       .logout(logout -> logout
         .logoutRequestMatcher(new AntPathRequestMatcher("/logout", "GET"))
         .logoutSuccessUrl("/login")
@@ -75,14 +87,13 @@ public class SecurityConfig {
         .permitAll()
       )
 
-      // 4) CSRF
-      // API(특히 Angular에서 호출하는 쓰기 엔드포인트)는 CSRF 예외 처리
+      // ───────────────── CSRF: API는 제외 ─────────────────
       .csrf(csrf -> csrf.ignoringRequestMatchers(
         new AntPathRequestMatcher("/signup"),
         new AntPathRequestMatcher("/logout"),
         new AntPathRequestMatcher("/user/**"),
         new AntPathRequestMatcher("/users/**"),
-        new AntPathRequestMatcher("/api/**") // 전체 API를 예외로(버스/기타 포함)
+        new AntPathRequestMatcher("/api/**")
       ));
 
     return http.build();

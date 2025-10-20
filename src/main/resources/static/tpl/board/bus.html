@@ -1,0 +1,137 @@
+<div class="section-header">
+    <h2 style="margin: 0">대구버스 게시판</h2>
+</div>
+
+<div
+    class="status-box"
+    ng-if="loading"
+>
+    ⏳ 불러오는 중...
+</div>
+
+<form
+    ng-submit="createPost()"
+    style="margin: 12px 0"
+>
+    <input
+        class="inline-input"
+        type="text"
+        ng-model="newPost.title"
+        placeholder="제목"
+    />
+    <br />
+    <textarea
+        class="inline-input"
+        style="height: 120px; margin-top: 8px"
+        ng-model="newPost.content"
+        placeholder="내용"
+    ></textarea>
+    <div style="margin-top: 8px">
+        <button
+            class="btn btn-primary"
+            type="submit"
+        >
+            등록
+        </button>
+    </div>
+</form>
+
+<ul
+    class="user-table"
+    style="padding: 0; border: 1px solid #edf0f5; border-radius: 12px"
+>
+    <li
+        style="list-style: none; padding: 12px; border-bottom: 1px solid #eee"
+        ng-repeat="p in posts track by p.postId"
+    >
+        <div ng-if="!p._editing">
+            <strong>{{p.title}}</strong>
+            <div style="color: #666; margin: 4px 0">{{p.content}}</div>
+            <small>{{p.writerName}} · {{p.createdAt | date:'yyyy-MM-dd HH:mm'}}</small>
+            <div style="margin-top: 6px">
+                <button
+                    class="btn btn-ghost"
+                    ng-click="startEditPost(p)"
+                >
+                    수정
+                </button>
+                <button
+                    class="btn btn-danger"
+                    ng-click="deletePost(p)"
+                >
+                    삭제
+                </button>
+                <button
+                    class="btn"
+                    ng-click="toggleComments(p)"
+                >
+                    {{p._showComments?'댓글 닫기':'댓글 보기'}}
+                </button>
+            </div>
+        </div>
+
+        <div ng-if="p._editing">
+            <input
+                class="inline-input"
+                type="text"
+                ng-model="p._editTitle"
+            />
+            <textarea
+                class="inline-input"
+                style="height: 100px; margin-top: 6px"
+                ng-model="p._editContent"
+            ></textarea>
+            <div style="margin-top: 6px">
+                <button
+                    class="btn btn-primary"
+                    ng-click="savePost(p)"
+                >
+                    저장
+                </button>
+                <button
+                    class="btn"
+                    ng-click="cancelEditPost(p)"
+                >
+                    취소
+                </button>
+            </div>
+        </div>
+
+        <div
+            ng-if="p._showComments"
+            style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee"
+        >
+            <div ng-if="!p._commentsLoaded">댓글 불러오는 중...</div>
+            <div
+                ng-repeat="c in p.comments track by c.commentId"
+                style="margin: 6px 0"
+            >
+                <strong>{{c.writerName}}</strong> :
+                <span>{{c.content}}</span>
+                <small style="color: #777"> · {{c.createdAt | date:'MM-dd HH:mm'}}</small>
+                <button
+                    class="btn btn-ghost"
+                    style="margin-left: 6px"
+                    ng-click="deleteComment(p,c)"
+                >
+                    삭제
+                </button>
+            </div>
+            <div style="margin-top: 6px">
+                <input
+                    class="inline-input"
+                    type="text"
+                    ng-model="p._newComment"
+                    placeholder="댓글 입력..."
+                />
+                <button
+                    class="btn btn-primary"
+                    style="margin-left: 6px"
+                    ng-click="addComment(p)"
+                >
+                    등록
+                </button>
+            </div>
+        </div>
+    </li>
+</ul>

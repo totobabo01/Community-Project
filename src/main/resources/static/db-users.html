@@ -1,37 +1,148 @@
-<div ng-if="loading">로딩 중...</div>
+<!-- /db-users.html -->
+<div style="background: #fff; border-radius: 16px; box-shadow: 0 10px 30px rgba(31, 38, 135, 0.08); padding: 18px">
+    <div style="background: #fbfdff; border: 1px solid #edf0f5; border-radius: 12px; padding: 18px">
+        <div class="section-header">
+            <div class="section-title">
+                <span class="dot"></span>
+                <h2 style="margin: 0">DB 사용자 관리</h2>
+            </div>
 
-<div
-    ng-if="!loading && adminOnly"
-    class="alert alert-warning"
-    style="margin: 12px 0"
->
-    🙏 이 페이지는 <b>관리자 전용입니다</b>.
-</div>
+            <!-- 관리자만 상단 버튼 노출 -->
+            <div
+                class="actions"
+                ng-if="isAdmin"
+            >
+                <button
+                    class="btn btn-ghost"
+                    ng-click="loadUsers()"
+                    ng-disabled="userStatusType==='info'"
+                >
+                    새로 고침
+                </button>
+                <button
+                    class="btn btn-primary"
+                    ng-click="goToNew()"
+                >
+                    여러 명 추가
+                </button>
+            </div>
+        </div>
 
-<div ng-if="!loading && !adminOnly">
-    <h2>DB 사용자 관리</h2>
-    <table
-        border="1"
-        cellpadding="6"
-        cellspacing="0"
-        style="width: 100%"
-    >
-        <thead>
-            <tr>
-                <th>사용자</th>
-                <th>권한</th>
-                <th>작업</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr ng-repeat="u in users">
-                <td>{{ u.username }}</td>
-                <td>{{ u.role }}</td>
-                <td>
-                    <button ng-disabled="!me || !me.admin">권한 변경</button>
-                    <button ng-disabled="!me || !me.admin">삭제</button>
-                </td>
-            </tr>
-        </tbody>
-    </table>
+        <!-- 안내/상태 -->
+        <div
+            class="status-box"
+            ng-if="userStatusMessage"
+            ng-class="{
+           'status-success': userStatusType==='success',
+           'status-error'  : userStatusType==='error',
+           'status-info'   : userStatusType==='info'
+         }"
+        >
+            {{ userStatusMessage }}
+        </div>
+
+        <!-- 비관리자 안내 -->
+        <div
+            class="status-box status-info"
+            ng-if="!isAdmin"
+        >
+            🙏 이 페이지는 <strong>관리자 전용</strong>입니다.
+        </div>
+
+        <!-- 관리자 전용 테이블 -->
+        <div ng-if="isAdmin">
+            <table
+                class="user-table"
+                aria-label="사용자 목록"
+            >
+                <thead>
+                    <tr>
+                        <th style="width: 22%">사용자</th>
+                        <th style="width: 22%">이메일</th>
+                        <th style="width: 16%">전화</th>
+                        <th style="width: 16%">권한</th>
+                        <th style="width: 24%">작업</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr ng-repeat="u in users">
+                        <td>
+                            <span ng-if="!u._editing">{{ u.name }}</span>
+                            <input
+                                ng-if="u._editing"
+                                class="inline-input"
+                                type="text"
+                                ng-model="u._editName"
+                            />
+                        </td>
+                        <td>
+                            <span ng-if="!u._editing">{{ u.email }}</span>
+                            <input
+                                ng-if="u._editing"
+                                class="inline-input"
+                                type="email"
+                                ng-model="u._editEmail"
+                            />
+                        </td>
+                        <td>
+                            <span ng-if="!u._editing">{{ u.phone || '-' }}</span>
+                            <input
+                                ng-if="u._editing"
+                                class="inline-input"
+                                type="text"
+                                ng-model="u._editPhone"
+                            />
+                        </td>
+                        <td>
+                            <span
+                                class="pill"
+                                ng-class="u._isAdmin ? 'green' : 'gray'"
+                            >
+                                {{ u.roleLabel }}
+                            </span>
+                        </td>
+                        <td>
+                            <div ng-if="!u._editing">
+                                <button
+                                    class="btn btn-ghost"
+                                    ng-click="startEdit(u)"
+                                >
+                                    수정
+                                </button>
+                                <button
+                                    class="btn btn-danger"
+                                    ng-click="deleteUser(u)"
+                                >
+                                    삭제
+                                </button>
+                            </div>
+                            <div ng-if="u._editing">
+                                <button
+                                    class="btn btn-primary"
+                                    ng-click="saveEdit(u)"
+                                >
+                                    저장
+                                </button>
+                                <button
+                                    class="btn btn-ghost"
+                                    ng-click="cancelEdit(u)"
+                                >
+                                    취소
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <tr ng-if="!users.length && isAdmin">
+                        <td
+                            colspan="5"
+                            style="text-align: center; color: #666"
+                        >
+                            표시할 데이터가 없습니다.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
