@@ -96,6 +96,14 @@
                 display: none;
                 z-index: 10;
             }
+            /* ❗ 호버로 강제 표시하던 규칙 제거(Angular 제어로만 열림/닫힘) */
+            /* .item:hover .dropdown { display:block; } */
+
+            .dropdown[ng-show],
+            .dropdown.ng-show {
+                display: block;
+            } /* ng-show(true)일 때 보이도록 보조 */
+
             .dropdown a {
                 display: block;
                 padding: 8px 10px;
@@ -107,9 +115,7 @@
             .dropdown a:hover {
                 background: #f5f7fb;
             }
-            .item:hover .dropdown {
-                display: block;
-            }
+
             .nav-right {
                 display: flex;
                 align-items: center;
@@ -126,6 +132,7 @@
             .btn-link:hover {
                 background: rgba(255, 255, 255, 0.12);
             }
+
             main {
                 max-width: 980px;
                 margin: 28px auto 40px;
@@ -333,6 +340,7 @@
                     class="nav"
                     role="navigation"
                     aria-label="주요 메뉴"
+                    ng-init="mBoard={_open:false}; mAdmin={_open:false}"
                 >
                     <!-- 클릭 시 /users?tab=bus 로 이동 (해시 추가 금지) -->
                     <div class="item">
@@ -342,16 +350,48 @@
                             >버스정보</a
                         >
                     </div>
-                    <div class="item">
-                        <a href="javascript:void(0)">게시판</a>
-                        <div class="dropdown">
+
+                    <!-- 게시판 (지연 닫힘 + 클릭 토글 + 바깥클릭 닫힘) -->
+                    <div
+                        class="item"
+                        ng-mouseenter="onMenuEnter(mBoard)"
+                        ng-mouseleave="onMenuLeave(mBoard)"
+                    >
+                        <a
+                            href="javascript:void(0)"
+                            ng-click="onMenuClick(mBoard, $event)"
+                            aria-haspopup="true"
+                            aria-expanded="{{!!mBoard._open}}"
+                            >게시판</a
+                        >
+                        <div
+                            class="dropdown"
+                            ng-show="mBoard._open"
+                            ng-click="$event.stopPropagation()"
+                        >
                             <a ng-href="#!/board/bus">대구버스 게시판</a>
                             <a ng-href="#!/board/normal">일반 게시판</a>
                         </div>
                     </div>
-                    <div class="item">
-                        <a href="javascript:void(0)">관리</a>
-                        <div class="dropdown">
+
+                    <!-- 관리 -->
+                    <div
+                        class="item"
+                        ng-mouseenter="onMenuEnter(mAdmin)"
+                        ng-mouseleave="onMenuLeave(mAdmin)"
+                    >
+                        <a
+                            href="javascript:void(0)"
+                            ng-click="onMenuClick(mAdmin, $event)"
+                            aria-haspopup="true"
+                            aria-expanded="{{!!mAdmin._open}}"
+                            >관리</a
+                        >
+                        <div
+                            class="dropdown"
+                            ng-show="mAdmin._open"
+                            ng-click="$event.stopPropagation()"
+                        >
                             <a ng-href="#!/db-users">DB 사용자 관리</a>
                             <a ng-href="#!/roles">권한 관리</a>
                         </div>

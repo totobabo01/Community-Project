@@ -29,17 +29,17 @@ body {
 body {
     font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
     color: var(--ink-900);
-    background: radial-gradient(1200px 600px at 20% -10%, var(--sky-100), transparent 60%), radial-gradient(1000px 480px at 110% -20%, var(--sky-200), transparent 65%), linear-gradient(180deg, var(--sky-50), #ffffff);
+    background: radial-gradient(1200px 600px at 20% -10%, var(--sky-100), transparent 60%), radial-gradient(1000px 480px at 110% -20%, var(--sky-200), transparent 65%), linear-gradient(180deg, var(--sky-50), #fff);
 }
 
-/* Top bar */
+/* ───── Top bar ───── */
 .topbar {
     backdrop-filter: saturate(140%) blur(6px);
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.5));
     border-bottom: 1px solid var(--border);
     position: sticky;
     top: 0;
-    z-index: 10;
+    z-index: 50;
 }
 .topbar > div {
     max-width: 980px;
@@ -71,7 +71,7 @@ body {
     box-shadow: 0 6px 16px rgba(67, 176, 255, 0.25);
 }
 
-/* Card */
+/* ───── Global card / text ───── */
 .card {
     width: 100%;
     max-width: 540px;
@@ -82,8 +82,6 @@ body {
     border-radius: var(--radius);
     box-shadow: var(--shadow);
 }
-
-/* Typography */
 h1 {
     margin: 0 0 18px;
     font-size: 28px;
@@ -93,7 +91,7 @@ p {
     color: var(--ink-700);
 }
 
-/* Form */
+/* ───── Form ───── */
 label {
     display: block;
     font-size: 14px;
@@ -140,7 +138,7 @@ button {
     height: auto;
 }
 
-/* Messages */
+/* ───── Messages ───── */
 .info,
 .error,
 .success {
@@ -162,7 +160,7 @@ button {
     color: #087a5b;
 }
 
-/* Utilities */
+/* ───── Utilities ───── */
 .right {
     margin-left: auto;
 }
@@ -175,11 +173,86 @@ pre {
     margin: 16px auto 0;
     border: 1px dashed var(--border);
 }
+
 @media (max-width: 560px) {
     .card {
         margin: 28px 14px;
     }
     .topbar > div {
         padding: 10px 12px;
+    }
+}
+
+/* ─────────────────────────────────────────────
+   Navigation & Dropdown (안정적인 열림/닫힘)
+   - Angular ng-show 로만 표시
+   - 깜빡임 방지: 패딩/간격 보정, pointer-events 제어
+   ───────────────────────────────────────────── */
+.nav {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin: 0 auto;
+}
+.nav .item {
+    position: relative;
+    padding-bottom: 8px; /* 아래로 살짝 패딩 → 마우스 이동 시 끊김 완화 */
+}
+.nav .item > a {
+    color: var(--ink-900);
+    text-decoration: none;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: rgba(255, 255, 255, 0.7);
+    font-size: 14px;
+    display: inline-block;
+}
+.nav .item > a:hover {
+    background: rgba(255, 255, 255, 0.9);
+}
+
+.dropdown {
+    position: absolute;
+    left: 0;
+    top: calc(100% + 6px);
+    min-width: 220px;
+    padding: 8px;
+    background: #fff;
+    color: #111827;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 14px 28px rgba(11, 18, 32, 0.12);
+    display: none;
+    pointer-events: none;
+    z-index: 60;
+}
+.dropdown a {
+    display: block;
+    padding: 10px 12px;
+    border-radius: 10px;
+    color: #111827;
+    text-decoration: none;
+    font-size: 14px;
+}
+.dropdown a:hover {
+    background: #f7faff;
+}
+
+/* ng-show(true)일 때만 보이도록 */
+.dropdown[ng-show],
+.dropdown.ng-show {
+    display: block;
+    pointer-events: auto;
+}
+
+/* 모바일: 터치 사용성 향상 */
+@media (hover: none) {
+    .nav .item > a {
+        padding: 10px 12px;
+    }
+    .dropdown {
+        top: calc(100% + 8px);
+        min-width: 240px;
     }
 }

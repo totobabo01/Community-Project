@@ -1,3 +1,4 @@
+// src/main/resources/static/app.js
 (function () {
     'use strict';
 
@@ -71,33 +72,40 @@
             .otherwise({ redirectTo: '/users' });
     });
 
-    // ───────────────── Root (버스 탭은 ?tab=bus로 제어) ─────────────────
-    app.controller('RootCtrl', function ($scope, $location, AuthService, MenuService) {
+    // ───────────────── Root (버스 탭은 ?tab=bus로 제어) + 메뉴 열림 제어 개선 ─────────────────
+    app.controller('RootCtrl', function ($scope, $location, $document, $timeout, AuthService, MenuService) {
         $scope.me = null;
         $scope.menus = [];
         $scope.location = $location;
 
-        // 주소의 쿼리스트링으로 탭 동기화: #!/users?tab=bus 일 때만 표시
+        // /users에 tab 파라미터가 없으면 기본으로 bus 부여
+        function ensureDefaultUsersTab() {
+            if ($location.path() === '/users' && !$location.search().tab) {
+                $location.search('tab', 'bus');
+            }
+        }
+
         function syncBusTab() {
+            ensureDefaultUsersTab();
             $scope.showBusTab = $location.path() === '/users' && $location.search().tab === 'bus';
         }
         syncBusTab();
 
-        // "버스정보" 버튼 클릭 → 경로는 /users, 쿼리만 tab=bus
         $scope.goBusTab = function () {
             if ($location.path() !== '/users') $location.path('/users');
-            $location.search('tab', 'bus'); // 주소: #!/users?tab=bus
+            $location.search('tab', 'bus');
             syncBusTab();
         };
 
-        // 주소/라우트가 바뀔 때마다 탭 상태 반영
         $scope.$on('$locationChangeSuccess', syncBusTab);
         $scope.$on('$routeChangeSuccess', function () {
-            // /users를 벗어나면 tab 파라미터 제거
+            ensureDefaultUsersTab();
             if ($location.path() !== '/users' && $location.search().tab) {
                 $location.search('tab', null);
             }
             syncBusTab();
+            // 라우트 이동시 드롭다운 강제 닫기
+            closeAllMenus();
         });
 
         $scope.isListView = function () {
@@ -108,7 +116,64 @@
         AuthService.loadMe().finally(() => {
             $scope.me = AuthService.getMe();
         });
+
+        // 메뉴 열림/닫힘 안정화: hover-intent + click-toggle + 바깥 클릭 닫기
+        function decorateMenuNode(n) {
+            n._open = false;
+            n._hover = false;
+            n._closing = null; // timeout id
+            (n.children || []).forEach(decorateMenuNode);
+        }
+        function closeAllMenus() {
+            function dfs(arr) {
+                (arr || []).forEach((m) => {
+                    m._open = false;
+                    if (m._closing) {
+                        $timeout.cancel(m._closing);
+                        m._closing = null;
+                    }
+                    dfs(m.children);
+                });
+            }
+            dfs($scope.menus);
+        }
+
+        $scope.onMenuEnter = function (m) {
+            m._hover = true;
+            if (m._closing) {
+                $timeout.cancel(m._closing);
+                m._closing = null;
+            }
+            $timeout(() => {
+                m._open = true;
+            }, 60);
+        };
+        $scope.onMenuLeave = function (m) {
+            m._hover = false;
+            m._closing = $timeout(() => {
+                if (!m._hover) m._open = false;
+                m._closing = null;
+            }, 180);
+        };
+        $scope.onMenuClick = function (m, $event) {
+            m._open = !m._open;
+            if (m._open) {
+                ($scope.menus || []).forEach((root) => {
+                    if (root !== m) root._open = false;
+                });
+            }
+            if ($event) $event.stopPropagation();
+        };
+
+        const offDocClick = $document.on('click', function () {
+            $scope.$applyAsync(() => closeAllMenus());
+        });
+        $scope.$on('$destroy', function () {
+            if (offDocClick && offDocClick.off) offDocClick.off();
+        });
+
         MenuService.loadTree().then((tree) => {
+            (tree || []).forEach(decorateMenuNode);
             $scope.menus = tree || [];
         });
     });
@@ -342,10 +407,41 @@
     });
 
     // ───────────────── 게시판 ─────────────────
-    app.controller('BoardBaseCtrl', function ($scope, $http) {
+    app.controller('BoardBaseCtrl', function ($scope, $http, AuthService) {
         $scope.posts = [];
         $scope.loading = false;
         $scope.newPost = { title: '', content: '' };
+
+        // 로그인 정보(버튼 노출 + 클라이언트 가드)
+        AuthService.loadMe().finally(() => {
+            $scope.me = AuthService.getMe();
+        });
+
+        const isNum = (v) => typeof v === 'number' && isFinite(v);
+        const isNonEmptyStr = (s) => typeof s === 'string' && s.trim().length > 0;
+
+        // 권한 체크(클라 가드 — 서버에서도 반드시 검증됨)
+        function canEditPost(p) {
+            if (!$scope.me) return false;
+            return $scope.me.isAdmin || $scope.me.username === p.writerId;
+        }
+        function canEditComment(c) {
+            if (!$scope.me) return false;
+            return $scope.me.isAdmin || $scope.me.username === c.writerId;
+        }
+
+        function resolvePostKey(p) {
+            if (isNum(p.postId)) return { type: 'num', key: p.postId };
+            const candidates = [p.postKey, p.postIdStr, p.post_uuid, p.postUuid, p.uuid, p.id, p.key].filter(isNonEmptyStr);
+            if (candidates.length) return { type: 'str', key: candidates[0] };
+            return { type: 'none', key: null };
+        }
+
+        function makePostUid(p, idx) {
+            const cand = [isNum(p.postId) ? String(p.postId) : null, isNum(p.id) ? String(p.id) : null, p.post_uuid, p.postUuid, p.uuid, p.idStr, p.postIdStr, p.key, p._key != null ? String(p._key) : null].filter(isNonEmptyStr);
+            if (cand.length) return cand[0];
+            return 'tmp-' + Date.now() + '-' + (idx == null ? Math.random().toString(36).slice(2) : idx);
+        }
 
         $scope.loadPosts = function () {
             if (!$scope.boardCode) return;
@@ -353,7 +449,14 @@
             $http
                 .get('/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts')
                 .then((res) => {
-                    $scope.posts = Array.isArray(res.data) ? res.data : [];
+                    const list = Array.isArray(res.data) ? res.data : [];
+                    $scope.posts = list.map((p, i) => {
+                        const r = resolvePostKey(p);
+                        p._keyType = r.type;
+                        p._key = r.key;
+                        p._uid = makePostUid(p, i);
+                        return p;
+                    });
                 })
                 .finally(() => {
                     $scope.loading = false;
@@ -364,14 +467,24 @@
             const t = ($scope.newPost.title || '').trim();
             const c = ($scope.newPost.content || '').trim();
             if (!t || !c) return;
-            $http.post('/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts', { title: t, content: c }).then((res) => {
-                const created = res.data || {};
-                $scope.posts.unshift(created);
-                $scope.newPost = { title: '', content: '' };
-            });
+            $http
+                .post('/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts', { title: t, content: c })
+                .then((res) => {
+                    const created = res.data || {};
+                    const r = resolvePostKey(created);
+                    created._keyType = r.type;
+                    created._key = r.key;
+                    created._uid = makePostUid(created);
+                    $scope.posts.unshift(created);
+                    $scope.newPost = { title: '', content: '' };
+                })
+                .catch((err) => {
+                    alert((err && err.data && (err.data.message || err.data.error)) || '등록 실패');
+                });
         };
 
         $scope.startEditPost = function (p) {
+            if (!canEditPost(p)) return alert('본인이 쓴 글만 수정할 수 있습니다.');
             p._editing = true;
             p._editTitle = p.title;
             p._editContent = p.content;
@@ -381,50 +494,183 @@
             p._editTitle = '';
             p._editContent = '';
         };
+
         $scope.savePost = function (p) {
-            const id = p.postId;
+            if (!canEditPost(p)) return alert('본인이 쓴 글만 수정할 수 있습니다.');
             const payload = { title: (p._editTitle || '').trim(), content: (p._editContent || '').trim() };
             if (!payload.title || !payload.content) return;
-            $http.put('/api/posts/' + encodeURIComponent(id), payload).then(() => {
+
+            const onOk = () => {
                 p.title = payload.title;
                 p.content = payload.content;
                 $scope.cancelEditPost(p);
-            });
+            };
+            const onErr = (err, msg) => {
+                if (err && err.status === 403) alert('본인이 쓴 글만 수정할 수 있습니다.');
+                else alert(msg);
+            };
+
+            if (p._keyType === 'num') {
+                $http
+                    .put('/api/posts/' + encodeURIComponent(p._key), payload)
+                    .then(onOk)
+                    .catch((e) => onErr(e, '수정 실패'));
+            } else if (p._keyType === 'str') {
+                $http
+                    .put('/api/posts/key/' + encodeURIComponent(p._key), payload)
+                    .then(onOk)
+                    .catch((e) => onErr(e, '수정 실패(키)'));
+            } else {
+                alert('이 게시글은 수정 키 정보를 알 수 없어 수정할 수 없습니다.');
+            }
         };
+
         $scope.deletePost = function (p) {
-            const id = p.postId;
+            if (!canEditPost(p)) return alert('본인이 쓴 글만 삭제할 수 있습니다.');
             if (!confirm('이 게시글을 삭제할까요?')) return;
-            $http.delete('/api/posts/' + encodeURIComponent(id)).then(() => {
-                $scope.posts = $scope.posts.filter((x) => x.postId !== id);
-            });
+
+            const onOk = () => {
+                $scope.posts = $scope.posts.filter((x) => x !== p);
+            };
+            const tryDeleteByNumericId = () => {
+                const numId = typeof p.postId === 'number' && isFinite(p.postId) ? p.postId : typeof p.id === 'number' && isFinite(p.id) ? p.id : null;
+                if (numId == null) return Promise.reject();
+                return $http.delete('/api/posts/' + encodeURIComponent(numId)).then(onOk);
+            };
+            const onErr = (err, msg) => {
+                if (err && err.status === 403) alert('본인이 쓴 글만 삭제할 수 있습니다.');
+                else alert(msg);
+            };
+
+            if (p._keyType === 'num') {
+                $http
+                    .delete('/api/posts/' + encodeURIComponent(p._key))
+                    .then(onOk)
+                    .catch((e) => onErr(e, '삭제 실패'));
+            } else if (p._keyType === 'str') {
+                // 1차: key로 삭제, 실패하면 숫자 ID로 폴백 시도
+                $http
+                    .delete('/api/posts/key/' + encodeURIComponent(p._key))
+                    .then(onOk)
+                    .catch(() => tryDeleteByNumericId().catch((e2) => onErr(e2, '삭제 실패(키/ID 모두 실패)')));
+            } else {
+                // 키 정보 모르면 혹시 숫자 ID 있나 시도
+                tryDeleteByNumericId().catch((e) => onErr(e, '이 게시글은 삭제 키/ID 정보를 알 수 없어 삭제할 수 없습니다.'));
+            }
         };
 
         $scope.toggleComments = function (p) {
             p._showComments = !p._showComments;
             if (p._showComments && !p._commentsLoaded) $scope.loadComments(p);
         };
+
+        function decorateComments(arr) {
+            const baseTs = Date.now();
+            return (arr || []).map((c, i) => {
+                if (!c) return c;
+                c._uid = (c.uuid && 'c-' + c.uuid) || (typeof c.commentId === 'number' && isFinite(c.commentId) && 'c-' + c.commentId) || 'c-tmp-' + baseTs + '-' + i;
+                return c;
+            });
+        }
+
         $scope.loadComments = function (p) {
-            $http.get('/api/posts/' + encodeURIComponent(p.postId) + '/comments').then((res) => {
-                p.comments = Array.isArray(res.data) ? res.data : [];
+            const url = p._keyType === 'num' ? '/api/posts/' + encodeURIComponent(p._key) + '/comments' : p._keyType === 'str' ? '/api/posts/key/' + encodeURIComponent(p._key) + '/comments' : null;
+
+            if (!url) {
+                p.comments = [];
+                p._commentsLoaded = true;
+                return;
+            }
+
+            $http.get(url).then((res) => {
+                p.comments = decorateComments(Array.isArray(res.data) ? res.data : []);
                 p._commentsLoaded = true;
                 p._newComment = '';
             });
         };
+
         $scope.addComment = function (p) {
             const text = (p._newComment || '').trim();
             if (!text) return;
-            $http.post('/api/posts/' + encodeURIComponent(p.postId) + '/comments', { content: text }).then((res) => {
+
+            const url = p._keyType === 'num' ? '/api/posts/' + encodeURIComponent(p._key) + '/comments' : p._keyType === 'str' ? '/api/posts/key/' + encodeURIComponent(p._key) + '/comments' : null;
+
+            if (!url) return alert('이 글은 댓글 기능을 사용할 수 없습니다.');
+
+            $http.post(url, { content: text }).then((res) => {
                 const created = res.data || {};
                 p.comments = p.comments || [];
                 p.comments.push(created);
                 p._newComment = '';
             });
         };
+
+        // ───────── 댓글 수정/삭제(본인만) ─────────
+        $scope.startEditComment = function (c) {
+            if (!canEditComment(c)) return alert('본인이 쓴 댓글만 수정할 수 있습니다.');
+            c._editing = true;
+            c._editContent = c.content;
+        };
+        $scope.cancelEditComment = function (c) {
+            c._editing = false;
+            c._editContent = '';
+        };
+        $scope.saveComment = function (p, c) {
+            if (!canEditComment(c)) return alert('본인이 쓴 댓글만 수정할 수 있습니다.');
+            const newText = (c._editContent || '').trim();
+            if (!newText) return;
+            if (!c.uuid) return alert('이 댓글은 수정용 키를 알 수 없어 수정할 수 없습니다.');
+
+            $http
+                .put('/api/comments/key/' + encodeURIComponent(c.uuid), { content: newText })
+                .then(function (res) {
+                    c.content = newText;
+                    if (res && res.data && res.data.updatedAt) c.updatedAt = res.data.updatedAt;
+                    c._editing = false;
+                    c._editContent = '';
+                })
+                .catch(function (err) {
+                    if (err && err.status === 403) alert('본인이 쓴 댓글만 수정할 수 있습니다.');
+                    else alert('수정에 실패했습니다.');
+                });
+        };
+
+        // ★ 댓글 삭제: uuid 우선, 없으면 숫자 PK로 호환
         $scope.deleteComment = function (p, c) {
+            if (!canEditComment(c)) return alert('본인이 쓴 댓글만 삭제할 수 있습니다.');
             if (!confirm('댓글을 삭제할까요?')) return;
-            $http.delete('/api/comments/' + encodeURIComponent(c.commentId)).then(() => {
-                p.comments = (p.comments || []).filter((x) => x.commentId !== c.commentId);
-            });
+
+            if (c && c.uuid) {
+                $http
+                    .delete('/api/comments/key/' + encodeURIComponent(c.uuid))
+                    .then(function () {
+                        p.comments = (p.comments || []).filter(function (x) {
+                            return x.uuid !== c.uuid;
+                        });
+                    })
+                    .catch(function (err) {
+                        if (err && err.status === 403) alert('본인이 쓴 댓글만 삭제할 수 있습니다.');
+                        else alert('삭제 실패');
+                    });
+                return;
+            }
+
+            const id = c && c.commentId;
+            if (typeof id === 'number' && isFinite(id)) {
+                $http
+                    .delete('/api/comments/' + encodeURIComponent(id))
+                    .then(function () {
+                        p.comments = (p.comments || []).filter(function (x) {
+                            return x.commentId !== id;
+                        });
+                    })
+                    .catch(function () {
+                        alert('삭제 실패');
+                    });
+                return;
+            }
+
+            alert('이 댓글은 삭제용 키를 알 수 없어 삭제할 수 없습니다.');
         };
     });
 
@@ -576,7 +822,7 @@
             if (name && name !== u.name) payload.name = name;
             if (phone && phone !== (u.phone || u.tel || u.phoneNumber)) payload.phone = phone;
             if (email && email !== u.email) {
-                if (!/^[^@\s]+@[^\s@]+\.[^\s@]+$/.test(email)) return setUserStatus('error', '이메일 형식이 올바르지 않습니다.', 2000);
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setUserStatus('error', '이메일 형식이 올바르지 않습니다.', 2000);
                 payload.email = email;
             }
             if (!Object.keys(payload).length) return $scope.cancelEdit(u);
@@ -602,7 +848,6 @@
             const idKey = u && (u.user_id || u.userId || u.id);
             if (!idKey) return setUserStatus('error', 'ID를 찾을 수 없어 삭제할 수 없습니다.', 2000);
             if (!confirm(`정말로 삭제할까요? (ID: ${idKey})`)) return;
-
             $http
                 .delete('/user/' + encodeURIComponent(idKey))
                 .then(function () {
@@ -675,7 +920,8 @@
             $q.all(tasks)
                 .then(function () {
                     alert('저장 완료!');
-                    $location.path('/users');
+                    // ✅ 저장 후 DB 사용자 관리로 이동
+                    $location.path('/db-users');
                 })
                 .catch(function (e) {
                     console.error(e);
@@ -687,7 +933,8 @@
         };
 
         $scope.goBack = function () {
-            $location.path('/users');
+            // ✅ 뒤로가기 시에도 DB 사용자 관리로 이동
+            $location.path('/db-users');
         };
     });
 

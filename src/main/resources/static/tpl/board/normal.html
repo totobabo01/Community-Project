@@ -1,3 +1,4 @@
+<!-- src/main/resources/static/tpl/board/normal.html -->
 <div class="section-header">
     <h2 style="margin: 0">일반 게시판</h2>
 </div>
@@ -42,34 +43,48 @@
 >
     <li
         style="list-style: none; padding: 12px; border-bottom: 1px solid #eee"
-        ng-repeat="p in posts track by p.postId"
+        ng-repeat="p in posts track by (p.uuid || p.postId || p.id || p._uid || $index)"
     >
+        <!-- 게시글 보기 모드 -->
         <div ng-if="!p._editing">
             <strong>{{p.title}}</strong>
             <div style="color: #666; margin: 4px 0">{{p.content}}</div>
-            <small>{{p.writerName}} · {{p.createdAt | date:'yyyy-MM-dd HH:mm'}}</small>
+
+            <!-- ✅ 작성자 표기: 이름 || 아이디, 둘 다 있으면 '이름 (아이디)' -->
+            <small>
+                {{ p.writerName || p.writerId || '익명' }}
+                <span ng-if="p.writerName && p.writerId"> ({{ p.writerId }})</span>
+                · {{ p.createdAt | date:'yyyy-MM-dd HH:mm' }}
+            </small>
+
             <div style="margin-top: 6px">
+                <!-- 본인 글 또는 관리자만 수정/삭제 -->
                 <button
                     class="btn btn-ghost"
+                    ng-if="me && (me.isAdmin || me.username === p.writerId)"
                     ng-click="startEditPost(p)"
                 >
                     수정
                 </button>
+
                 <button
                     class="btn btn-danger"
+                    ng-if="me && (me.isAdmin || me.username === p.writerId)"
                     ng-click="deletePost(p)"
                 >
                     삭제
                 </button>
+
                 <button
                     class="btn"
                     ng-click="toggleComments(p)"
                 >
-                    {{p._showComments?'댓글 닫기':'댓글 보기'}}
+                    {{ p._showComments ? '댓글 닫기' : '댓글 보기' }}
                 </button>
             </div>
         </div>
 
+        <!-- 게시글 수정 모드 -->
         <div ng-if="p._editing">
             <input
                 class="inline-input"
@@ -97,26 +112,69 @@
             </div>
         </div>
 
+        <!-- 댓글 영역 -->
         <div
             ng-if="p._showComments"
             style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee"
         >
             <div ng-if="!p._commentsLoaded">댓글 불러오는 중...</div>
+
+            <!-- 댓글 목록 (uuid 우선으로 track) -->
             <div
-                ng-repeat="c in p.comments track by c.commentId"
+                ng-repeat="c in p.comments track by (c.uuid || c.commentId || c.id || c._uid || $index)"
                 style="margin: 6px 0"
             >
-                <strong>{{c.writerName}}</strong> :
-                <span>{{c.content}}</span>
-                <small style="color: #777"> · {{c.createdAt | date:'MM-dd HH:mm'}}</small>
-                <button
-                    class="btn btn-ghost"
-                    style="margin-left: 6px"
-                    ng-click="deleteComment(p,c)"
-                >
-                    삭제
-                </button>
+                <!-- 댓글 보기 모드 -->
+                <div ng-if="!c._editing">
+                    <strong>{{c.writerName || c.writerId}}</strong> :
+                    <span>{{c.content}}</span>
+                    <small style="color: #777"> · {{c.createdAt | date:'MM-dd HH:mm'}}</small>
+
+                    <!-- 본인 댓글 또는 관리자만 수정/삭제 -->
+                    <button
+                        class="btn btn-ghost"
+                        style="margin-left: 6px"
+                        ng-if="me && (me.isAdmin || me.username === c.writerId)"
+                        ng-click="startEditComment(c)"
+                    >
+                        수정
+                    </button>
+
+                    <button
+                        class="btn btn-danger"
+                        style="margin-left: 4px"
+                        ng-if="me && (me.isAdmin || me.username === c.writerId)"
+                        ng-click="deleteComment(p, c)"
+                    >
+                        삭제
+                    </button>
+                </div>
+
+                <!-- 댓글 수정 모드 -->
+                <div ng-if="c._editing">
+                    <textarea
+                        class="inline-input"
+                        style="height: 80px"
+                        ng-model="c._editContent"
+                    ></textarea>
+                    <div style="margin-top: 6px">
+                        <button
+                            class="btn btn-primary"
+                            ng-click="saveComment(p, c)"
+                        >
+                            저장
+                        </button>
+                        <button
+                            class="btn"
+                            ng-click="cancelEditComment(c)"
+                        >
+                            취소
+                        </button>
+                    </div>
+                </div>
             </div>
+
+            <!-- 새 댓글 입력 -->
             <div style="margin-top: 6px">
                 <input
                     class="inline-input"
