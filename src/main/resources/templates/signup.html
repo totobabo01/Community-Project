@@ -79,13 +79,6 @@
                 padding: 10px;
                 border-radius: 10px;
             }
-            .ok {
-                background: #e8f5e9;
-                color: #2e7d32;
-                border: 1px solid #c8e6c9;
-                padding: 10px;
-                border-radius: 10px;
-            }
             a {
                 color: #3478f6;
                 text-decoration: none;
@@ -101,26 +94,20 @@
             <h1>회원가입</h1>
             <p class="hint">필수 항목을 입력해 계정을 생성하세요.</p>
 
-            <!-- 결과/오류 메시지 -->
+            <!-- 오류 메시지: AuthController가 redirect:/signup?error=... 로 세팅 -->
             <div th:if="${param.error}">
                 <p
                     class="error"
                     th:switch="${param.error}"
                 >
-                    <span th:case="'invalid_userId'">아이디 형식을 확인해 주세요. (최대 16자)</span>
-                    <span th:case="'invalid_password'">비밀번호를 입력해 주세요.</span>
+                    <span th:case="'invalid_userId'">아이디 형식을 확인해 주세요. (영문/숫자/_ 최대 16자)</span>
+                    <span th:case="'invalid_password'">비밀번호를 4자 이상 입력해 주세요.</span>
                     <span th:case="'invalid_name'">이름을 입력해 주세요.</span>
-                    <span th:case="'invalid_email'">이메일을 입력해 주세요.</span>
+                    <span th:case="'invalid_email'">올바른 이메일을 입력해 주세요.</span>
                     <span th:case="'conflict'">이미 사용 중인 아이디 또는 이메일입니다.</span>
                     <span th:case="'server'">서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.</span>
                     <span th:case="*">요청 처리에 실패했습니다.</span>
                 </p>
-            </div>
-            <div
-                th:if="${param.registered}"
-                class="ok"
-            >
-                가입이 완료되었습니다. 로그인해 주세요.
             </div>
 
             <!-- ✅ 백엔드(AuthController) 파라미터명과 정확히 일치 -->
@@ -130,7 +117,7 @@
                 method="post"
                 autocomplete="off"
             >
-                <!-- CSRF (SecurityConfig에서 /signup을 CSRF 예외 처리했다면 없어도 동작하지만, 넣어도 무방) -->
+                <!-- CSRF 보호: 반드시 포함 -->
                 <input
                     type="hidden"
                     th:name="${_csrf.parameterName}"
@@ -143,6 +130,8 @@
                     name="userId"
                     type="text"
                     maxlength="16"
+                    pattern="^[A-Za-z0-9_]{1,16}$"
+                    title="영문/숫자/밑줄(_)만 허용, 최대 16자"
                     required
                     autofocus
                     placeholder="예: jhpark01"

@@ -18,6 +18,11 @@
         <script src="/app.js"></script>
 
         <style>
+            /* ✅ Angular의 ng-show/ng-hide 동작을 확실히 지원 */
+            .ng-hide {
+                display: none !important;
+            }
+
             [ng-cloak] {
                 display: none;
             }
@@ -82,6 +87,8 @@
             .nav > .item > a:hover {
                 background: rgba(255, 255, 255, 0.12);
             }
+
+            /* ✅ dropdown: 기본 block, ng-hide로만 숨김 */
             .dropdown {
                 position: absolute;
                 left: 0;
@@ -93,17 +100,9 @@
                 min-width: 200px;
                 padding: 8px;
                 border: 1px solid #e5e7eb;
-                display: none;
+                display: block;
                 z-index: 10;
             }
-            /* ❗ 호버로 강제 표시하던 규칙 제거(Angular 제어로만 열림/닫힘) */
-            /* .item:hover .dropdown { display:block; } */
-
-            .dropdown[ng-show],
-            .dropdown.ng-show {
-                display: block;
-            } /* ng-show(true)일 때 보이도록 보조 */
-
             .dropdown a {
                 display: block;
                 padding: 8px 10px;
@@ -199,6 +198,7 @@
                 color: #1565c0;
                 border: 1px solid #90caf9;
             }
+
             #output {
                 max-height: 400px;
                 overflow-y: auto;
@@ -220,6 +220,7 @@
             strong {
                 color: #2c3e50;
             }
+
             .user-table {
                 width: 100%;
                 border-collapse: collapse;
@@ -243,12 +244,14 @@
             .user-table tbody tr:hover td {
                 background: #fbfdff;
             }
+
             .inline-input {
                 width: 95%;
                 padding: 6px 8px;
                 border: 1px solid #d6dbe7;
                 border-radius: 8px;
             }
+
             .section-header {
                 display: flex;
                 align-items: center;
@@ -323,6 +326,33 @@
                 background: #f1f1f1;
                 color: #555;
             }
+
+            .hero {
+                display: flex;
+                gap: 24px;
+                align-items: center;
+                justify-content: center;
+                background: linear-gradient(135deg, #f5f9ff 0%, #eef7ff 100%);
+                border: 1px solid #e6eeff;
+                border-radius: 16px;
+                padding: 28px 24px;
+                margin-bottom: 10px;
+                text-align: center;
+            }
+            .hero h2 {
+                margin: 0 0 8px;
+                font-size: 24px;
+                color: #1f2d3d;
+            }
+            .hero p {
+                margin: 0;
+                color: #4a5568;
+            }
+            .hero .cta,
+            .hero-illustration,
+            .quick-cards {
+                display: none;
+            }
         </style>
     </head>
 
@@ -342,7 +372,6 @@
                     aria-label="주요 메뉴"
                     ng-init="mBoard={_open:false}; mAdmin={_open:false}"
                 >
-                    <!-- 클릭 시 /users?tab=bus 로 이동 (해시 추가 금지) -->
                     <div class="item">
                         <a
                             href=""
@@ -351,7 +380,7 @@
                         >
                     </div>
 
-                    <!-- 게시판 (지연 닫힘 + 클릭 토글 + 바깥클릭 닫힘) -->
+                    <!-- 게시판 -->
                     <div
                         class="item"
                         ng-mouseenter="onMenuEnter(mBoard)"
@@ -369,8 +398,8 @@
                             ng-show="mBoard._open"
                             ng-click="$event.stopPropagation()"
                         >
-                            <a ng-href="#!/board/bus">대구버스 게시판</a>
-                            <a ng-href="#!/board/normal">일반 게시판</a>
+                            <a ng-href="#/board/bus">대구버스 게시판</a>
+                            <a ng-href="#/board/normal">일반 게시판</a>
                         </div>
                     </div>
 
@@ -392,8 +421,8 @@
                             ng-show="mAdmin._open"
                             ng-click="$event.stopPropagation()"
                         >
-                            <a ng-href="#!/db-users">DB 사용자 관리</a>
-                            <a ng-href="#!/roles">권한 관리</a>
+                            <a ng-href="#/db-users">DB 사용자 관리</a>
+                            <a ng-href="#/roles">권한 관리</a>
                         </div>
                     </div>
                 </nav>
@@ -417,7 +446,22 @@
         </div>
 
         <main>
-            <!-- ✅ 컨트롤러가 관리하는 showBusTab 으로만 표시 -->
+            <!-- 홈 -->
+            <section
+                id="welcome"
+                role="region"
+                aria-label="환영"
+                ng-if="showWelcome"
+            >
+                <div class="hero">
+                    <div>
+                        <h2>홈페이지에 오신 것을 환영합니다 👋</h2>
+                        <p>상단 메뉴에서 원하시는 기능을 선택하여 이용해 주세요.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 버스 탭 -->
             <section
                 id="tab-bus"
                 role="region"
@@ -452,7 +496,11 @@
                         <div
                             class="status-box"
                             ng-if="statusMessage"
-                            ng-class="{'status-success': statusType==='success','status-error': statusType==='error','status-info': statusType==='info'}"
+                            ng-class="{
+                'status-success': statusType==='success',
+                'status-error': statusType==='error',
+                'status-info': statusType==='info'
+              }"
                         >
                             {{ statusMessage }}
                         </div>
@@ -473,7 +521,7 @@
             <div ng-view></div>
         </main>
 
-        <!-- 로그인/권한/탈퇴 -->
+        <!-- 로그인/권한/탈퇴 스크립트 (기존 유지) -->
         <script>
             (function () {
                 try {
@@ -525,7 +573,6 @@
                         window.location.href = '/login';
                     });
 
-                // 계정 탈퇴
                 document.addEventListener('click', function (e) {
                     if (e.target && e.target.id === 'btn-delete') {
                         e.preventDefault();
@@ -550,6 +597,5 @@
                 });
             })();
         </script>
-        <!-- 이전의 #tab-bus 해시 직접 토글 스크립트는 사용하지 않습니다 -->
     </body>
 </html>

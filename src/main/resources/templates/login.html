@@ -11,7 +11,7 @@
             name="viewport"
             content="width=device-width, initial-scale=1"
         />
-        <!-- 안전한 캐시무력화: #dates 유틸 사용 -->
+        <!-- 안전한 캐시 무력화 -->
         <link
             rel="stylesheet"
             th:href="@{/css/main.css(v=${#dates.createNow().time})}"
@@ -19,12 +19,7 @@
     </head>
     <body>
         <header class="topbar">
-            <div>
-                <div class="brand">
-                    <!-- 🚌 아이콘 제거, 텍스트만 표시 -->
-                    <span>실습 프로젝트</span>
-                </div>
-            </div>
+            <div class="brand"><span>실습 프로젝트</span></div>
         </header>
 
         <main
@@ -34,13 +29,22 @@
             <h1>로그인</h1>
             <p class="hint">서비스 이용을 위해 계정으로 로그인하세요.</p>
 
-            <!-- 가입 성공 안내만 유지 -->
-            <div th:if="${param.registered}">
+            <!-- ✅ 가입 성공 안내: flash attribute 로만 노출 -->
+            <div
+                th:if="${registered}"
+                aria-live="polite"
+                role="status"
+            >
                 <p class="success">가입이 완료되었습니다. 로그인해 주세요.</p>
             </div>
 
-            <!-- 실패 안내 -->
-            <div th:if="${param.error}">
+            <!-- ✅ 로그인 실패 안내: 컨트롤러에서 모델에 넣은 error 값만 사용 -->
+            <div
+                th:if="${error}"
+                aria-live="assertive"
+                role="alert"
+                id="login-error"
+            >
                 <p class="error">아이디 또는 비밀번호가 올바르지 않습니다.</p>
             </div>
 
@@ -48,26 +52,38 @@
                 th:action="@{/login}"
                 method="post"
                 autocomplete="on"
+                th:attr="aria-describedby=${error} ? 'login-error' : null"
             >
+                <!-- CSRF -->
                 <input
                     type="hidden"
                     th:name="${_csrf.parameterName}"
                     th:value="${_csrf.token}"
                 />
-                <label>아이디</label>
+
+                <label for="username">아이디</label>
                 <input
+                    id="username"
                     type="text"
                     name="username"
                     placeholder="아이디"
                     required
+                    autocomplete="username"
+                    autofocus
+                    th:value="${param.username}"
                 />
-                <label>비밀번호</label>
+                <!-- 실패 시 username 유지: Spring Security가 실패 후 리다이렉트에 파라미터를 남기지 않으면 빈 값이지만, 남겼다면 유지됩니다. -->
+
+                <label for="password">비밀번호</label>
                 <input
+                    id="password"
                     type="password"
                     name="password"
                     placeholder="비밀번호"
                     required
+                    autocomplete="current-password"
                 />
+
                 <div style="margin-top: 14px">
                     <button
                         type="submit"
