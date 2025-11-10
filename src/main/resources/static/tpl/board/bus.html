@@ -1,125 +1,412 @@
 <!-- src/main/resources/static/tpl/board/bus.html -->
-<div class="section-header">
-    <h2 style="margin: 0">대구버스 게시판</h2>
-</div>
-
-<!-- 로딩 표시 -->
 <div
-    class="status-box"
-    ng-if="loading"
+    class="board-shell"
+    ng-init="showComposer=false"
+    ng-cloak
 >
-    ⏳ 불러오는 중...
-</div>
-
-<!-- 새 글 작성 -->
-<form
-    ng-submit="createPost()"
-    style="margin: 12px 0"
->
-    <input
-        class="inline-input"
-        type="text"
-        ng-model="newPost.title"
-        placeholder="제목"
-    />
-    <br />
-    <textarea
-        class="inline-input"
-        style="height: 120px; margin-top: 8px"
-        ng-model="newPost.content"
-        placeholder="내용"
-    ></textarea>
-    <div style="margin-top: 8px">
-        <button
-            class="btn btn-primary"
-            type="submit"
-        >
-            등록
-        </button>
+    <!-- 헤더: 제목 + 우측 버튼들 -->
+    <div class="section-header card-header-like">
+        <div class="title-wrap">
+            <span class="title-dot"></span>
+            <h2 style="margin: 0">대구버스 게시판</h2>
+        </div>
+        <div class="header-actions">
+            <button
+                class="btn"
+                ng-click="reload ? reload() : (loadPosts && loadPosts())"
+                ng-disabled="loading"
+                aria-label="목록 새로 고침"
+            >
+                새로 고침
+            </button>
+            <button
+                class="btn primary"
+                ng-click="showComposer = !showComposer"
+                aria-expanded="{{!!showComposer}}"
+            >
+                {{ showComposer ? '작성 닫기' : '글 쓰기' }}
+            </button>
+        </div>
     </div>
-</form>
 
-<!-- ▽▽▽ 페이지네이션(상단) ▽▽▽ -->
-<div class="pager">
-    <div class="left">
-        <label class="label">페이지 크기</label>
+    <!-- 🔎 검색 바: 한 줄 정렬 -->
+    <div class="search-bar card-header-like search-inline">
+        <label class="label">검색 구분</label>
         <select
             class="select"
-            ng-model="pageSize"
-            ng-options="s for s in pageSizes"
-            ng-change="changeSize()"
-        ></select>
-        <span
-            class="muted"
-            style="margin-left: 8px"
-            >총 {{ total || 0 }}건</span
+            ng-model="q.type"
+            aria-label="검색 구분"
         >
+            <option value="author">작성자</option>
+            <option value="content">내용</option>
+            <option value="author_content">작성자+내용</option>
+            <option value="time">기간</option>
+        </select>
+
+        <!-- 키워드 검색 -->
+        <div
+            ng-if="q.type !== 'time'"
+            class="ctrl grow"
+        >
+            <input
+                class="input-like w100"
+                type="text"
+                placeholder="검색어 입력"
+                ng-model="q.keyword"
+                aria-label="검색어"
+            />
+        </div>
+
+        <!-- 기간 검색 -->
+        <div
+            ng-if="q.type === 'time'"
+            class="ctrl"
+        >
+            <label class="label sm">From</label>
+            <input
+                class="input-like"
+                type="date"
+                ng-model="q.from"
+                aria-label="시작일"
+            />
+            <label class="label sm">To</label>
+            <input
+                class="input-like"
+                type="date"
+                ng-model="q.to"
+                aria-label="종료일"
+            />
+        </div>
+
+        <div class="spacer"></div>
+
+        <button
+            class="btn"
+            ng-click="resetSearch()"
+            ng-disabled="loading"
+        >
+            초기화
+        </button>
+        <button
+            class="btn primary"
+            ng-click="applySearch()"
+            ng-disabled="loading"
+        >
+            검색
+        </button>
     </div>
 
-    <div class="right">
-        <button
-            class="btn-page"
-            ng-click="first()"
-            ng-disabled="page <= 0"
-        >
-            « 처음
-        </button>
-        <button
-            class="btn-page"
-            ng-click="prev()"
-            ng-disabled="page <= 0"
-        >
-            ‹ 이전
-        </button>
-
-        <button
-            class="btn-page"
-            ng-repeat="p in pageRange()"
-            ng-class="{ active: p === page }"
-            ng-click="go(p)"
-        >
-            {{ p + 1 }}
-        </button>
-
-        <button
-            class="btn-page"
-            ng-click="next()"
-            ng-disabled="page >= pages - 1"
-        >
-            다음 ›
-        </button>
-        <button
-            class="btn-page"
-            ng-click="last()"
-            ng-disabled="page >= pages - 1"
-        >
-            끝 »
-        </button>
-    </div>
-</div>
-<!-- △△△ 페이지네이션(상단) △△△ -->
-
-<ul
-    class="user-table"
-    style="padding: 0; border: 1px solid #edf0f5; border-radius: 12px"
->
-    <li
-        style="list-style: none; padding: 12px; border-bottom: 1px solid #eee"
-        ng-repeat="p in posts track by (p._uid || p.uuid || p.postId || p.id || $index)"
+    <!-- 로딩 표시 -->
+    <div
+        class="status-box"
+        ng-if="loading"
+        aria-live="polite"
     >
-        <!-- 게시글 보기 모드 -->
-        <div ng-if="!p._editing">
-            <strong>{{ p.title }}</strong>
-            <div style="color: #666; margin: 4px 0">{{ p.content }}</div>
+        ⏳ 불러오는 중...
+    </div>
 
-            <small>
-                {{ p.writerName || p.writerId || '익명' }}
-                <span ng-if="p.writerName && p.writerId"> ({{ p.writerId }})</span>
-                · {{ p.createdAt | date:'yyyy-MM-dd HH:mm' }}
-            </small>
+    <!-- 글쓰기(토글) -->
+    <div
+        class="composer-wrap"
+        ng-show="showComposer"
+    >
+        <form
+            ng-submit="createPost()"
+            style="margin: 12px 0"
+        >
+            <input
+                class="inline-input input-like"
+                type="text"
+                ng-model="newPost.title"
+                placeholder="제목"
+                aria-label="제목"
+            />
+            <br />
+            <textarea
+                class="inline-input input-like"
+                style="height: 120px; margin-top: 8px"
+                ng-model="newPost.content"
+                placeholder="내용"
+                aria-label="내용"
+            ></textarea>
+            <div style="margin-top: 8px; text-align: right">
+                <button
+                    class="btn primary"
+                    type="submit"
+                    ng-disabled="loading"
+                >
+                    등록
+                </button>
+            </div>
+        </form>
+    </div>
 
-            <div style="margin-top: 6px">
-                <!-- 본인 글 또는 관리자만 노출 -->
+    <!-- ▽▽▽ 페이지네이션(상단) ▽▽▽ -->
+    <div class="pager">
+        <div class="left">
+            <label class="label">페이지 크기</label>
+            <select
+                class="select"
+                ng-model="pageSize"
+                ng-options="s for s in pageSizes"
+                ng-change="changeSize()"
+                aria-label="페이지 크기 선택"
+            ></select>
+            <span
+                class="muted"
+                style="margin-left: 8px"
+                >총 {{ total || 0 }}건</span
+            >
+        </div>
+
+        <div class="right">
+            <button
+                class="btn-page"
+                ng-click="first()"
+                ng-disabled="page <= 0 || loading"
+                aria-label="첫 페이지"
+            >
+                « 처음
+            </button>
+            <button
+                class="btn-page"
+                ng-click="prev()"
+                ng-disabled="page <= 0 || loading"
+                aria-label="이전 페이지"
+            >
+                ‹ 이전
+            </button>
+
+            <button
+                class="btn-page"
+                ng-repeat="p in pageRange()"
+                ng-class="{ active: p === page }"
+                ng-click="go(p)"
+                ng-disabled="loading"
+                aria-label="{{ p + 1 }} 페이지"
+            >
+                {{ p + 1 }}
+            </button>
+
+            <button
+                class="btn-page"
+                ng-click="next()"
+                ng-disabled="page >= pages - 1 || loading"
+                aria-label="다음 페이지"
+            >
+                다음 ›
+            </button>
+            <button
+                class="btn-page"
+                ng-click="last()"
+                ng-disabled="page >= pages - 1 || loading"
+                aria-label="끝 페이지"
+            >
+                끝 »
+            </button>
+        </div>
+    </div>
+    <!-- △△△ 페이지네이션(상단) △△△ -->
+
+    <!-- 목록 카드 -->
+    <div class="board-card">
+        <!-- 테이블 헤더 -->
+        <div class="table-head">
+            <div class="c-title">제목</div>
+            <div class="c-writer">작성자</div>
+            <div class="c-date">작성일</div>
+            <div class="c-actions">작업</div>
+        </div>
+
+        <!-- 게시글 행 -->
+        <div
+            class="table-row"
+            ng-repeat="p in posts track by (p._uid || p.uuid || p.postId || p.id || $index)"
+        >
+            <!-- 제목/내용/댓글 -->
+            <div class="c-title">
+                <!-- 보기 모드 -->
+                <div ng-if="!p._editing">
+                    <div class="post-title"><strong>{{ p.title }}</strong></div>
+                    <div
+                        class="post-snippet"
+                        ng-if="p.content"
+                    >
+                        {{ p.content }}
+                    </div>
+                    <button
+                        class="btn light sm"
+                        ng-click="toggleComments(p)"
+                        ng-disabled="loading"
+                    >
+                        {{ p._showComments ? '댓글 닫기' : '댓글 보기' }}
+                    </button>
+                </div>
+
+                <!-- 수정 모드 -->
+                <div ng-if="p._editing">
+                    <input
+                        class="inline-input input-like"
+                        type="text"
+                        ng-model="p._editTitle"
+                        aria-label="제목 수정"
+                    />
+                    <textarea
+                        class="inline-input input-like"
+                        style="height: 100px; margin-top: 6px"
+                        ng-model="p._editContent"
+                        aria-label="내용 수정"
+                    ></textarea>
+                    <div style="margin-top: 6px">
+                        <button
+                            class="btn primary"
+                            ng-click="savePost(p)"
+                            ng-disabled="loading"
+                        >
+                            저장
+                        </button>
+                        <button
+                            class="btn light"
+                            ng-click="cancelEditPost(p)"
+                        >
+                            취소
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 댓글 영역 -->
+                <div
+                    ng-if="p._showComments"
+                    style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee"
+                >
+                    <div ng-if="!p._commentsLoaded">댓글 불러오는 중...</div>
+
+                    <!-- 댓글 목록 -->
+                    <div
+                        ng-repeat="c in p.comments track by (c._uid || c.uuid || c.commentId || c.id || $index)"
+                        ng-style="{ 'padding-left': ((c.depth || 0) * 16) + 'px' }"
+                        style="margin: 6px 0"
+                    >
+                        <!-- 댓글 보기 -->
+                        <div ng-if="!c._editing">
+                            <strong>{{ c.writerName || c.writerId }}</strong> :
+                            <span>{{ c.content }}</span>
+                            <small style="color: #777"> · {{ c.createdAt | date:'MM-dd HH:mm' }}</small>
+
+                            <button
+                                class="btn btn-warning"
+                                style="margin-left: 6px"
+                                ng-if="me && (me.isAdmin || me.username === c.writerId)"
+                                ng-click="startEditComment(c)"
+                            >
+                                수정
+                            </button>
+                            <button
+                                class="btn btn-danger"
+                                style="margin-left: 4px"
+                                ng-if="me && (me.isAdmin || me.username === c.writerId)"
+                                ng-click="deleteComment(p, c)"
+                            >
+                                삭제
+                            </button>
+                            <button
+                                class="btn light"
+                                style="margin-left: 4px"
+                                ng-if="!c._replying"
+                                ng-click="startReply(c)"
+                            >
+                                답글
+                            </button>
+                        </div>
+
+                        <!-- 댓글 수정 -->
+                        <div ng-if="c._editing">
+                            <textarea
+                                class="inline-input input-like"
+                                style="height: 80px"
+                                ng-model="c._editContent"
+                            ></textarea>
+                            <div style="margin-top: 6px">
+                                <button
+                                    class="btn primary"
+                                    ng-click="saveComment(p, c)"
+                                    ng-disabled="loading"
+                                >
+                                    저장
+                                </button>
+                                <button
+                                    class="btn light"
+                                    ng-click="cancelEditComment(c)"
+                                >
+                                    취소
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 대댓글 입력 -->
+                        <div
+                            ng-if="c._replying"
+                            style="margin-top: 6px"
+                        >
+                            <input
+                                class="inline-input input-like"
+                                type="text"
+                                ng-model="c._replyText"
+                                placeholder="답글을 입력하세요"
+                            />
+                            <button
+                                class="btn primary"
+                                style="margin-left: 6px"
+                                ng-click="submitReply(p, c)"
+                                ng-disabled="loading"
+                            >
+                                등록
+                            </button>
+                            <button
+                                class="btn light"
+                                style="margin-left: 4px"
+                                ng-click="cancelReply(c)"
+                            >
+                                취소
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 새 댓글 입력 -->
+                    <div style="margin-top: 6px">
+                        <input
+                            class="inline-input input-like"
+                            type="text"
+                            ng-model="p._newComment"
+                            placeholder="댓글 입력..."
+                        />
+                        <button
+                            class="btn primary"
+                            style="margin-left: 6px"
+                            ng-click="addComment(p)"
+                            ng-disabled="loading"
+                        >
+                            등록
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 작성자 -->
+            <div class="c-writer">
+                <span class="badge">{{ p.writerName || p.writerId || '익명' }}</span>
+                <span
+                    class="muted"
+                    ng-if="p.writerName && p.writerId"
+                    >({{ p.writerId }})</span
+                >
+            </div>
+
+            <!-- 작성일 -->
+            <div class="c-date">{{ (p.createdAt || p.created_at) | date:'yyyy-MM-dd HH:mm' }}</div>
+
+            <!-- 작업 -->
+            <div class="c-actions">
                 <button
                     class="btn btn-warning"
                     ng-if="me && (me.isAdmin || me.username === p.writerId)"
@@ -127,7 +414,6 @@
                 >
                     수정
                 </button>
-
                 <button
                     class="btn btn-danger"
                     ng-if="me && (me.isAdmin || me.username === p.writerId)"
@@ -135,214 +421,303 @@
                 >
                     삭제
                 </button>
-
-                <button
-                    class="btn btn-neutral"
-                    ng-click="toggleComments(p)"
-                >
-                    {{ p._showComments ? '댓글 닫기' : '댓글 보기' }}
-                </button>
             </div>
         </div>
 
-        <!-- 게시글 수정 모드 -->
-        <div ng-if="p._editing">
-            <input
-                class="inline-input"
-                type="text"
-                ng-model="p._editTitle"
-            />
-            <textarea
-                class="inline-input"
-                style="height: 100px; margin-top: 6px"
-                ng-model="p._editContent"
-            ></textarea>
-            <div style="margin-top: 6px">
-                <button
-                    class="btn btn-primary"
-                    ng-click="savePost(p)"
-                >
-                    저장
-                </button>
-                <button
-                    class="btn btn-neutral"
-                    ng-click="cancelEditPost(p)"
-                >
-                    취소
-                </button>
-            </div>
-        </div>
-
-        <!-- 댓글 영역 -->
+        <!-- 비어 있을 때 -->
         <div
-            ng-if="p._showComments"
-            style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee"
+            class="table-empty"
+            ng-if="!loading && (!posts || posts.length === 0)"
         >
-            <div ng-if="!p._commentsLoaded">댓글 불러오는 중...</div>
-
-            <!-- 댓글 목록 -->
-            <div
-                ng-repeat="c in p.comments track by (c._uid || c.uuid || c.commentId || c.id || $index)"
-                ng-style="{ 'padding-left': ((c.depth || 0) * 16) + 'px' }"
-                style="margin: 6px 0"
-            >
-                <!-- 댓글 보기 모드 -->
-                <div ng-if="!c._editing">
-                    <strong>{{ c.writerName || c.writerId }}</strong> :
-                    <span>{{ c.content }}</span>
-                    <small style="color: #777"> · {{ c.createdAt | date:'MM-dd HH:mm' }}</small>
-
-                    <!-- 본인 댓글 또는 관리자만 -->
-                    <button
-                        class="btn btn-warning"
-                        style="margin-left: 6px"
-                        ng-if="me && (me.isAdmin || me.username === c.writerId)"
-                        ng-click="startEditComment(c)"
-                    >
-                        수정
-                    </button>
-
-                    <button
-                        class="btn btn-danger"
-                        style="margin-left: 4px"
-                        ng-if="me && (me.isAdmin || me.username === c.writerId)"
-                        ng-click="deleteComment(p, c)"
-                    >
-                        삭제
-                    </button>
-
-                    <button
-                        class="btn btn-neutral"
-                        style="margin-left: 4px"
-                        ng-if="!c._replying"
-                        ng-click="startReply(c)"
-                    >
-                        답글
-                    </button>
-                </div>
-
-                <!-- 댓글 수정 모드 -->
-                <div
-                    ng-if="c._editing"
-                    style="margin-left: 0"
-                >
-                    <textarea
-                        class="inline-input"
-                        style="height: 80px"
-                        ng-model="c._editContent"
-                    ></textarea>
-                    <div style="margin-top: 6px">
-                        <button
-                            class="btn btn-primary"
-                            ng-click="saveComment(p, c)"
-                        >
-                            저장
-                        </button>
-                        <button
-                            class="btn btn-neutral"
-                            ng-click="cancelEditComment(c)"
-                        >
-                            취소
-                        </button>
-                    </div>
-                </div>
-
-                <!-- 대댓글 입력 영역 -->
-                <div
-                    ng-if="c._replying"
-                    style="margin-top: 6px"
-                >
-                    <input
-                        class="inline-input"
-                        type="text"
-                        ng-model="c._replyText"
-                        placeholder="답글을 입력하세요"
-                    />
-                    <button
-                        class="btn btn-primary"
-                        style="margin-left: 6px"
-                        ng-click="submitReply(p, c)"
-                    >
-                        등록
-                    </button>
-                    <button
-                        class="btn btn-neutral"
-                        style="margin-left: 4px"
-                        ng-click="cancelReply(c)"
-                    >
-                        취소
-                    </button>
-                </div>
-            </div>
-
-            <!-- 새 댓글 입력 -->
-            <div style="margin-top: 6px">
-                <input
-                    class="inline-input"
-                    type="text"
-                    ng-model="p._newComment"
-                    placeholder="댓글 입력..."
-                />
-                <button
-                    class="btn btn-primary"
-                    style="margin-left: 6px"
-                    ng-click="addComment(p)"
-                >
-                    등록
-                </button>
-            </div>
+            등록된 글이 없습니다.
         </div>
-    </li>
-</ul>
-
-<!-- ▽▽▽ 페이지네이션(하단) ▽▽▽ -->
-<div
-    class="pager"
-    style="margin-top: 10px"
->
-    <div class="left">
-        <span class="muted">페이지 {{ (page || 0) + 1 }} / {{ pages || 1 }}</span>
     </div>
 
-    <div class="right">
-        <button
-            class="btn-page"
-            ng-click="first()"
-            ng-disabled="page <= 0"
-        >
-            « 처음
-        </button>
-        <button
-            class="btn-page"
-            ng-click="prev()"
-            ng-disabled="page <= 0"
-        >
-            ‹ 이전
-        </button>
+    <!-- ▽▽▽ 페이지네이션(하단) ▽▽▽ -->
+    <div
+        class="pager"
+        style="margin-top: 10px"
+    >
+        <div class="left">
+            <span class="muted">페이지 {{ (page || 0) + 1 }} / {{ pages || 1 }}</span>
+        </div>
 
-        <button
-            class="btn-page"
-            ng-repeat="p in pageRange()"
-            ng-class="{ active: p === page }"
-            ng-click="go(p)"
-        >
-            {{ p + 1 }}
-        </button>
+        <div class="right">
+            <button
+                class="btn-page"
+                ng-click="first()"
+                ng-disabled="page <= 0 || loading"
+            >
+                « 처음
+            </button>
+            <button
+                class="btn-page"
+                ng-click="prev()"
+                ng-disabled="page <= 0 || loading"
+            >
+                ‹ 이전
+            </button>
 
-        <button
-            class="btn-page"
-            ng-click="next()"
-            ng-disabled="page >= pages - 1"
-        >
-            다음 ›
-        </button>
-        <button
-            class="btn-page"
-            ng-click="last()"
-            ng-disabled="page >= pages - 1"
-        >
-            끝 »
-        </button>
+            <button
+                class="btn-page"
+                ng-repeat="p in pageRange()"
+                ng-class="{ active: p === page }"
+                ng-click="go(p)"
+                ng-disabled="loading"
+            >
+                {{ p + 1 }}
+            </button>
+
+            <button
+                class="btn-page"
+                ng-click="next()"
+                ng-disabled="page >= pages - 1 || loading"
+            >
+                다음 ›
+            </button>
+            <button
+                class="btn-page"
+                ng-click="last()"
+                ng-disabled="page >= pages - 1 || loading"
+            >
+                끝 »
+            </button>
+        </div>
     </div>
+    <!-- △△△ 페이지네이션(하단) △△△ -->
 </div>
-<!-- △△△ 페이지네이션(하단) △△△ -->
+
+<!-- ===== 스타일(페이지 내부 전용) ===== -->
+<style>
+    [ng-cloak] {
+        display: none;
+    }
+    .board-shell {
+        padding: 12px;
+    }
+
+    /* 상단 헤더 / 검색 바 공용 카드 */
+    .card-header-like {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: #fff;
+        border: 1px solid #edf0f5;
+        border-radius: 12px;
+        padding: 12px 16px;
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.04);
+        margin-bottom: 12px;
+    }
+    .title-wrap {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .title-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #2d7ef7;
+    }
+
+    /* 🔎 검색 바: 한 줄 정렬 */
+    .search-inline {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: nowrap;
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+    .search-inline .ctrl {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .search-inline .grow {
+        flex: 1 1 360px;
+    }
+    .search-inline .w100 {
+        width: 100%;
+    }
+    .search-inline .spacer {
+        flex: 1 1 auto;
+        min-width: 12px;
+    }
+
+    /* 좁은 화면에서는 자동 줄바꿈 */
+    @media (max-width: 820px) {
+        .search-inline {
+            flex-wrap: wrap;
+        }
+        .search-inline .spacer {
+            display: none;
+        }
+        .search-inline .grow {
+            flex: 1 1 100%;
+        }
+    }
+
+    /* 버튼 */
+    .btn {
+        border: 1px solid #d7ddea;
+        background: #fff;
+        padding: 7px 12px;
+        border-radius: 10px;
+        font-size: 14px;
+        cursor: pointer;
+    }
+    .btn:hover {
+        background: #f7f9fc;
+    }
+    .btn.primary {
+        background: #2d7ef7;
+        color: #fff;
+        border-color: #2d7ef7;
+    }
+    .btn.light {
+        background: #f6f8fb;
+        border-color: #e3e8f2;
+    }
+    .btn.sm {
+        padding: 4px 8px;
+        font-size: 12px;
+    }
+    .btn-page {
+        border: 1px solid #d7ddea;
+        background: #fff;
+        padding: 6px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+    }
+    .btn-page.active {
+        background: #2d7ef7;
+        color: #fff;
+        border-color: #2d7ef7;
+    }
+    .btn-danger {
+        background: #e74c3c;
+        color: #fff;
+        border-color: #e74c3c;
+    }
+    .btn-warning {
+        background: #f39c12;
+        color: #fff;
+        border-color: #f39c12;
+    }
+
+    /* 인풋 */
+    .input-like {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #d7ddea;
+        border-radius: 10px;
+        padding: 10px 12px;
+        outline: none;
+        font-size: 14px;
+        min-width: 160px;
+    }
+    .input-like:focus {
+        border-color: #2d7ef7;
+    }
+
+    /* 라벨/셀렉트 */
+    .label {
+        margin-right: 6px;
+        color: #5a6a85;
+    }
+    .label.sm {
+        margin: 0 6px 0 0;
+        font-size: 12px;
+        color: #6b7280;
+    }
+    .select {
+        border: 1px solid #d7ddea;
+        border-radius: 8px;
+        padding: 6px 8px;
+        outline: none;
+        background: #fff;
+    }
+
+    /* 작성 폼 */
+    .composer-wrap {
+        background: #fff;
+        border: 1px solid #edf0f5;
+        border-radius: 12px;
+        padding: 12px 16px;
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.04);
+        margin-bottom: 12px;
+    }
+
+    /* 카드(목록) */
+    .board-card {
+        background: #fff;
+        border: 1px solid #edf0f5;
+        border-radius: 12px;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.06);
+        overflow: hidden;
+    }
+
+    /* 테이블 레이아웃 */
+    .table-head,
+    .table-row {
+        display: grid;
+        grid-template-columns: 1fr 180px 180px 220px;
+        gap: 12px;
+        align-items: center;
+        padding: 14px 16px;
+    }
+    .table-head {
+        color: #5a6a85;
+        font-weight: 600;
+        font-size: 13px;
+        background: #f8fafc;
+        border-bottom: 1px solid #eef2f7;
+    }
+    .table-row {
+        border-bottom: 1px solid #f0f3f8;
+    }
+    .table-row:hover {
+        background: #fbfdff;
+    }
+    .table-empty {
+        padding: 24px 16px;
+        color: #8a94a6;
+    }
+
+    /* 셀 내용 */
+    .post-title {
+        font-weight: 600;
+        margin-bottom: 6px;
+    }
+    .post-snippet {
+        color: #6b7280;
+        font-size: 13px;
+        margin-bottom: 8px;
+    }
+    .badge {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        background: #eef4ff;
+        color: #3556e0;
+        border: 1px solid #dce6ff;
+    }
+
+    /* 페이지네이션 바 */
+    .pager {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: #fff;
+        border: 1px solid #edf0f5;
+        border-radius: 12px;
+        padding: 10px 12px;
+        margin: 12px 0;
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.04);
+    }
+    .pager .muted {
+        color: #6b7280;
+    }
+</style>

@@ -112,7 +112,7 @@ input[type='email'] {
 }
 input:focus {
     border-color: var(--sky-400);
-    box-shadow: 0 0 0 4px rgba(67, 176, 255, 0.18);
+    box-shadow: 0 0 0 4px rgba(43, 150, 255, 0.18);
 }
 button {
     height: 44px;
@@ -184,9 +184,7 @@ pre {
 }
 
 /* ─────────────────────────────────────────────
-   Navigation & Dropdown (안정적인 열림/닫힘)
-   - Angular ng-show 로만 표시
-   - 깜빡임 방지: 패딩/간격 보정, pointer-events 제어
+   Navigation & Dropdown (AngularJS ng-show 대응)
    ───────────────────────────────────────────── */
 .nav {
     display: flex;
@@ -196,7 +194,7 @@ pre {
 }
 .nav .item {
     position: relative;
-    padding-bottom: 8px; /* 아래로 살짝 패딩 → 마우스 이동 시 끊김 완화 */
+    padding-bottom: 8px;
 }
 .nav .item > a {
     color: var(--ink-900);
@@ -212,6 +210,7 @@ pre {
     background: rgba(255, 255, 255, 0.9);
 }
 
+/* 기본은 숨김 */
 .dropdown {
     position: absolute;
     left: 0;
@@ -239,14 +238,15 @@ pre {
     background: #f7faff;
 }
 
-/* ng-show(true)일 때만 보이도록 */
-.dropdown[ng-show],
-.dropdown.ng-show {
+/* AngularJS: ng-show/ ng-hide 대응 */
+.ng-hide {
+    display: none !important;
+} /* angular.css 미포함 대비 */
+.dropdown:not(.ng-hide) {
     display: block;
     pointer-events: auto;
 }
 
-/* 모바일: 터치 사용성 향상 */
 @media (hover: none) {
     .nav .item > a {
         padding: 10px 12px;

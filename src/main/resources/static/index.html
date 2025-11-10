@@ -22,7 +22,6 @@
             .ng-hide {
                 display: none !important;
             }
-
             [ng-cloak] {
                 display: none;
             }
@@ -87,7 +86,6 @@
             .nav > .item > a:hover {
                 background: rgba(255, 255, 255, 0.12);
             }
-
             /* ✅ dropdown: 기본 block, ng-hide로만 숨김 */
             .dropdown {
                 position: absolute;
@@ -398,8 +396,17 @@
                             ng-show="mBoard._open"
                             ng-click="$event.stopPropagation()"
                         >
-                            <a ng-href="#/board/bus">대구버스 게시판</a>
-                            <a ng-href="#/board/normal">일반 게시판</a>
+                            <!-- ✅ href + ng-click(navTo) 같이 사용 -->
+                            <a
+                                href="#/board/bus"
+                                ng-click="navTo('#/board/bus', $event)"
+                                >대구버스 게시판</a
+                            >
+                            <a
+                                href="#/board/normal"
+                                ng-click="navTo('#/board/normal', $event)"
+                                >일반 게시판</a
+                            >
                         </div>
                     </div>
 
@@ -421,8 +428,17 @@
                             ng-show="mAdmin._open"
                             ng-click="$event.stopPropagation()"
                         >
-                            <a ng-href="#/db-users">DB 사용자 관리</a>
-                            <a ng-href="#/roles">권한 관리</a>
+                            <!-- ✅ 여기서도 navTo 강제 -->
+                            <a
+                                href="#/db-users"
+                                ng-click="navTo('#/db-users', $event)"
+                                >DB 사용자 관리</a
+                            >
+                            <a
+                                href="#/roles"
+                                ng-click="navTo('#/roles', $event)"
+                                >권한 관리</a
+                            >
                         </div>
                     </div>
                 </nav>
@@ -496,11 +512,7 @@
                         <div
                             class="status-box"
                             ng-if="statusMessage"
-                            ng-class="{
-                'status-success': statusType==='success',
-                'status-error': statusType==='error',
-                'status-info': statusType==='info'
-              }"
+                            ng-class="{'status-success':statusType==='success','status-error':statusType==='error','status-info':statusType==='info'}"
                         >
                             {{ statusMessage }}
                         </div>

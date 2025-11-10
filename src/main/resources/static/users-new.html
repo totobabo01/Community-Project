@@ -1,157 +1,311 @@
-<!-- /users-new.html -->
-<section
-    class="card"
-    ng-controller="UsersNewCtrl"
->
-    <!-- 헤더 -->
-    <div
-        class="row"
-        style="align-items: center; gap: 10px"
-    >
-        <button
-            class="ghost"
-            ng-click="goBack()"
-        >
-            ← 뒤로
-        </button>
-        <h2 style="margin: 0">사용자 여러 명 추가</h2>
-        <span
-            class="pill"
-            style="margin-left: 8px; background: #e8f2ff; border: 1px solid #cfe1ff; color: #2c63ca"
-        >
-            아이디·이름·전화번호·이메일
-        </span>
-    </div>
+<div class="multi-add">
+    <!-- 바깥 카드 -->
+    <div class="stack-outer">
+        <div class="stack-inner">
+            <!-- 헤더: 뒤로가기 + 제목 + (우측 행동영역은 비움) -->
+            <div class="section-header">
+                <div class="section-title">
+                    <button
+                        class="btn btn-ghost sm"
+                        ng-click="goBack()"
+                    >
+                        ← 뒤로
+                    </button>
+                    <h2>사용자 여러 명 추가</h2>
+                </div>
+                <!-- 필요 시 오른쪽 액션 버튼 배치 -->
+                <div class="actions"></div>
+            </div>
 
-    <!-- 저장 폼 -->
-    <form
-        name="frm"
-        novalidate
-        ng-submit="saveAll(frm)"
-    >
-        <table class="user-table">
-            <thead>
-                <tr>
-                    <th style="width: 44px; text-align: center">#</th>
-                    <th style="width: 160px">아이디<span class="muted"> (최대 16자)</span></th>
-                    <th style="width: 200px">이름<span class="muted"> *</span></th>
-                    <th style="width: 220px">전화번호</th>
-                    <th>이메일<span class="muted"> *</span></th>
-                    <th style="width: 120px; text-align: center">
+            <!-- 안내 리본 -->
+            <div class="hint-ribbon">
+                <span class="pill">한 번에 저장</span>
+                이름·이메일은 필수입니다. (아이디는 비워두면 서버에서 자동 생성 가능)
+            </div>
+
+            <!-- 입력 테이블 박스 -->
+            <div
+                class="list-box"
+                style="padding: 14px 14px 6px"
+            >
+                <div class="grid table-head">
+                    <div class="col col-num">#</div>
+                    <div class="col">아이디 (최대 16자)</div>
+                    <div class="col">이름 *</div>
+                    <div class="col">전화번호</div>
+                    <div class="col">이메일 *</div>
+                    <div class="col col-actions">행</div>
+                </div>
+
+                <!-- 행들 -->
+                <div
+                    class="grid table-row"
+                    ng-repeat="r in rows track by $index"
+                >
+                    <div class="col col-num">{{$index + 1}}</div>
+
+                    <div class="col">
+                        <input
+                            class="inline-input"
+                            type="text"
+                            placeholder="예: sam09"
+                            ng-model="r.userId"
+                            maxlength="16"
+                        />
+                    </div>
+
+                    <div class="col">
+                        <input
+                            class="inline-input required"
+                            type="text"
+                            placeholder="예: 홍길동"
+                            ng-model="r.name"
+                        />
+                    </div>
+
+                    <div class="col">
+                        <input
+                            class="inline-input"
+                            type="text"
+                            placeholder="예: 010-1234-5678"
+                            ng-model="r.phone"
+                        />
+                    </div>
+
+                    <div class="col">
+                        <input
+                            class="inline-input required"
+                            type="email"
+                            placeholder="예: hong@example.com"
+                            ng-model="r.email"
+                        />
+                    </div>
+
+                    <div class="col col-actions">
                         <button
-                            type="button"
-                            class="primary"
-                            ng-click="addRow()"
+                            class="btn tiny"
+                            ng-click="addRowAt($index)"
                         >
                             ＋
                         </button>
-                    </th>
-                </tr>
-            </thead>
-
-            <tbody>
-                <!-- 한 행 -->
-                <tr ng-repeat="r in rows track by $index">
-                    <td style="text-align: center">{{$index + 1}}</td>
-
-                    <!-- 아이디 -->
-                    <td>
-                        <input
-                            type="text"
-                            class="inline-input"
-                            name="uid{{$index}}"
-                            ng-model="r.user_id"
-                            maxlength="16"
-                            placeholder="예: sam09"
-                            ng-pattern="/^[A-Za-z0-9_]{0,16}$/"
-                        />
-                        <small
-                            class="error"
-                            ng-if="frm['uid' + $index].$invalid && frm['uid' + $index].$touched"
-                        >
-                            영문/숫자/밑줄만 허용(최대 16자)
-                        </small>
-                    </td>
-
-                    <!-- 이름 -->
-                    <td>
-                        <input
-                            type="text"
-                            class="inline-input"
-                            name="name{{$index}}"
-                            ng-model="r.name"
-                            placeholder="예: 홍길동"
-                            required
-                        />
-                        <small
-                            class="error"
-                            ng-if="frm['name' + $index].$invalid && frm['name' + $index].$touched"
-                        >
-                            이름은 필수입니다.
-                        </small>
-                    </td>
-
-                    <!-- 전화번호 -->
-                    <td>
-                        <input
-                            type="text"
-                            class="inline-input"
-                            name="phone{{$index}}"
-                            ng-model="r.phone"
-                            placeholder="예: 010-1234-5678"
-                        />
-                    </td>
-
-                    <!-- 이메일 -->
-                    <td>
-                        <input
-                            type="email"
-                            class="inline-input"
-                            name="email{{$index}}"
-                            ng-model="r.email"
-                            placeholder="예: hong@example.com"
-                            required
-                        />
-                        <small
-                            class="error"
-                            ng-if="frm['email' + $index].$invalid && frm['email' + $index].$touched"
-                        >
-                            이메일 형식이 올바르지 않습니다.
-                        </small>
-                    </td>
-
-                    <!-- 삭제 -->
-                    <td style="text-align: center">
                         <button
-                            type="button"
-                            class="danger"
+                            class="btn tiny danger"
                             ng-click="removeRow($index)"
-                            ng-disabled="rows.length <= 1"
+                            ng-disabled="rows.length===1"
                         >
                             －
                         </button>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
+                    </div>
+                </div>
+            </div>
 
-        <!-- 저장 버튼 -->
-        <div
-            class="row"
-            style="margin-top: 12px; align-items: center; gap: 12px"
-        >
-            <button
-                type="submit"
-                class="primary"
-                ng-disabled="frm.$invalid || saving"
-            >
-                {{ saving ? '저장 중...' : '한 번에 저장' }}
-            </button>
-            <span
-                class="muted"
-                ng-if="!saving"
-                >이름·이메일은 필수입니다. (아이디는 비워두면 서버에서 생성 가능)</span
-            >
+            <!-- 하단 버튼줄 -->
+            <div class="footer-bar">
+                <div class="left">
+                    <button
+                        class="btn"
+                        ng-click="addRow()"
+                    >
+                        행 추가
+                    </button>
+                    <button
+                        class="btn"
+                        ng-click="addN(5)"
+                    >
+                        +5
+                    </button>
+                </div>
+                <div class="right">
+                    <button
+                        class="btn btn-ghost"
+                        ng-click="goBack()"
+                    >
+                        취소
+                    </button>
+                    <button
+                        class="btn btn-primary"
+                        ng-click="saveAll()"
+                        ng-disabled="saving"
+                    >
+                        {{ saving ? '저장 중…' : '저장' }}
+                    </button>
+                </div>
+            </div>
         </div>
-    </form>
-</section>
+    </div>
+
+    <!-- ▼ 스타일: .multi-add 범위에만 적용 -->
+    <style>
+        .multi-add .stack-outer {
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(31, 38, 135, 0.08);
+            padding: 18px;
+            max-width: 980px;
+            margin: 0 auto;
+        }
+        .multi-add .stack-inner {
+            background: #fbfdff;
+            border: 1px solid #edf0f5;
+            border-radius: 12px;
+            padding: 18px;
+        }
+        .multi-add .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+        .multi-add .section-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .multi-add .section-title h2 {
+            margin: 0;
+            font-size: 20px;
+            font-weight: 700;
+        }
+        .multi-add .actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .multi-add .hint-ribbon {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #f7fbff;
+            border: 1px solid #e9eef5;
+            color: #5d6b82;
+            border-radius: 10px;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            font-size: 13px;
+        }
+        .multi-add .pill {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: #eef6ff;
+            color: #2b77e7;
+            font-weight: 600;
+            font-size: 12px;
+            border: 1px solid #d9e8ff;
+        }
+
+        /* 표 형태 레이아웃 */
+        .multi-add .grid {
+            display: grid;
+            grid-template-columns: 56px 1fr 1fr 1fr 1.4fr 96px;
+            gap: 10px;
+            align-items: center;
+        }
+        .multi-add .table-head {
+            background: #ffffff;
+            border: 1px solid #e9eef5;
+            border-radius: 10px;
+            padding: 12px;
+            font-size: 13px;
+            color: #6a7a92;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .multi-add .table-row {
+            background: #fff;
+            border: 1px solid #e9eef5;
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 8px;
+        }
+        /* ⬇⬇ 문제였던 부분 수정: `.col.#` → `.col.col-num` */
+        .multi-add .col.col-num {
+            text-align: center;
+            color: #60708a;
+            font-weight: 600;
+        }
+
+        .multi-add .inline-input {
+            width: 100%;
+            height: 36px;
+            border: 1px solid #e3e9f3;
+            border-radius: 8px;
+            padding: 0 10px;
+            font-size: 14px;
+            outline: none;
+            background: #fbfdff;
+            transition: box-shadow 0.15s ease, border-color 0.15s ease;
+        }
+        .multi-add .inline-input:focus {
+            border-color: #cfe0ff;
+            box-shadow: 0 0 0 3px rgba(76, 132, 255, 0.15);
+            background: #fff;
+        }
+        .multi-add .inline-input.required {
+            background: #fffdf7;
+        }
+        .multi-add .col-actions {
+            display: flex;
+            gap: 6px;
+            justify-content: center;
+        }
+
+        /* 버튼들 – 목록 화면과 동일 계열 */
+        .multi-add .btn {
+            border: 1px solid #e1e7f0;
+            background: #fff;
+            border-radius: 10px;
+            padding: 8px 12px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: transform 0.03s ease, box-shadow 0.12s ease, background 0.12s ease;
+        }
+        .multi-add .btn:hover {
+            background: #f8fbff;
+            box-shadow: 0 3px 10px rgba(31, 38, 135, 0.08);
+        }
+        .multi-add .btn:active {
+            transform: translateY(1px);
+        }
+
+        .multi-add .btn-ghost {
+            background: #f7f9fc;
+        }
+        .multi-add .btn-primary {
+            background: #4c84ff;
+            color: #fff;
+            border-color: #4c84ff;
+        }
+        .multi-add .btn-primary:hover {
+            box-shadow: 0 6px 16px rgba(76, 132, 255, 0.3);
+        }
+        .multi-add .btn.danger {
+            background: #ff6b6b;
+            color: #fff;
+            border-color: #ff6b6b;
+        }
+        .multi-add .btn.sm {
+            padding: 6px 10px;
+            font-size: 13px;
+            border-radius: 8px;
+        }
+        .multi-add .btn.tiny {
+            padding: 4px 8px;
+            font-size: 12px;
+            border-radius: 8px;
+        }
+
+        .multi-add .footer-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-top: 14px;
+        }
+        .multi-add .footer-bar .left,
+        .multi-add .footer-bar .right {
+            display: flex;
+            gap: 8px;
+        }
+    </style>
+</div>

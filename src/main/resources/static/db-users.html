@@ -1,6 +1,196 @@
 <!-- /db-users.html -->
 <div style="background: #fff; border-radius: 16px; box-shadow: 0 10px 30px rgba(31, 38, 135, 0.08); padding: 18px">
     <div style="background: #fbfdff; border: 1px solid #edf0f5; border-radius: 12px; padding: 18px">
+        <!-- ▼▼ 검색툴바 전용 스타일(스코프: .search-toolbar 안에서만 적용) ▼▼ -->
+        <style>
+            /* 행 전체 컨테이너: 왼쪽(검색) ┃ 오른쪽(페이지 크기) */
+            .searchbar-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                margin: 10px 0 14px;
+            }
+            /* 공통 툴바 박스 */
+            .search-toolbar {
+                display: grid;
+                gap: 10px;
+                background: #ffffff;
+                border: 1px solid #e9eef5;
+                border-radius: 10px;
+                padding: 10px 12px;
+                box-shadow: 0 6px 18px rgba(31, 38, 135, 0.06);
+            }
+            /* 왼쪽 툴바는 4열: 셀렉트, 인풋, 초기화, 검색 */
+            .search-toolbar.left {
+                grid-template-columns: 140px 1fr auto auto;
+                min-width: 420px;
+            }
+            /* 오른쪽 툴바는 2열: 페이지크기/총건수 */
+            .search-toolbar.right {
+                grid-template-columns: auto auto;
+                width: auto;
+                min-width: 260px;
+            }
+            /* 각 필드 */
+            .search-toolbar .field {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .search-toolbar .field label {
+                font-size: 12px;
+                color: #6b7785;
+                white-space: nowrap;
+            }
+            /* 인풋/셀렉트 톤 */
+            .search-toolbar input[type='search'],
+            .search-toolbar select {
+                height: 34px;
+                padding: 0 10px;
+                border-radius: 8px;
+                border: 1px solid #dde3ee;
+                outline: none;
+                background: #fbfdff;
+            }
+            .search-toolbar input[type='search']:focus,
+            .search-toolbar select:focus {
+                border-color: #98b7ff;
+                box-shadow: 0 0 0 3px rgba(98, 139, 255, 0.15);
+            }
+            /* 오른쪽 정렬용 */
+            .search-toolbar .muted {
+                color: #8b95a1;
+                font-size: 13px;
+            }
+            /* 페이지 버튼들과 간격 살짝 */
+            .pager .btn-page {
+                margin-left: 4px;
+            }
+            /* pill */
+            .pill {
+                display: inline-block;
+                padding: 2px 8px;
+                border-radius: 999px;
+                font-size: 12px;
+            }
+            .pill.green {
+                background: #e8fff1;
+                color: #0b8f3a;
+            }
+            .pill.gray {
+                background: #eff2f6;
+                color: #5b6470;
+            }
+            /* 테이블 기본 */
+            .user-table {
+                width: 100%;
+                border-collapse: collapse;
+                background: #fff;
+                border: 1px solid #edf0f5;
+                border-radius: 10px;
+                overflow: hidden;
+            }
+            .user-table th,
+            .user-table td {
+                padding: 10px 12px;
+                border-bottom: 1px solid #f1f3f7;
+                vertical-align: middle;
+            }
+            .user-table thead th {
+                background: #f7f9fc;
+                font-weight: 600;
+                color: #3b4350;
+            }
+            .inline-input {
+                width: 100%;
+                height: 32px;
+                border: 1px solid #dde3ee;
+                border-radius: 8px;
+                padding: 0 10px;
+                background: #fbfdff;
+            }
+            .status-box {
+                margin: 10px 0;
+                padding: 10px 12px;
+                border-radius: 8px;
+                background: #f7f9fe;
+                color: #345;
+            }
+            .status-success {
+                background: #e9fff2;
+                color: #116a36;
+            }
+            .status-error {
+                background: #ffecec;
+                color: #9c2b2b;
+            }
+            .status-info {
+                background: #f3f7ff;
+                color: #2f4b90;
+            }
+            .btn {
+                padding: 6px 10px;
+                border-radius: 8px;
+                border: 1px solid #dbe2ee;
+                background: #fff;
+                cursor: pointer;
+            }
+            .btn-ghost {
+                background: #fff;
+            }
+            .btn-primary {
+                background: #3b82f6;
+                border-color: #3b82f6;
+                color: #fff;
+            }
+            .btn-danger {
+                background: #ef4444;
+                border-color: #ef4444;
+                color: #fff;
+            }
+            .btn:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+            }
+            .section-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin: 6px 0 14px;
+            }
+            .section-title {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .section-title .dot {
+                width: 8px;
+                height: 8px;
+                background: #3b82f6;
+                border-radius: 50%;
+            }
+            .pager {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .btn-page {
+                padding: 6px 10px;
+                border: 1px solid #dbe2ee;
+                background: #fff;
+                border-radius: 8px;
+            }
+            .btn-page.active {
+                background: #e9f0ff;
+                border-color: #98b7ff;
+            }
+            .muted {
+                color: #8b95a1;
+            }
+        </style>
+        <!-- ▲▲ 검색툴바 전용 스타일 ▲▲ -->
+
         <div class="section-header">
             <div class="section-title">
                 <span class="dot"></span>
@@ -33,10 +223,10 @@
             class="status-box"
             ng-if="userStatusMessage"
             ng-class="{
-           'status-success': userStatusType==='success',
-           'status-error'  : userStatusType==='error',
-           'status-info'   : userStatusType==='info'
-         }"
+        'status-success': userStatusType==='success',
+        'status-error'  : userStatusType==='error',
+        'status-info'   : userStatusType==='info'
+      }"
         >
             {{ userStatusMessage }}
         </div>
@@ -49,8 +239,77 @@
             🙏 이 페이지는 <strong>관리자 전용</strong>입니다.
         </div>
 
-        <!-- 관리자 전용 테이블 -->
-        <div ng-if="isAdmin">
+        <!-- 관리자 전용 영역 -->
+        <!-- ✅ ng-if → ng-show 로 변경: 새 스코프 생성 방지(페이지네이션 변수 그림자 문제 해결) -->
+        <div ng-show="isAdmin">
+            <!-- ✅ 검색 툴바 (게시판과 동일 톤) -->
+            <div class="searchbar-row">
+                <!-- 왼쪽: 검색 구분/입력/버튼 -->
+                <div
+                    class="search-toolbar left"
+                    style="flex: 1"
+                >
+                    <div class="field">
+                        <label>검색 구분</label>
+                        <select
+                            ng-model="q.type"
+                            ng-init="q.type = q.type || 'username'"
+                            aria-label="검색 구분"
+                        >
+                            <option value="username">사용자</option>
+                            <option value="email">이메일</option>
+                            <option value="phone">전화</option>
+                            <option value="role">권한</option>
+                        </select>
+                    </div>
+
+                    <div class="field">
+                        <input
+                            type="search"
+                            placeholder="검색어 입력"
+                            ng-model="q.keyword"
+                            ng-keydown="$event.keyCode === 13 && applySearch()"
+                            aria-label="검색어 입력"
+                            style="width: 100%"
+                        />
+                    </div>
+
+                    <button
+                        class="btn btn-ghost"
+                        ng-click="resetSearch()"
+                    >
+                        초기화
+                    </button>
+                    <button
+                        class="btn btn-primary"
+                        ng-click="applySearch()"
+                    >
+                        검색
+                    </button>
+                </div>
+
+                <!-- 오른쪽: 페이지 크기/총 건수 -->
+                <div class="search-toolbar right">
+                    <div class="field">
+                        <label>페이지 크기</label>
+                        <select
+                            ng-model="pageSize"
+                            ng-options="s for s in pageSizes"
+                            ng-change="onSize()"
+                            aria-label="페이지 크기 선택"
+                        ></select>
+                    </div>
+                    <div
+                        class="field"
+                        style="justify-content: flex-end"
+                    >
+                        <span class="muted">총 {{ (filtered && filtered.length) || 0 }}건</span>
+                    </div>
+                </div>
+            </div>
+            <!-- /검색 툴바 -->
+
+            <!-- 표 -->
             <table
                 class="user-table"
                 aria-label="사용자 목록"
@@ -65,7 +324,8 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <tr ng-repeat="u in users">
+                    <!-- ✅ 여기: tr를 닫지 말고 안쪽에 td를 넣어야 함 -->
+                    <tr ng-repeat="u in paged track by (u._uid || u.user_id || u.userId || u.id || $index)">
                         <td>
                             <span ng-if="!u._editing">{{ u.name }}</span>
                             <input
@@ -97,9 +357,8 @@
                             <span
                                 class="pill"
                                 ng-class="u._isAdmin ? 'green' : 'gray'"
+                                >{{ u.roleLabel }}</span
                             >
-                                {{ u.roleLabel }}
-                            </span>
                         </td>
                         <td>
                             <div ng-if="!u._editing">
@@ -133,7 +392,7 @@
                         </td>
                     </tr>
 
-                    <tr ng-if="!users.length && isAdmin">
+                    <tr ng-if="!paged.length">
                         <td
                             colspan="5"
                             style="text-align: center; color: #666"
@@ -143,6 +402,57 @@
                     </tr>
                 </tbody>
             </table>
+
+            <!-- ✅ 페이지네이션 -->
+            <div
+                class="pager"
+                style="margin-top: 10px"
+            >
+                <div class="left">
+                    <span class="muted">페이지 {{ (page || 0) + 1 }} / {{ pages || 1 }}</span>
+                </div>
+                <div class="right">
+                    <button
+                        class="btn-page"
+                        ng-click="first()"
+                        ng-disabled="page<=0"
+                    >
+                        « 처음
+                    </button>
+                    <button
+                        class="btn-page"
+                        ng-click="prev()"
+                        ng-disabled="page<=0"
+                    >
+                        ‹ 이전
+                    </button>
+
+                    <button
+                        class="btn-page"
+                        ng-repeat="p in pageRange()"
+                        ng-class="{active:p===page}"
+                        ng-click="go(p)"
+                    >
+                        {{ p + 1 }}
+                    </button>
+
+                    <button
+                        class="btn-page"
+                        ng-click="next()"
+                        ng-disabled="page>=pages-1"
+                    >
+                        다음 ›
+                    </button>
+                    <button
+                        class="btn-page"
+                        ng-click="last()"
+                        ng-disabled="page>=pages-1"
+                    >
+                        끝 »
+                    </button>
+                </div>
+            </div>
+            <!-- /페이지네이션 -->
         </div>
     </div>
 </div>
