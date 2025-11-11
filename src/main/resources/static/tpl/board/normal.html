@@ -1,7 +1,7 @@
 <!-- src/main/resources/static/tpl/board/bus.html -->
 <div
     class="board-shell"
-    ng-init="showComposer=false"
+    ng-init="showComposer=false; showSearch=false; q = q || { type:'author', keyword:'', from:null, to:null };"
     ng-cloak
 >
     <!-- 헤더: 제목 + 우측 버튼들 -->
@@ -11,6 +11,28 @@
             <h2 style="margin: 0">일반 게시판</h2>
         </div>
         <div class="header-actions">
+            <!-- 🔎 검색 토글 버튼 -->
+            <button
+                class="icon-btn"
+                ng-click="showSearch = !showSearch"
+                aria-pressed="{{!!showSearch}}"
+                aria-label="검색창 {{showSearch ? '닫기' : '열기'}}"
+                title="검색"
+            >
+                <!-- magnifier svg -->
+                <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                >
+                    <path
+                        d="M10.5 3a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zm8.85 13.56 2.79 2.79a1 1 0 1 1-1.42 1.42l-2.79-2.79a1 1 0 0 1 1.42-1.42z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </button>
+
             <button
                 class="btn"
                 ng-click="reload ? reload() : (loadPosts && loadPosts())"
@@ -29,71 +51,86 @@
         </div>
     </div>
 
-    <!-- 🔎 검색 바: 한 줄 정렬 -->
-    <div class="search-bar card-header-like search-inline">
-        <label class="label">검색 구분</label>
-        <select
-            class="select"
-            ng-model="q.type"
-            aria-label="검색 구분"
-        >
-            <option value="author">작성자</option>
-            <option value="content">내용</option>
-            <option value="author_content">작성자+내용</option>
-            <option value="time">기간</option>
-        </select>
+    <!-- 🔎 검색 바: 토글 패널 -->
+    <div
+        class="card-header-like search-panel"
+        ng-show="showSearch"
+        role="region"
+        aria-label="게시판 검색 패널"
+    >
+        <div class="search-inline">
+            <label class="label">검색 구분</label>
+            <select
+                class="select"
+                ng-model="q.type"
+                aria-label="검색 구분"
+            >
+                <option value="author">작성자</option>
+                <option value="content">내용</option>
+                <option value="author_content">작성자+내용</option>
+                <option value="time">기간</option>
+            </select>
 
-        <!-- 키워드 검색 -->
-        <div
-            ng-if="q.type !== 'time'"
-            class="ctrl grow"
-        >
-            <input
-                class="input-like w100"
-                type="text"
-                placeholder="검색어 입력"
-                ng-model="q.keyword"
-                aria-label="검색어"
-            />
+            <!-- 키워드 검색 -->
+            <div
+                ng-if="q.type !== 'time'"
+                class="ctrl grow"
+            >
+                <input
+                    class="input-like w100"
+                    type="text"
+                    placeholder="검색어 입력"
+                    ng-model="q.keyword"
+                    aria-label="검색어"
+                    ng-keypress="$event.which===13 && applySearch && applySearch()"
+                />
+            </div>
+
+            <!-- 기간 검색 -->
+            <div
+                ng-if="q.type === 'time'"
+                class="ctrl"
+            >
+                <label class="label sm">From</label>
+                <input
+                    class="input-like"
+                    type="date"
+                    ng-model="q.from"
+                    aria-label="시작일"
+                />
+                <label class="label sm">To</label>
+                <input
+                    class="input-like"
+                    type="date"
+                    ng-model="q.to"
+                    aria-label="종료일"
+                />
+            </div>
+
+            <div class="spacer"></div>
+
+            <button
+                class="btn"
+                ng-click="resetSearch && resetSearch();"
+                ng-disabled="loading"
+            >
+                초기화
+            </button>
+            <button
+                class="btn primary"
+                ng-click="applySearch && applySearch();"
+                ng-disabled="loading"
+            >
+                검색
+            </button>
+            <button
+                class="btn light"
+                ng-click="showSearch=false"
+                aria-label="검색창 닫기"
+            >
+                닫기
+            </button>
         </div>
-
-        <!-- 기간 검색 -->
-        <div
-            ng-if="q.type === 'time'"
-            class="ctrl"
-        >
-            <label class="label sm">From</label>
-            <input
-                class="input-like"
-                type="date"
-                ng-model="q.from"
-                aria-label="시작일"
-            />
-            <label class="label sm">To</label>
-            <input
-                class="input-like"
-                type="date"
-                ng-model="q.to"
-                aria-label="종료일"
-            />
-        </div>
-
-        <div class="spacer"></div>
-
-        <button
-            class="btn"
-            ng-click="resetSearch()"
-            ng-disabled="loading"
-        >
-            초기화
-        </button>
-        <button
-            class="btn primary"
-            ng-click="applySearch()"
-            ng-disabled="loading"
-        >
-            검색
-        </button>
     </div>
 
     <!-- 로딩 표시 -->
@@ -520,14 +557,30 @@
         background: #2d7ef7;
     }
 
+    /* 🔎 검색 패널 애니메이션 */
+    .search-panel {
+        animation: dropIn 0.16s ease-out;
+    }
+    @keyframes dropIn {
+        from {
+            opacity: 0;
+            transform: translateY(-6px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
     /* 🔎 검색 바: 한 줄 정렬 */
     .search-inline {
         display: flex;
         align-items: center;
         gap: 10px;
         flex-wrap: nowrap;
-        padding-top: 10px;
-        padding-bottom: 10px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+        width: 100%;
     }
     .search-inline .ctrl {
         display: flex;
@@ -583,6 +636,24 @@
         padding: 4px 8px;
         font-size: 12px;
     }
+
+    /* 헤더용 아이콘 버튼 */
+    .icon-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border: 1px solid #d7ddea;
+        background: #fff;
+        border-radius: 10px;
+        margin-right: 6px;
+        cursor: pointer;
+    }
+    .icon-btn:hover {
+        background: #f7f9fc;
+    }
+
     .btn-page {
         border: 1px solid #d7ddea;
         background: #fff;

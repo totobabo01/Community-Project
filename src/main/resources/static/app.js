@@ -69,6 +69,10 @@
         $locationProvider.hashPrefix('');
 
         $routeProvider
+            // ✅ 대메뉴 리다이렉트: 게시판/관리 → 첫 소메뉴
+            .when('/board', { redirectTo: '/board/bus' })
+            .when('/admin', { redirectTo: '/db-users' }) // 🔧 변경: /roles → /db-users
+
             .when('/users', {
                 template: '<div></div>',
             })
@@ -77,17 +81,16 @@
                 controller: 'UsersNewCtrl',
             })
             .when('/board/bus', {
-                // ▼ 파일 이동 없이: 실제 폴더명이 "tpl\ board" 이므로 URL 인코딩 사용
-                templateUrl: '/tpl%5C%20board/bus.html',
+                templateUrl: '/tpl/board/bus.html', // ← 여기! '/tpl/%20board/bus.html' 아니고 이게 정답
                 controller: 'BoardBusCtrl',
             })
+            // 게시판 (일반)
             .when('/board/normal', {
-                // ▼ 동일하게 인코딩
-                templateUrl: '/tpl%5C%20board/normal.html',
+                templateUrl: '/tpl/board/normal.html', // ← 여기! '/tpl/%20board/normal.html' 아님
                 controller: 'BoardNormalCtrl',
             })
+            // 권한 관리 (현재 파일 위치가 static/roles.html 이므로 그대로)
             .when('/roles', {
-                // ✅ 템플릿 파일 주석 경로와 일치시키기 (파일 이동 안 함: 루트 roles.html 사용)
                 templateUrl: '/roles.html',
                 controller: 'RolesCtrl',
             })
@@ -100,11 +103,44 @@
             });
     });
 
-    // '#!/' 진입 호환
-    app.run(function ($window) {
+    // '#!/' 진입 호환 + ★ 전역 클릭 위임(해시 없는 링크를 해시 라우팅으로 변환)
+    app.run(function ($window, $document) {
         if ($window.location.hash.indexOf('#!/') === 0) {
             $window.location.replace('#/' + $window.location.hash.slice(3));
         }
+
+        // ★ 해시(#)가 없는 내부 링크를 자동으로 '#/...'로 변환
+        //   예) <a href="/board"> → '#/board' 로 라우팅
+        $document.on('click', function (evt) {
+            try {
+                let el = evt.target;
+                // a 태그까지 위로 탐색
+                while (el && el !== document && el.tagName !== 'A') el = el.parentNode;
+                if (!el || el.tagName !== 'A') return;
+
+                const href = el.getAttribute('href') || '';
+                // 외부 링크/빈 링크/해시 링크는 무시
+                if (!href || href.indexOf('http') === 0 || href.indexOf('#') === 0) return;
+
+                // 내부 라우트 패턴만 처리
+                const internal = /^\/(users(\/new)?|board(\/(bus|normal))?|admin|roles|db-users)$/.test(href);
+                if (!internal) return;
+
+                // ★★★ 관리자 전용 경로 가드(전역) — 메뉴는 보이되, 비관리자 클릭 시 차단
+                const adminPaths = new Set(['/admin', '/roles', '/db-users']);
+                if (adminPaths.has(href) && !($window.__IS_ADMIN__ === true)) {
+                    evt.preventDefault();
+                    alert('관리자 전용 페이지입니다.');
+                    return; // 라우팅 차단
+                }
+
+                evt.preventDefault();
+                // /board, /admin 은 라우팅 후 리다이렉트 규칙으로 첫 소메뉴로 이동됨
+                $window.location.hash = '#' + href;
+            } catch (_) {
+                /* noop */
+            }
+        });
     });
 
     // ───────────────── Root (탭/메뉴 제어) ─────────────────
@@ -112,6 +148,7 @@
         $scope.me = null;
         $scope.menus = [];
         $scope.location = $location;
+        $scope.isAdmin = false; // ✅ 상단 네비에서 ng-if="isAdmin" 사용할 수 있게 공개
 
         function ensureDefaultUsersTab() {
             if ($location.path() === '/users' && !$location.search().tab) {
@@ -155,6 +192,8 @@
 
         AuthService.loadMe().finally(() => {
             $scope.me = AuthService.getMe();
+            $scope.isAdmin = isAdminFrom($scope.me); // ✅ 여기서 관리자 여부 계산
+            window.__IS_ADMIN__ = $scope.isAdmin; // ✅ 추가: 전역 가드(app.run)에서 참조하도록 반영
         });
 
         function decorateMenuNode(n) {
@@ -199,7 +238,20 @@
             m._open = !m._open;
         };
 
-        // ✅ 여기 추가: 메뉴에서 호출하는 강제 라우팅 함수
+        // ✅ 대메뉴 → 첫 소메뉴 매핑
+        const firstChildMap = {
+            '/board': '/board/bus',
+            board: '/board/bus',
+            '/admin': '/db-users', // 🔧 변경: 관리 기본은 DB 사용자 관리
+            admin: '/db-users', // 🔧 변경
+        };
+
+        // ★★★ 현재 관리자 여부 즉시 확인 헬퍼
+        function isAdminNow() {
+            return $scope.isAdmin || isAdminFrom($scope.me);
+        }
+
+        // ✅ 메뉴에서 호출하는 강제 라우팅 함수
         $scope.navTo = function (url, $event) {
             try {
                 if ($event) {
@@ -211,11 +263,21 @@
                 // '#/roles?x=1' → path '/roles', query {x:'1'}
                 // 'roles', '/roles', '#/roles', 'http://...#/roles' 모두 방어
                 const hashPos = url.indexOf('#/');
-                if (hashPos >= 0) url = url.slice(hashPos + 1); // '#/roles' → '/roles'
-                if (url.indexOf('#') === 0) url = url.slice(1); // '#/roles' → '/roles'
+                if (hashPos >= 0) url = url.slice(hashPos + 1);
+                if (url.indexOf('#') === 0) url = url.slice(1);
 
                 // 절대경로 보정
                 if (url.indexOf('/') !== 0) url = '/' + url;
+
+                // ✅ 대메뉴 키를 첫 소메뉴로 치환
+                if (firstChildMap[url]) url = firstChildMap[url];
+
+                // ★★★ 관리자 전용 경로 가드(메뉴/강제 네비 모두)
+                const adminPaths = new Set(['/admin', '/roles', '/db-users']);
+                if (adminPaths.has(url) && !isAdminNow()) {
+                    alert('관리자 전용 페이지입니다.');
+                    return; // 라우팅 차단
+                }
 
                 // 쿼리 분리
                 const qIdx = url.indexOf('?');
@@ -516,6 +578,25 @@
         $scope.q = { type: 'author', keyword: '', from: null, to: null };
         const isNum = (v) => typeof v === 'number' && isFinite(v);
         const isNonEmptyStr = (s) => typeof s === 'string' && s.trim().length > 0;
+
+        // ──────── [ADD] 검색 창 토글/닫기 ────────
+        $scope.searchOpen = false;
+        $scope.toggleSearch = function (open) {
+            $scope.searchOpen = typeof open === 'boolean' ? open : !$scope.searchOpen;
+            if ($scope.searchOpen) {
+                setTimeout(function () {
+                    var el = document.getElementById('board-search-input');
+                    if (el) el.focus();
+                }, 0);
+            }
+        };
+        $scope.closeSearch = function (resetAlso) {
+            if (resetAlso) $scope.resetSearch();
+            $scope.searchOpen = false;
+        };
+        $scope.onSearchKey = function ($event) {
+            if ($event && $event.which === 13) $scope.applySearch(); // Enter
+        };
 
         $scope.searchActive = function () {
             const kw = String($scope.q.keyword || '').trim();
@@ -871,11 +952,15 @@
 
     // ───────────────── Roles ─────────────────
     // ───────────────── Roles ─────────────────
-    app.controller('RolesCtrl', function ($scope, $http, AuthService) {
+    app.controller('RolesCtrl', function ($scope, $http, $timeout, AuthService) {
         $scope.isAdmin = false;
         $scope.loading = true;
         $scope.saving = false;
-        $scope.rows = [];
+
+        // ⚠️ 뷰에서 쓰던 변수명을 유지하면서, 내부에서 원본을 따로 보관
+        $scope.rows = []; // ← 화면에 뿌려지는 "현재 페이지" 데이터 (슬라이스 결과로 덮어씀)
+        $scope.sourceRows = []; // ← 서버에서 받은 전체 원본 목록(필터/페이지 계산의 기준)
+
         $scope.msg = '';
         $scope.msgType = 'info';
 
@@ -891,7 +976,7 @@
         function notify(type, text, ms) {
             $scope.msgType = type;
             $scope.msg = text;
-            if (ms) setTimeout(() => $scope.$applyAsync(() => ($scope.msg = '')), ms);
+            if (ms) $timeout(() => ($scope.msg = ''), ms);
         }
 
         // 숫자 보정 유틸(전역 toInt와 동일한 동작, 여기선 즉시 사용하기 좋게 래핑)
@@ -938,11 +1023,15 @@
             const start = $scope.page * size;
             $scope.paged = ($scope.filtered || []).slice(start, start + size);
 
+            // ✅ 템플릿이 rows로 렌더링하더라도 페이지가 적용되도록 rows를 슬라이스 결과로 덮어씀
+            $scope.rows = $scope.paged;
+
             // ✅ 템플릿이 {{ pages }}와 ng-disabled="page>=pages-1"를 쓰므로 동기화
             $scope.pages = pages;
         }
         function refilter() {
-            $scope.filtered = ($scope.rows || []).filter((r) => matchRow(r, $scope.q));
+            // ✅ 필터는 항상 원본(sourceRows)을 기준으로
+            $scope.filtered = ($scope.sourceRows || []).filter((r) => matchRow(r, $scope.q));
             $scope.page = 0;
             repage();
         }
@@ -1012,13 +1101,21 @@
             $http
                 .get('/api/admin/roles')
                 .then((res) => {
-                    $scope.rows = Array.isArray(res.data) ? res.data : [];
+                    // ✅ 원본과 뷰 데이터를 분리 관리
+                    $scope.sourceRows = Array.isArray(res.data) ? res.data : [];
+                    $scope.rows = $scope.sourceRows.slice(0); // 초기엔 전체를 복사해 놓고,
                     notify('info', '권한 목록을 불러왔습니다.', 1200);
-                    refilter();
+                    refilter(); // 즉시 필터/페이지 계산 → rows가 현재 페이지로 대체됨
                 })
                 .catch((err) => {
                     if (err && err.status === 403) notify('error', '관리자 전용 페이지입니다.', 2500);
                     else notify('error', '권한 목록을 불러오지 못했습니다.', 2500);
+                    // 실패 시 안전 초기화
+                    $scope.sourceRows = [];
+                    $scope.rows = [];
+                    $scope.filtered = [];
+                    $scope.paged = [];
+                    $scope.pages = 1;
                 })
                 .finally(() => {
                     $scope.loading = false;
@@ -1036,6 +1133,9 @@
                 .then(() => {
                     row.role = target;
                     notify('success', '저장되었습니다.', 1200);
+                    // 원본(sourceRows)에도 반영해 일관성 유지
+                    const idx = ($scope.sourceRows || []).findIndex((r) => r.username === row.username);
+                    if (idx >= 0) $scope.sourceRows[idx].role = target;
                     refilter(); // 검색/페이지 다시 반영
                 })
                 .catch((err) => notify('error', err && err.data ? err.data : '저장 중 오류가 발생했습니다.', 2500))
@@ -1049,8 +1149,11 @@
             if ($scope.isAdmin) $scope.load();
             else {
                 $scope.loading = false;
+                $scope.sourceRows = [];
                 $scope.rows = [];
-                refilter();
+                $scope.filtered = [];
+                $scope.paged = [];
+                $scope.pages = 1;
             }
         });
     });

@@ -25,6 +25,7 @@
             [ng-cloak] {
                 display: none;
             }
+
             :root {
                 --blue: #3478f6;
                 --blue-600: #2c63ca;
@@ -112,7 +113,6 @@
             .dropdown a:hover {
                 background: #f5f7fb;
             }
-
             .nav-right {
                 display: flex;
                 align-items: center;
@@ -174,6 +174,7 @@
                 font-size: 16px;
                 cursor: pointer;
             }
+
             .status-box {
                 margin-bottom: 16px;
                 text-align: center;
@@ -242,7 +243,6 @@
             .user-table tbody tr:hover td {
                 background: #fbfdff;
             }
-
             .inline-input {
                 width: 95%;
                 padding: 6px 8px;
@@ -309,6 +309,7 @@
                 background: var(--danger);
                 color: #fff;
             }
+
             .pill {
                 padding: 3px 8px;
                 border-radius: 999px;
@@ -372,7 +373,7 @@
                 >
                     <div class="item">
                         <a
-                            href=""
+                            href="#/users?tab=bus"
                             ng-click="$event.preventDefault(); goBusTab()"
                             >버스정보</a
                         >
@@ -385,8 +386,8 @@
                         ng-mouseleave="onMenuLeave(mBoard)"
                     >
                         <a
-                            href="javascript:void(0)"
-                            ng-click="onMenuClick(mBoard, $event)"
+                            href="#/board"
+                            ng-click="navTo('#/board', $event)"
                             aria-haspopup="true"
                             aria-expanded="{{!!mBoard._open}}"
                             >게시판</a
@@ -396,7 +397,6 @@
                             ng-show="mBoard._open"
                             ng-click="$event.stopPropagation()"
                         >
-                            <!-- ✅ href + ng-click(navTo) 같이 사용 -->
                             <a
                                 href="#/board/bus"
                                 ng-click="navTo('#/board/bus', $event)"
@@ -410,15 +410,15 @@
                         </div>
                     </div>
 
-                    <!-- 관리 -->
+                    <!-- 관리 (항상 보이게; 클릭 가드는 app.js가 처리) -->
                     <div
                         class="item"
                         ng-mouseenter="onMenuEnter(mAdmin)"
                         ng-mouseleave="onMenuLeave(mAdmin)"
                     >
                         <a
-                            href="javascript:void(0)"
-                            ng-click="onMenuClick(mAdmin, $event)"
+                            href="#/admin"
+                            ng-click="navTo('#/admin', $event)"
                             aria-haspopup="true"
                             aria-expanded="{{!!mAdmin._open}}"
                             >관리</a
@@ -428,7 +428,6 @@
                             ng-show="mAdmin._open"
                             ng-click="$event.stopPropagation()"
                         >
-                            <!-- ✅ 여기서도 navTo 강제 -->
                             <a
                                 href="#/db-users"
                                 ng-click="navTo('#/db-users', $event)"
@@ -543,6 +542,7 @@
                         if (s)
                             s.$applyAsync(function () {
                                 s.__isAdmin = false;
+                                s.isAdmin = false;
                             });
                     }
                 } catch (e) {}
@@ -564,7 +564,15 @@
                         var who = document.getElementById('whoami');
                         if (who && data.username) who.textContent = '안녕하세요, ' + data.username + '님';
 
-                        var isAdmin = !!(data && (data.isAdmin || (Array.isArray(data.authorities) && data.authorities.indexOf('ROLE_ADMIN') !== -1)));
+                        // 관리자 여부 전역 보관(메뉴는 항상 보이지만 클릭 가드에서 사용)
+                        var isAdmin = !!(
+                            data &&
+                            (data.isAdmin ||
+                                data.admin ||
+                                (Array.isArray(data.authorities) && data.authorities.some((a) => ((a && a.authority) || a) === 'ROLE_ADMIN')) ||
+                                (Array.isArray(data.roles) && data.roles.some((r) => ((r && r.role) || r) === 'ROLE_ADMIN')) ||
+                                (Array.isArray(data.roleList) && data.roleList.some((r) => ((r && r.role) || r) === 'ROLE_ADMIN')))
+                        );
                         window.__IS_ADMIN__ = isAdmin;
 
                         try {
@@ -573,7 +581,8 @@
                                 var s = body ? angular.element(body).scope() : null;
                                 if (s)
                                     s.$applyAsync(function () {
-                                        s.__isAdmin = window.__IS_ADMIN__;
+                                        s.__isAdmin = isAdmin;
+                                        s.isAdmin = isAdmin;
                                     });
                             }
                         } catch (e) {}

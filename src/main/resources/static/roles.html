@@ -1,9 +1,10 @@
-<!-- /tpl/admin/roles.html -->
+<!-- /roles.html -->
 <div
     style="background: #fff; border-radius: 16px; box-shadow: 0 10px 30px rgba(31, 38, 135, 0.08); padding: 18px"
     ng-cloak
 >
     <div style="background: #fbfdff; border: 1px solid #edf0f5; border-radius: 12px; padding: 18px">
+        <!-- 헤더 -->
         <div class="section-header">
             <div class="section-title">
                 <span class="dot"></span>
@@ -13,7 +14,7 @@
             <!-- 관리자만 상단 버튼 노출 -->
             <div
                 class="actions"
-                ng-if="isAdmin"
+                ng-show="isAdmin"
             >
                 <button
                     type="button"
@@ -30,7 +31,11 @@
         <div
             class="status-box"
             ng-if="msg"
-            ng-class="{'status-success': msgType==='success','status-error': msgType==='error','status-info': msgType==='info'}"
+            ng-class="{
+        'status-success': msgType==='success',
+        'status-error'  : msgType==='error',
+        'status-info'   : msgType==='info'
+      }"
         >
             {{ msg }}
         </div>
@@ -43,8 +48,8 @@
             🙏 이 페이지는 <strong>관리자 전용</strong>입니다.
         </div>
 
-        <!-- 관리자 전용 영역 -->
-        <div ng-if="isAdmin">
+        <!-- 관리자 전용 영역 (스코프 분리 방지: ng-show 사용) -->
+        <div ng-show="isAdmin">
             <!-- ▼▼ 검색 툴바 (DB 사용자 화면 톤) ▼▼ -->
             <style>
                 .searchbar-row {
@@ -156,7 +161,6 @@
 
             <div class="searchbar-row">
                 <div class="search-toolbar">
-                    <!-- 셀렉트 변경 즉시 반영 -->
                     <!-- 검색 구분: 사용자 / 권한 -->
                     <select
                         class="select"
@@ -183,6 +187,7 @@
                     >
                         검색
                     </button>
+
                     <button
                         type="button"
                         class="btn"
@@ -195,13 +200,15 @@
 
                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
                     <label class="muted">페이지 크기</label>
-                    <!-- 숫자 바인딩 보장 -->
+
+                    <!-- 숫자 바인딩 보장: + 단항연산자로 number 캐스팅 후 onSize() -->
                     <select
                         class="page-size-select"
                         ng-model="pageSize"
                         ng-options="s as s for s in pageSizes track by s"
-                        ng-change="onSize()"
+                        ng-change="pageSize = +pageSize; onSize()"
                     ></select>
+
                     <span
                         class="muted"
                         style="margin-left: 4px"
@@ -226,14 +233,14 @@
                 </thead>
                 <tbody>
                     <!-- 페이징된 결과 -->
-                    <tr ng-repeat="row in paged track by row.username">
+                    <tr ng-repeat="row in paged track by (row.username || $index)">
                         <td>{{ row.username }}</td>
                         <td>
                             <span
                                 class="pill"
                                 ng-class="{
-                  'green':(row.role||'').toUpperCase()==='ROLE_ADMIN',
-                  'gray':(row.role||'ROLE_USER').toUpperCase()!=='ROLE_ADMIN'
+                  green: (row.role||'').toUpperCase()==='ROLE_ADMIN',
+                  gray : (row.role||'ROLE_USER').toUpperCase()!=='ROLE_ADMIN'
                 }"
                             >
                                 {{ (row.role || 'ROLE_USER') }}
@@ -243,15 +250,16 @@
                             <button
                                 type="button"
                                 class="btn btn-primary"
-                                ng-disabled="saving || (row.role||'').toUpperCase()==='ROLE_ADMIN'"
+                                ng-disabled="saving || loading || (row.role||'').toUpperCase()==='ROLE_ADMIN'"
                                 ng-click="changeRole(row,'ROLE_ADMIN')"
                             >
                                 관리자 부여
                             </button>
+
                             <button
                                 type="button"
                                 class="btn btn-ghost"
-                                ng-disabled="saving || (row.role||'').toUpperCase()==='ROLE_USER'"
+                                ng-disabled="saving || loading || (row.role||'').toUpperCase()==='ROLE_USER'"
                                 ng-click="changeRole(row,'ROLE_USER')"
                             >
                                 관리자 해제
@@ -276,8 +284,7 @@
                 style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center"
             >
                 <div class="left">
-                    <!-- pages 대신 컨트롤러 계산식 사용 -->
-                    <span class="muted">페이지 {{ (page||0)+1 }} / {{ pagesCount() }}</span>
+                    <span class="muted"> 페이지 {{ (page||0)+1 }} / {{ pagesCount() }} </span>
                 </div>
                 <div class="right">
                     <button
@@ -288,6 +295,7 @@
                     >
                         « 처음
                     </button>
+
                     <button
                         type="button"
                         class="btn-page"
@@ -297,10 +305,11 @@
                         ‹ 이전
                     </button>
 
+                    <!-- ✅ 클릭 안정화: track by p -->
                     <button
                         type="button"
                         class="btn-page"
-                        ng-repeat="p in pageRange() track by $index"
+                        ng-repeat="p in pageRange() track by p"
                         ng-class="{active:p===page}"
                         ng-click="go(p)"
                     >
@@ -315,6 +324,7 @@
                     >
                         다음 ›
                     </button>
+
                     <button
                         type="button"
                         class="btn-page"
