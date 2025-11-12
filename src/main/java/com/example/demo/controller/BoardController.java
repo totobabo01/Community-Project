@@ -62,6 +62,47 @@ public class BoardController {
         return new PageDTO<>(rows, total, page, size);                 // 프런트가 바로 쓰기 좋은 페이지 응답으로 래핑해 반환
     }
 
+    /* =========================
+     * 🔎 단건 조회 추가 (405 해결 포인트)
+     * ========================= */
+
+    /** 숫자 ID 또는 문자열 키를 허용하는 공통 단건 조회(내부 유틸) */
+    private PostDto loadOneByIdOrKey(String idOrKey) {
+        if (idOrKey != null && idOrKey.matches("\\d+")) {
+            // 순수 숫자면 PK로 조회
+            return postDao.findById(Long.parseLong(idOrKey));
+        }
+        // 숫자가 아니면 UUID/문자열 키로 조회
+        return postDao.findByKey(idOrKey);
+    }
+
+    /** 단건 조회 – 숫자/문자열 통합 라우트 (편집 진입에서 사용) */
+    @GetMapping("/posts/{id}")                                        // 예: GET /api/posts/123  또는 /api/posts/550e8400-...
+    public ResponseEntity<?> getOneById(@PathVariable String id, Authentication auth) {
+        PostDto p = loadOneByIdOrKey(id);
+        if (p == null) return ResponseEntity.notFound().build();
+
+        // 편집화면에서 호출되므로 작성자 또는 관리자만 접근 허용
+        String me = username(auth);
+        if (!(isAdmin(auth) || (me != null && me.equals(p.getWriterId())))) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        return ResponseEntity.ok(p);
+    }
+
+    /** 단건 조회 – 문자열 키 전용 라우트 (별칭) */
+    @GetMapping("/posts/key/{key}")                                   // 예: GET /api/posts/key/550e8400-...
+    public ResponseEntity<?> getOneByKey(@PathVariable String key, Authentication auth) {
+        PostDto p = loadOneByIdOrKey(key);
+        if (p == null) return ResponseEntity.notFound().build();
+
+        String me = username(auth);
+        if (!(isAdmin(auth) || (me != null && me.equals(p.getWriterId())))) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        return ResponseEntity.ok(p);
+    }
+
     /** 게시글 생성 */
     @PostMapping("/boards/{code}/posts")                              // 예: POST /api/boards/NORM/posts (JSON 본문으로 글 데이터)
     public ResponseEntity<PostDto> create(                            // 생성된 글 데이터를 본문으로 200 OK 반환

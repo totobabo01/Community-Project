@@ -103,13 +103,13 @@ public class PostDao {
                 var si = new SchemaInfo();
                 si.table = table;                                              // 실제 테이블명
                 si.id = pick(cols, "post_id", "id", "uuid");                   // PK 컬럼 후보 중 선택
-                si.board = pick(cols, "board_code", "board_uuid", "boardCd", "board"); // 보드 식별 컬럼 후보
+                si.board = pick(cols, "board_code", "board_uuid", "boardcd", "board"); // 보드 식별 컬럼 후보
                 si.title = pick(cols, "title");
                 si.content = pick(cols, "content", "contents", "body");
                 si.writerId = pick(cols, "writer_id", "author_id");
                 si.writerName = pick(cols, "writer_name", "author_name", "nickname", "name");
-                si.createdAt = pick(cols, "created_at", "write_dt", "createdAt");
-                si.updatedAt = pick(cols, "updated_at", "update_dt", "updatedAt");
+                si.createdAt = pick(cols, "created_at", "write_dt", "createdat");
+                si.updatedAt = pick(cols, "updated_at", "update_dt", "updatedat");
 
                 cachedPost = si;                                               // 캐시 저장
                 return si;
@@ -176,28 +176,46 @@ public class PostDao {
     }
 
     public List<PostDto> findByBoardPaged(String code, int page, int size) {
-        var s = ensurePostResolved();
-        String orderBy =
-            (s.id != null) ? s.id :
-            (s.createdAt != null) ? s.createdAt :
-            (s.updatedAt != null) ? s.updatedAt : s.title;
-        int offset = Math.max(0, page) * Math.max(1, size);    // 음수 방지 후 offset 계산
+        // ensurePostResolved()는 “게시글 테이블에 대한 컬럼/테이블 이름들을 한 번 해석(Resolve)해서, 이후엔 그 정보를 재사용하도록 보장”하는 헬퍼
+    var s = ensurePostResolved();                 // 게시글 테이블 메타정보를 준비/보장.
+                                                  // 예: s.table(테이블명), s.board(보드 FK 컬럼명),
+                                                  //     s.id(기본키 컬럼명), s.createdAt/s.updatedAt(시간 컬럼명) 등.
 
-        if (boardColumnIsUuid(s)) { 
-            String sql =
-                "SELECT p.* " +
-                "FROM " + s.table + " p JOIN board b ON p." + s.board + " = b.uuid " +
-                "WHERE b.board_code = ? " +
-                "ORDER BY " + orderBy + " DESC LIMIT ? OFFSET ?";
-            return jdbc.query(sql, (rs, i) -> mapRow(rs, s), code, size, offset);
-        } else {
-            String sql =
-                "SELECT * FROM " + s.table +
-                " WHERE " + s.board + " = ? " +
-                " ORDER BY " + orderBy + " DESC LIMIT ? OFFSET ?";
-            return jdbc.query(sql, (rs, i) -> mapRow(rs, s), code, size, offset);
-        }
+    String orderBy =
+        (s.id != null) ? s.id :                   // 1순위: PK(보통 자동 증가 id)가 있으면 그 컬럼으로 정렬
+        (s.createdAt != null) ? s.createdAt :     // 2순위: 생성일 컬럼이 있으면 그걸로 정렬
+        (s.updatedAt != null) ? s.updatedAt :     // 3순위: 수정일 컬럼이 있으면 그걸로 정렬
+        s.title;                                  // 마지막 fallback: 제목 컬럼으로 정렬(최악의 경우라도 정렬 가능하게)
+
+    int offset = Math.max(0, page) * Math.max(1, size); // 페이지네이션 offset 계산.
+                                                         // page 음수 방지(최소 0), size 최소 1 보장 → 안전한 곱셈.
+
+    if (boardColumnIsUuid(s)) {                  // 게시글 테이블의 보드 참조 컬럼(s.board)이 UUID 타입인지 판별.
+                                                 // - UUID면 보통 게시글.p.board_uuid = board.uuid 형태라 JOIN 필요
+                                                 // - 숫자 FK라면 바로 WHERE p.board_id = ? 로 필터링 가능
+        String sql =
+            "SELECT p.* " +
+            "FROM " + s.table + " p JOIN board b ON p." + s.board + " = b.uuid " + // 게시글과 board 테이블을 UUID로 조인
+            "WHERE b.board_code = ? " +                                             // 외부에서 받은 보드 코드로 필터
+            "ORDER BY " + orderBy + " DESC LIMIT ? OFFSET ?";                       // 최신순(내림차순) + 페이지네이션
+        return jdbc.query(                                                          // Spring JdbcTemplate 질의 실행
+            sql,                                                                    //  - sql: 위에서 만든 동적 SQL
+            (rs, i) -> mapRow(rs, s),                                               //  - RowMapper: ResultSet → PostDto 매핑
+            code, size, offset                                                      //  - 바인딩 파라미터: board_code, LIMIT, OFFSET
+        );
+    } else {
+        String sql =
+            "SELECT * FROM " + s.table +                                            // 조인 없이 바로 게시글 테이블 조회
+            " WHERE " + s.board + " = ? " +                                         // 숫자 FK 등인 경우: 보드 식별값으로 직접 필터링
+            " ORDER BY " + orderBy + " DESC LIMIT ? OFFSET ?";                      // 동일하게 최신순 + 페이지네이션
+        return jdbc.query(
+            sql,
+            (rs, i) -> mapRow(rs, s),
+            code, size, offset                                                      //  - 보드 식별값(code)이 숫자/문자 모두 가능하도록 설계된 듯
+        );
     }
+}
+
 
     // ResultSet → PostDto 매핑(스키마 유연성 고려, 컬럼 존재 시만 읽음)
     private PostDto mapRow(ResultSet rs, SchemaInfo s) throws SQLException {
@@ -363,5 +381,30 @@ public class PostDao {
         String sql = "DELETE FROM " + s.table +
                      " WHERE " + s.id + " = ? AND " + s.writerId + " = ?"; // PK + 소유자 일치 조건
         return jdbc.update(sql, param, ownerId);
+    }
+
+    // ───────────────────────── 🔎 단건 조회(편집 화면에서 사용) ─────────────────────────
+    /** 숫자 PK로 단건 조회 */
+    public PostDto findById(Long id) {
+        if (id == null) return null;
+        var s = ensurePostResolved();
+        String sql = "SELECT * FROM " + s.table + " WHERE " + s.id + " = ?";
+        List<PostDto> list = jdbc.query(sql, (rs, i) -> mapRow(rs, s), id);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /** UUID/문자열 키로 단건 조회 */
+    public PostDto findByKey(String key) {
+        if (key == null || key.isBlank()) return null;
+        var s = ensurePostResolved();
+        String sql = "SELECT * FROM " + s.table + " WHERE " + s.id + " = ?";
+        List<PostDto> list = jdbc.query(sql, (rs, i) -> mapRow(rs, s), key);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /** 숫자/문자 구분 없이 하나 받아 단건 조회(내부 유틸, 필요 시 사용) */
+    public PostDto findOneByAnyId(String idOrKey) {
+        if (idOrKey == null || idOrKey.isBlank()) return null;
+        return isNumericString(idOrKey) ? findById(Long.parseLong(idOrKey)) : findByKey(idOrKey);
     }
 }
