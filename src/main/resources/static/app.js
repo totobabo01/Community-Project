@@ -1202,6 +1202,7 @@
             $scope.loading = true;
             let url = null;
             if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
+            // encodeURIComponent는 URL 안에 넣을 값(파라미터)을 안전하게 문자 인코딩해 주는 자바스크립트 함수
             else url = '/api/posts/key/' + encodeURIComponent(key);
 
             $http
