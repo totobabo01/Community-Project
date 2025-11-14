@@ -439,10 +439,7 @@
         }
         function buildKeySet(obj) {
             if (!obj) return new Set();
-            const cand = [obj.user_id, obj.userId, obj.id, obj.email, obj.username, obj.name]
-                .filter(Boolean)
-                .map(String)
-                .map((s) => s.trim().toLowerCase());
+            const cand = [obj.user_id, obj.userId, obj.id, obj.email, obj.username, obj.name].filter(Boolean).map((s) => s.trim().toLowerCase());
             return new Set(cand);
         }
         function makeRoleIndex(roleRows) {
@@ -774,7 +771,7 @@
             return 'tmp-' + Date.now() + '-' + (idx == null ? Math.random().toString(36).slice(2) : idx);
         }
 
-        // 📥 게시글 목록 로드 함수
+        // 📥 게시글 목록 로드 함수  (← 여기 부분이 에러 나던 곳, 깔끔하게 다시 정리)
         $scope.loadPosts = function () {
             // 게시판 코드가 없으면 종료 (boardCode는 어떤 게시판인지 구분)
             if (!$scope.boardCode) return;
@@ -782,12 +779,12 @@
             $scope.loading = true; // 로딩 상태 활성화 (로딩 스피너 등 표시용)
 
             // 검색이 활성화되어 있는지 여부 확인
-            const isSearching = $scope.searchActive(); // $scope.searchActive는 **“지금 검색 조건이 실제로 켜져 있는가?”**를 판단해서 true/false를 돌려주는 헬퍼 함수
+            const isSearching = $scope.searchActive(); // 지금 검색 조건이 실제로 켜져 있는지
+
             // 요청 파라미터 객체 정의
             const params = {
                 // 검색 중이면 항상 첫 페이지부터 로드, 아니면 현재 페이지 사용
                 page: isSearching ? 0 : $scope.page,
-
                 // 검색 중이면 한 번에 200개 불러오고, 아니면 페이지 크기(pageSize) 사용
                 size: isSearching ? 200 : toInt($scope.pageSize, 10),
             };
@@ -805,48 +802,120 @@
             }
 
             $http
-                .get('/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts', { params })
+                .get(
+                    '/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts', // ① 요청 보낼 URL 문자열
+                    { params } // ② 쿼리스트링으로 붙일 파라미터들
+                )
                 .then((res) => {
-                    const data = res.data || {};
-                    const list = Array.isArray(data.content) ? data.content : Array.isArray(data.rows) ? data.rows : Array.isArray(data.list) ? data.list : Array.isArray(data) ? data : [];
+                    // ③ 요청이 성공했을 때 실행되는 콜백
+                    const data = res.data || {}; // ④ 응답 본문(res.data)이 없으면 빈 객체로 방어
+                    const list =
+                        // ⑤ 여기서부터 응답 구조에 따라 "실제 목록 배열"만 뽑아내는 부분
+                        Array.isArray(data.content)
+                            ? data.content // ⑥ data.content가 배열이면 그걸 리스트로 사용 (Spring Page 스타일)
+                            : Array.isArray(data.rows)
+                            ? data.rows // ⑦ data.rows가 배열이면 그걸 사용 (rows 형태 응답 지원)
+                            : Array.isArray(data.list)
+                            ? data.list // ⑧ data.list가 배열이면 그걸 사용 (list 형태 응답 지원)
+                            : Array.isArray(data)
+                            ? data // ⑨ data 자체가 배열이면 그걸 사용 (응답이 바로 배열인 경우)
+                            : []; // ⑩ 위에 모두 해당 안 되면 그냥 빈 배열 사용 (에러 방지용 기본값)
 
                     // 검색/비검색 공통: 프런트에서 필터 + 슬라이스
                     filterAndSlice(list);
 
                     // ─── 서버 페이지/전체 수치 동기화(비검색일 때 서버 값을 우선) ───
                     if (!isSearching) {
+                        // isSearching이 false일 때만 서버 페이지 정보를 반영.
                         // 현재 페이지/페이지 크기
-                        $scope.page = typeof data.page === 'number' ? data.page : typeof data.number === 'number' ? data.number : $scope.page;
-                        $scope.pageSize = toInt(typeof data.size === 'number' ? data.size : $scope.pageSize, 10);
+                        $scope.page =
+                            typeof data.page === 'number'
+                                ? data.page // 1순위: data.page
+                                : typeof data.number === 'number'
+                                ? data.number // 2순위: data.number
+                                : $scope.page; // 없으면 기존 유지
+
+                        $scope.pageSize = toInt(
+                            typeof data.size === 'number' ? data.size : $scope.pageSize, // 서버 size 우선
+                            10
+                        );
 
                         // 총합/총페이지 robust 파싱
-                        const hasTotal = typeof data.total === 'number' || typeof data.totalElements === 'number';
-                        const serverTotal = typeof data.total === 'number' ? data.total : data.totalElements;
-                        const serverTotalPages = typeof data.totalPages === 'number' ? data.totalPages : typeof data.pages === 'number' ? data.pages : undefined;
+                        const hasTotal =
+                            typeof data.total === 'number' || // 1) 응답 객체 data에
+                            typeof data.totalElements === 'number'; //    - data.total 또는 data.totalElements 중
+                        //    어느 하나라도 "숫자"로 존재하는지 확인.
+                        //    → 둘 중 하나라도 숫자면, 서버가 총 개수(total)를
+                        //      명시적으로 보내준다고 판단.
+
+                        const serverTotal =
+                            typeof data.total === 'number'
+                                ? data.total // 2) 우선순위 1: data.total 필드가 숫자면 그대로 사용.
+                                : data.totalElements; //    그렇지 않으면 data.totalElements(Spring Page 스타일)를 사용.
+
+                        const serverTotalPages =
+                            typeof data.totalPages === 'number'
+                                ? data.totalPages // 3) 우선순위 1: data.totalPages(페이지 개수)가 있으면 사용.
+                                : typeof data.pages === 'number'
+                                ? data.pages //    우선순위 2: totalPages 대신 pages라는 이름으로 올 수도 있으므로 체크.
+                                : undefined; //    둘 다 없으면 "정의되지 않음"(undefined)으로 둠.
 
                         if (hasTotal) {
-                            $scope.total = serverTotal;
-                            $scope.pages = Math.max(1, Math.ceil($scope.total / Math.max(1, toInt($scope.pageSize, 10))));
+                            // total 또는 totalElements가 있을 때
+                            $scope.total = serverTotal; // 4) 서버가 알려준 total(또는 totalElements)을 그대로 전체 개수로 채택.
+                            $scope.pages = Math.max(
+                                1, //    최소 1페이지는 보장(0페이지는 말이 안 됨)
+                                Math.ceil(
+                                    $scope.total / //    전체 개수를
+                                        Math.max(1, toInt($scope.pageSize, 10)) //    페이지 크기(최소 1 이상 보정)로 나누어
+                                ) //    올림 → 페이지 개수 계산.
+                            );
                         } else if (serverTotalPages !== undefined) {
-                            // totalElements가 없고 totalPages만 있을 때
-                            $scope.pages = Math.max(1, serverTotalPages);
-                            // total은 근사치로 pages*size (서버가 정확 totalElements를 안 줄 때 UI용 계산)
-                            $scope.total = $scope.pages * Math.max(1, toInt($scope.pageSize, 10));
+                            // totalElements 없이 totalPages만 있을 때
+                            $scope.pages = Math.max(
+                                1,
+                                serverTotalPages // 5) 총 페이지 수만 알고 있을 경우, 그 값을 그대로 사용
+                            ); //    (역시 최소 1 보장).
+
+                            $scope.total =
+                                $scope.pages * // 6) totalElements가 없으므로,
+                                Math.max(1, toInt($scope.pageSize, 10)); //    "페이지 수 × 페이지 크기"로 전체 개수를 근사치로 추정.
+                            //    → UI에서 "총 N건" 같이 표시할 때 쓰는 대략적인 값.
                         } else {
                             // 어떤 메타도 없으면 현재 목록 길이 기준으로 보수 계산
                             const curLen = Array.isArray(list) ? list.length : 0;
-                            $scope.total = Math.max($scope.total || 0, curLen + $scope.page * Math.max(1, toInt($scope.pageSize, 10)));
-                            $scope.pages = Math.max(1, Math.ceil($scope.total / Math.max(1, toInt($scope.pageSize, 10))));
+                            // 7) 서버가 total / totalElements / totalPages 같은 메타 정보를 전혀 안 줄 때:
+                            //    이번에 받아온 목록(list)이 배열이면 그 길이(length)를 사용하고, 아니면 0으로 처리.
+
+                            $scope.total = Math.max(
+                                $scope.total || 0, // 8) 기존에 계산해 둔 total이 있으면 그 값과 비교해서
+                                curLen +
+                                    $scope.page * //    "현재 페이지까지 최소 몇 개의 데이터가 있었을 것인지"
+                                        Math.max(1, toInt($scope.pageSize, 10)) //    대략 계산: (지금까지 지나온 페이지 수 × 페이지크기) + 현재 페이지 길이
+                            ); //    그 중 더 큰 값을 total로 사용해 "적어도 이 정도는 있다"는 보수적 추정.
+
+                            $scope.pages = Math.max(
+                                1,
+                                Math.ceil(
+                                    $scope.total / Math.max(1, toInt($scope.pageSize, 10)) // 9) 위에서 추정한 total을 기준으로 다시 페이지 수를 계산.
+                                )
+                            );
+                            // → 요약:
+                            //   서버가 아무 메타를 안 줄 때도, 지금까지 본 데이터 양을 기반으로
+                            //   "총 건수/페이지 수"를 대략 추정해서 UI가 깨지지 않게 하는 방어 로직.
                         }
                     }
                 })
+
                 .catch(() => {
-                    $scope.posts = [];
-                    $scope.total = 0;
-                    $scope.pages = 1;
+                    // HTTP 요청이 실패한 경우(네트워크/서버 에러 등)
+                    $scope.posts = []; // 게시글 목록은 빈 배열로
+                    $scope.total = 0; // 총 건수 0
+                    $scope.pages = 1; // 페이지 수는 최소 1로 보정 (UI 깨지지 않게)
                 })
                 .finally(() => {
-                    $scope.loading = false;
+                    // 성공/실패 상관없이 마지막에 항상 실행
+                    $scope.loading = false; // 로딩 상태 해제 → 스피너/버튼 비활성화 풀어줌
                 });
         };
 
@@ -906,10 +975,6 @@
             return arr;
         };
 
-        // (댓글/CRUD 이하 동일)
-        // ... [생략: 기존 댓글/수정/삭제 로직 전부 동일] ...
-        // ── 최상위 댓글 작성/대댓글/수정/삭제/토글 함수들은 원본 그대로 유지 ──
-
         // ====== 댓글 관련 ======
         $scope.toggleComments = function (p) {
             // 특정 게시글 p의 댓글 영역 열기/닫기 토글
@@ -923,10 +988,7 @@
             return (arr || []).map((c, i) => {
                 // 안전하게 배열화 후 각 댓글 가공
                 if (!c) return c; // 방어: null/undefined면 그대로 반환
-                c._uid = // 리스트 렌더링에 쓰는 고유 키(React의 key 같은 용도)
-                    (c.uuid && 'c-' + c.uuid) || //   1) uuid가 있으면 그걸 사용
-                    (typeof c.commentId === 'number' && isFinite(c.commentId) && 'c-' + c.commentId) || // 2) 숫자 id가 있으면 사용
-                    'c-tmp-' + baseTs + '-' + i; //   3) 둘 다 없으면 임시 키 생성(낙관적 추가 대비)
+                c._uid = (c.uuid && 'c-' + c.uuid) || (typeof c.commentId === 'number' && isFinite(c.commentId) && 'c-' + c.commentId) || 'c-tmp-' + baseTs + '-' + i;
                 c._replying = false; // 대댓글 입력창 표시 상태(기본 숨김)
                 c._replyText = ''; // 대댓글 입력값(초기 공란)
                 return c; // 가공된 댓글 반환
@@ -935,129 +997,96 @@
 
         $scope.loadComments = function (p) {
             // 게시글 p의 댓글 목록을 서버에서 불러오기
-            const url = p._keyType === 'num' ? '/api/posts/' + encodeURIComponent(p._key) + '/comments' : p._keyType === 'str' ? '/api/posts/key/' + encodeURIComponent(p._key) + '/comments' : null; // 게시글 식별 타입(num/str)에 따라 API URL 결정
+            const url = p._keyType === 'num' ? '/api/posts/' + encodeURIComponent(p._key) + '/comments' : p._keyType === 'str' ? '/api/posts/key/' + encodeURIComponent(p._key) + '/comments' : null;
             if (!url) {
-                // 식별 키가 없으면 댓글 기능 비활성 처리
-                p.comments = []; // 화면에 빈 배열 표시
-                p._commentsLoaded = true; // 로딩 완료로 간주(다시 로드 시도하지 않게)
-                return; // 종료
+                p.comments = [];
+                p._commentsLoaded = true;
+                return;
             }
             $http.get(url).then((res) => {
-                // 서버에서 댓글 목록 GET
-                p.comments = decorateComments(Array.isArray(res.data) ? res.data : []); // 응답을 배열로 강제 후 화면용 보정
-                p._commentsLoaded = true; // 이 게시글에 대해 댓글이 로딩되었음을 표시
-                p._newComment = ''; // 새 댓글 입력창 초기화
+                p.comments = decorateComments(Array.isArray(res.data) ? res.data : []);
+                p._commentsLoaded = true;
+                p._newComment = '';
             });
         };
 
         $scope.addComment = function (p) {
-            // 새 댓글 등록
-            const text = (p._newComment || '').trim(); // 입력값 공백 제거
-            if (!text) return; // 내용이 없으면 중단
-            const url = p._keyType === 'num' ? '/api/posts/' + encodeURIComponent(p._key) + '/comments' : p._keyType === 'str' ? '/api/posts/key/' + encodeURIComponent(p._key) + '/comments' : null; // 게시글 식별 타입에 맞는 등록 URL
-            if (!url) return alert('이 글은 댓글 기능을 사용할 수 없습니다.'); // 식별 불가
+            const text = (p._newComment || '').trim();
+            if (!text) return;
+            const url = p._keyType === 'num' ? '/api/posts/' + encodeURIComponent(p._key) + '/comments' : p._keyType === 'str' ? '/api/posts/key/' + encodeURIComponent(p._key) + '/comments' : null;
+            if (!url) return alert('이 글은 댓글 기능을 사용할 수 없습니다.');
             $http.post(url, { content: text }).then((res) => {
-                // POST로 댓글 작성
-                const created = res.data || {}; // 서버가 돌려준 생성된 댓글 객체
-                p.comments = p.comments || []; // 배열 방어
-                p.comments.push(created); // 목록 뒤에 바로 추가(낙관적 갱신)
-                p._newComment = ''; // 입력창 비우기
+                const created = res.data || {};
+                p.comments = p.comments || [];
+                p.comments.push(created);
+                p._newComment = '';
             });
         };
 
         $scope.startReply = function (c) {
-            // 특정 댓글 c에 대댓글 입력 시작
-            c._replying = true; // 입력창 표시
-            c._replyText = ''; // 입력값 초기화
+            c._replying = true;
+            c._replyText = '';
         };
 
         $scope.cancelReply = function (c) {
-            // 대댓글 입력 취소
-            c._replying = false; // 입력창 닫기
-            c._replyText = ''; // 입력값 비우기
+            c._replying = false;
+            c._replyText = '';
         };
 
         $scope.submitReply = function (p, parent) {
-            // 대댓글 전송
-            const text = (parent._replyText || '').trim(); // 입력값 정리
-            if (!text) return; // 빈 문자열이면 중단
-            if (!parent || !parent.uuid)
-                // 부모 댓글의 uuid가 필수(키 기반 API)
-                return alert('이 댓글은 대댓글 키(uuid)를 알 수 없습니다.');
-            const url = '/api/comments/key/' + encodeURIComponent(parent.uuid) + '/replies'; // 대댓글 API
+            const text = (parent._replyText || '').trim();
+            if (!text) return;
+            if (!parent || !parent.uuid) return alert('이 댓글은 대댓글 키(uuid)를 알 수 없습니다.');
+            const url = '/api/comments/key/' + encodeURIComponent(parent.uuid) + '/replies';
             $http
-                .post(url, { content: text }) // 서버에 대댓글 등록
+                .post(url, { content: text })
                 .then((res) => {
-                    const created = res.data || {}; // 생성된 대댓글
-                    p.comments = p.comments || []; // 목록 방어
-                    p.comments.push(created); // 현재 평면 목록 뒤에 추가(트리 변환은 렌더러에서 처리 가능)
-                    parent._replying = false; // 입력창 닫기
-                    parent._replyText = ''; // 입력값 비우기
+                    const created = res.data || {};
+                    p.comments = p.comments || [];
+                    p.comments.push(created);
+                    parent._replying = false;
+                    parent._replyText = '';
                 })
                 .catch(() => {
-                    alert('대댓글 등록에 실패했습니다.'); // 실패 안내
+                    alert('대댓글 등록에 실패했습니다.');
                 });
         };
 
         $scope.startEditComment = function (c) {
-            // 댓글 수정 시작
-            if (!canEditComment(c))
-                // 권한(작성자 본인) 체크
-                return alert('본인이 쓴 댓글만 수정할 수 있습니다.');
-            c._editing = true; // 수정 모드 진입
-            c._editContent = c.content; // 현재 내용을 편집 버퍼에 복사
+            if (!canEditComment(c)) return alert('본인이 쓴 댓글만 수정할 수 있습니다.');
+            c._editing = true;
+            c._editContent = c.content;
         };
-
         $scope.cancelEditComment = function (c) {
-            // 댓글 수정 취소
-            c._editing = false; // 수정 모드 해제
-            c._editContent = ''; // 편집 버퍼 비우기
+            c._editing = false;
+            c._editContent = '';
         };
-
         $scope.saveComment = function (p, c) {
-            // 댓글 수정 저장
-            if (!canEditComment(c))
-                // 다시 한 번 권한 확인(이중 방어)
-                return alert('본인이 쓴 댓글만 수정할 수 있습니다.');
-            const newText = (c._editContent || '').trim(); // 편집 내용 정리
-            if (!newText) return; // 빈 내용이면 중단
-            if (!c.uuid)
-                // 수정 API는 키(uuid) 기반 가정
-                return alert('이 댓글은 수정용 키를 알 수 없어 수정할 수 없습니다.');
+            if (!canEditComment(c)) return alert('본인이 쓴 댓글만 수정할 수 있습니다.');
+            const newText = (c._editContent || '').trim();
+            if (!newText) return;
+            if (!c.uuid) return alert('이 댓글은 수정용 키를 알 수 없어 수정할 수 없습니다.');
             $http
-                .put(
-                    '/api/comments/key/' + encodeURIComponent(c.uuid), // PUT으로 내용 갱신
-                    { content: newText }
-                )
+                .put('/api/comments/key/' + encodeURIComponent(c.uuid), { content: newText })
                 .then(function (res) {
-                    c.content = newText; // 화면상 내용 반영
-                    if (res && res.data && res.data.updatedAt)
-                        // 서버가 갱신 시각을 주면
-                        c.updatedAt = res.data.updatedAt; // 로컬에도 업데이트
-                    c._editing = false; // 수정 모드 종료
-                    c._editContent = ''; // 편집 버퍼 비우기
+                    c.content = newText;
+                    if (res && res.data && res.data.updatedAt) c.updatedAt = res.data.updatedAt;
+                    c._editing = false;
+                    c._editContent = '';
                 })
                 .catch(function (err) {
-                    if (err && err.status === 403)
-                        // 권한 오류면 친절히 메시지
-                        alert('본인이 쓴 댓글만 수정할 수 있습니다.');
-                    else alert('수정에 실패했습니다.'); // 기타 실패
+                    if (err && err.status === 403) alert('본인이 쓴 댓글만 수정할 수 있습니다.');
+                    else alert('수정에 실패했습니다.');
                 });
         };
-
         $scope.deleteComment = function (p, c) {
-            // 댓글 삭제
-            if (!canEditComment(c))
-                // 삭제 권한(작성자 본인) 확인
-                return alert('본인이 쓴 댓글만 삭제할 수 있습니다.');
-            if (!confirm('댓글을 삭제할까요?')) return; // 사용자 확인
+            if (!canEditComment(c)) return alert('본인이 쓴 댓글만 삭제할 수 있습니다.');
+            if (!confirm('댓글을 삭제할까요?')) return;
             if (c && c.uuid) {
-                // 1) uuid 기반 삭제 경로
                 $http
-                    .delete('/api/comments/key/' + encodeURIComponent(c.uuid)) // 키 기반 DELETE
+                    .delete('/api/comments/key/' + encodeURIComponent(c.uuid))
                     .then(function () {
                         p.comments = (p.comments || []).filter(function (x) {
-                            // 클라이언트 목록에서 제거
                             return x.uuid !== c.uuid;
                         });
                     })
@@ -1065,15 +1094,15 @@
                         if (err && err.status === 403) alert('본인이 쓴 댓글만 삭제할 수 있습니다.');
                         else alert('삭제 실패');
                     });
-                return; // 종료(아래 분기 타지 않게)
+                return;
             }
-            const id = c && c.commentId; // 2) 숫자 id 기반 삭제 경로(레거시 호환)
+            const id = c && c.commentId;
             if (typeof id === 'number' && isFinite(id)) {
                 $http
-                    .delete('/api/comments/' + encodeURIComponent(id)) // id 기반 DELETE
+                    .delete('/api/comments/' + encodeURIComponent(id))
                     .then(function () {
                         p.comments = (p.comments || []).filter(function (x) {
-                            return x.commentId !== id; // 목록에서 id로 제거
+                            return x.commentId !== id;
                         });
                     })
                     .catch(function () {
@@ -1081,7 +1110,7 @@
                     });
                 return;
             }
-            alert('이 댓글은 삭제용 키를 알 수 없어 삭제할 수 없습니다.'); // 어떤 키도 없으면 실패 안내
+            alert('이 댓글은 삭제용 키를 알 수 없어 삭제할 수 없습니다.');
         };
 
         // ====== ★ 게시글 CRUD(추가) — 저장 후 항상 새로고침 ======
@@ -1095,7 +1124,6 @@
             $http
                 .post(url, { title, content })
                 .then(function () {
-                    // 목록을 서버 기준으로 다시 로드
                     $scope.newPost = { title: '', content: '' };
                     $scope.page = 0;
                     $scope.loadPosts();
@@ -1105,7 +1133,6 @@
                 });
         };
 
-        // 편집 시작/취소 (권한 가드 포함)
         $scope.startEditPost = function (p) {
             if (!canEditPost(p)) return alert('본인이 쓴 글만 수정할 수 있습니다.');
             p._editing = true;
@@ -1118,7 +1145,6 @@
             p._editContent = '';
         };
 
-        // 저장: 로컬 값을 바꾸지 않고 목록 재조회(=새로고침)
         $scope.savePost = function (p) {
             if (!canEditPost(p)) return alert('본인이 쓴 글만 수정할 수 있습니다.');
             const title = (p._editTitle || '').trim();
@@ -1138,7 +1164,6 @@
                     p._editing = false;
                     p._editTitle = '';
                     p._editContent = '';
-                    // ✅ 반드시 서버 데이터로 재렌더
                     $scope.reload ? $scope.reload() : $scope.loadPosts();
                 })
                 .catch(function () {
@@ -1146,7 +1171,6 @@
                 });
         };
 
-        // 삭제: 성공 후 목록 재조회
         $scope.deletePost = function (p) {
             if (!canEditPost(p)) return alert('본인이 쓴 글만 삭제할 수 있습니다.');
             if (!confirm('정말 삭제할까요?')) return;
@@ -1168,118 +1192,188 @@
                 });
         };
 
-        // ★★★ 목록 → 편집 전용 화면으로 이동 (분리 페이지)
         $scope.goEdit = function (p) {
-            if (!p || !p._key || !p._keyType) return alert('수정용 키가 없습니다.');
-            // 편집 화면은 권한 체크를 서버에서 다시 하므로, 여기서는 단순 이동만 담당
+            // 게시글 하나(p)를 "수정 전용 화면"으로 보내는 함수.
+            // 목록 화면에서 [수정] 버튼을 눌렀을 때 호출됨.
+
+            if (!p || !p._key || !p._keyType)
+                // 방어 코드:
+                //  - p가 없거나(null/undefined)
+                //  - p._key(글을 식별하는 실제 값) 가 없거나
+                //  - p._keyType(키의 종류: 숫자인지 문자열인지 구분) 이 없으면
+                //    → 수정에 필요한 식별 정보가 없다는 뜻이므로,
+                return alert('수정용 키가 없습니다.');
+            //    경고창을 띄우고 함수 종료.
+
             var type = p._keyType === 'num' ? 'num' : 'str';
+            // type 변수에 'num' 또는 'str' 중 하나를 넣음.
+            //  - p._keyType 값이 'num' 이면 그대로 'num'
+            //  - 그 외에는 모두 'str' 로 간주
+            //    → URL 패턴에서 /edit/num/123  또는 /edit/str/UUID  이렇게 쓰기 위해 미리 구분.
+
             var code = ($scope.boardCode || '').toLowerCase(); // 'BUS' → 'bus'
-            // 예: #/board/bus/edit/str/550e8400-...  또는  #/board/bus/edit/num/42
-            window.location.hash = '#/board/' + encodeURIComponent(code) + '/edit/' + type + '/' + encodeURIComponent(p._key);
+            // 현재 게시판의 코드(예: 'BUS', 'NORM')를 소문자로 변환.
+            //  - $scope.boardCode 가 없으면 빈 문자열 '' 사용 (에러 방어)
+            //  - toLowerCase() 로 'BUS' → 'bus'
+            //    → 라우팅 규칙이 /board/bus, /board/normal 이런 식이기 때문.
+
+            window.location.hash =
+                '#/board/' +
+                encodeURIComponent(code) + // 게시판 코드 부분 (예: 'bus')
+                '/edit/' +
+                type + // 키 타입: 'num' 또는 'str'
+                '/' +
+                encodeURIComponent(p._key); // 실제 글의 키 값(숫자 id 또는 uuid 등)
+
+            // 최종적으로 hash 값 예시:
+            //   #/board/bus/edit/num/42
+            //   #/board/bus/edit/str/550e8400-e29b-41d4-a716-446655440000
+            //
+            // 이렇게 location.hash 를 바꾸면,
+            //   → AngularJS의 ngRoute 가 URL을 감지해서
+            //   app.config(...) 에서 정의한 이 라우트로 이동함:
+            //
+            //   .when('/board/:code/edit/:type/:key', {
+            //       templateUrl: '/tpl/board/edit.html',
+            //       controller: 'BoardEditCtrl',
+            //   })
+            //
+            // 그래서 이 함수의 역할은:
+            //   "현재 목록에서 선택한 글을, 분리된 '수정 전용 화면(BoardEditCtrl)'으로
+            //    옮기기 위한 hash URL 을 만들어서 브라우저 주소에 세팅" 하는 것.
         };
+
         // ====== // 게시글 CRUD 끝 ======
     });
 
     // ───────────────── 게시글 편집 전용 컨트롤러 ─────────────────
+    // 게시글 "수정 전용 화면"을 담당하는 컨트롤러 정의
     app.controller('BoardEditCtrl', function ($scope, $http, $routeParams, $location) {
-        $scope.loading = true;
-        $scope.saving = false;
-        $scope.deleting = false;
+        // 화면 상단에 로딩 스피너/비활성화에 사용할 상태값들
+        $scope.loading = true; // 데이터(게시글 한 건)를 불러오는 중인지 여부
+        $scope.saving = false; // 저장(수정) 요청 중인지 여부
+        $scope.deleting = false; // 삭제 요청 중인지 여부
 
-        const code = String($routeParams.code || '').toUpperCase(); // 'BUS' / 'NORM'
-        const type = String($routeParams.type || 'str'); // 'num' | 'str'
-        const key = $routeParams.key;
+        // URL 파라미터에서 게시판 코드, 키 타입, 키 값을 꺼내서 사용
+        // 예: #/board/bus/edit/str/550e8400-...  → code='BUS', type='str', key='550e8...'
+        const code = String($routeParams.code || '').toUpperCase(); // 'bus' → 'BUS', 'norm' → 'NORM'
+        const type = String($routeParams.type || 'str'); // 'num' 또는 'str' (기본값 'str')
+        const key = $routeParams.key; // 글을 식별하는 실제 값(id 또는 uuid 등)
 
-        // 뒤로가기: 해당 게시판 목록으로
+        // ▶ 목록 화면으로 돌아가는 공통 함수
         function backToList() {
-            const path = '/board/' + code.toLowerCase();
-            $location.path(path).search({}); // 쿼리 제거
+            const path = '/board/' + code.toLowerCase(); // 'BUS' → '/board/bus'
+            $location
+                .path(path) // 라우트 경로를 목록 페이지로 변경
+                .search({}); // URL 쿼리 파라미터는 모두 초기화
         }
-        $scope.cancel = backToList;
+        // backToList는 "목록 화면으로 돌아가기" 전용으로 만든 작은 함수 이름
+        $scope.cancel = backToList; // 취소 버튼에서 사용하기 위해 $scope에 연결
 
-        // 단건 로드
+        // ▶ 게시글 1건을 서버에서 가져와서 form에 채워 넣는 함수
         function fetchOne() {
-            $scope.loading = true;
+            $scope.loading = true; // 로딩 시작 표시
             let url = null;
-            if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
-            // encodeURIComponent는 URL 안에 넣을 값(파라미터)을 안전하게 문자 인코딩해 주는 자바스크립트 함수
+            if (type === 'num')
+                // 키 타입이 숫자라면: /api/posts/{id}
+                // encodeURIComponent는 자바스크립트에서 문자열을 URL 안에 안전하게 넣기 위해 특수문자들을 인코딩(변환)해 주는 함수
+                url = '/api/posts/' + encodeURIComponent(key);
+            // 문자열 키(uuid 등)라면: /api/posts/key/{key}
             else url = '/api/posts/key/' + encodeURIComponent(key);
 
             $http
-                .get(url)
+                .get(url) // 서버에 GET 요청 → 게시글 한 건 조회
                 .then(function (res) {
-                    const p = res.data || {};
+                    const p = res.data || {}; // 응답이 없을 경우를 대비해 빈 객체로 방어
+                    // 실제 수정 폼에 바인딩할 데이터
                     $scope.form = {
-                        title: p.title || '',
-                        content: p.content || '',
+                        title: p.title || '', // 제목
+                        content: p.content || '', // 내용
                     };
+                    // 화면에 참고용으로 보여줄 메타 정보(작성자, 시간 등)
                     $scope.meta = {
-                        writerId: p.writerId || p.author || '',
-                        writerName: p.writerName || p.username || '',
+                        writerId: p.writerId || p.author || '', // 작성자 ID(백엔드 필드 이름이 다를 수 있어 여러 후보 중 하나 사용)
+                        writerName: p.writerName || p.username || '', // 작성자 이름
+                        // 작성일(필드명이 상황에 따라 다를 수 있어서 여러 개 중 하나 선택)
                         createdAt: p.createdAt || p.writeTime || p.created_at || '',
-                        updatedAt: p.updatedAt || '',
+                        updatedAt: p.updatedAt || '', // 수정일
                     };
                 })
                 .catch(function () {
-                    alert('게시글을 불러오지 못했습니다.');
-                    backToList();
+                    // 조회 실패 시
+                    alert('게시글을 불러오지 못했습니다.'); // 에러 안내
+                    backToList(); // 목록으로 되돌아감
                 })
                 .finally(function () {
-                    $scope.loading = false;
+                    // 성공/실패 상관없이 마지막에 항상 호출
+                    $scope.loading = false; // 로딩 종료
                 });
         }
-        fetchOne();
+        fetchOne(); // 컨트롤러가 생성되자마자 바로 게시글을 한 번 조회
 
-        // 저장
+        // ▶ [저장] 버튼을 눌렀을 때 호출되는 함수 (게시글 수정)
         $scope.save = function () {
-            const title = ($scope.form.title || '').trim();
-            const content = ($scope.form.content || '').trim();
-            if (!title) return alert('제목을 입력하세요.');
+            const title = ($scope.form.title || '').trim(); // 제목에서 앞뒤 공백 제거
+            const content = ($scope.form.content || '').trim(); // 내용에서 앞뒤 공백 제거
+            if (!title) return alert('제목을 입력하세요.'); // 제목이 비어 있으면 경고 후 중단
 
-            $scope.saving = true;
+            $scope.saving = true; // 저장 중 상태 on → 버튼 비활성화 등에 사용
             let url = null;
-            if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
+            if (type === 'num')
+                // 숫자 키일 경우
+                url = '/api/posts/' + encodeURIComponent(key);
+            // 문자열 키일 경우
             else url = '/api/posts/key/' + encodeURIComponent(key);
 
             $http
-                .put(url, { title, content })
+                .put(url, { title, content }) // PUT 요청으로 서버에 수정 내용 전송
                 .then(function () {
-                    // ✅ 목록으로 이동(분리 화면의 목적: 저장 후 리스트 새로고침)
-                    backToList();
+                    // 성공 시
+                    backToList(); // 다시 목록 화면으로 이동 (수정된 내용은 목록을 새로 로드해서 보여주게 됨)
                 })
                 .catch(function () {
+                    // 실패 시
                     alert('저장에 실패했습니다.');
                 })
                 .finally(function () {
-                    $scope.saving = false;
+                    // 성공/실패 상관없이
+                    $scope.saving = false; // 저장 중 상태 해제
                 });
         };
 
-        // 삭제
+        // ▶ [삭제] 버튼을 눌렀을 때 호출되는 함수 (게시글 삭제)
         $scope.remove = function () {
-            if (!confirm('정말 삭제할까요?')) return;
-            $scope.deleting = true;
+            // 사용자에게 한 번 더 확인
+            if (!confirm('정말 삭제할까요?')) return; // 취소 누르면 아무 것도 안 함
+            $scope.deleting = true; // 삭제 중 상태 on
+
             let url = null;
-            if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
+            if (type === 'num')
+                // 숫자 키일 경우
+                url = '/api/posts/' + encodeURIComponent(key);
+            // 문자열 키(uuid 등)일 경우
             else url = '/api/posts/key/' + encodeURIComponent(key);
 
             $http
-                .delete(url)
+                .delete(url) // DELETE 요청으로 서버에 삭제 요청
                 .then(function () {
-                    backToList();
+                    // 성공 시
+                    backToList(); // 목록 화면으로 이동
                 })
                 .catch(function () {
+                    // 실패 시
                     alert('삭제에 실패했습니다.');
                 })
                 .finally(function () {
-                    $scope.deleting = false;
+                    // 성공/실패 상관없이
+                    $scope.deleting = false; // 삭제 중 상태 해제
                 });
         };
     });
 
     // ───────────────── 게시판 라우트별 컨트롤러 ─────────────────
     app.controller('BoardBusCtrl', function ($scope, $controller) {
-        angular.extend(this, $controller('BoardBaseCtrl', { $scope }));
+        angular.extend(this, $controller('BoardBaseCtrl', { $scope })); // extend:상속
         $scope.boardCode = 'BUS';
         $scope.loadPosts();
     });
@@ -1290,27 +1384,24 @@
     });
 
     // ───────────────── Roles ─────────────────
-    // ───────────────── Roles ─────────────────
     app.controller('RolesCtrl', function ($scope, $http, $timeout, AuthService) {
         $scope.isAdmin = false;
         $scope.loading = true;
         $scope.saving = false;
 
-        // ⚠️ 뷰에서 쓰던 변수명을 유지하면서, 내부에서 원본을 따로 보관
-        $scope.rows = []; // ← 화면에 뿌려지는 "현재 페이지" 데이터 (슬라이스 결과로 덮어씀)
-        $scope.sourceRows = []; // ← 서버에서 받은 전체 원본 목록(필터/페이지 계산의 기준)
+        $scope.rows = []; // 화면용 데이터
+        $scope.sourceRows = []; // 서버 전체 원본
 
         $scope.msg = '';
         $scope.msgType = 'info';
 
-        // ✅ 검색 + 페이지네이션 상태 (사용자/권한 + 5/10/15/20)
         $scope.q = { type: 'username', keyword: '' };
         $scope.pageSizes = [5, 10, 15, 20];
-        $scope.pageSize = 10; // 셀렉트에서 바뀌면 문자열일 수 있으므로 아래 num()로 항상 숫자화
+        $scope.pageSize = 10;
         $scope.page = 0;
         $scope.filtered = [];
         $scope.paged = [];
-        $scope.pages = 1; // ✅ 템플릿 호환(페이지 표시/버튼 비활성화에 사용)
+        $scope.pages = 1;
 
         function notify(type, text, ms) {
             $scope.msgType = type;
@@ -1318,23 +1409,19 @@
             if (ms) $timeout(() => ($scope.msg = ''), ms);
         }
 
-        // 숫자 보정 유틸(전역 toInt와 동일한 동작, 여기선 즉시 사용하기 좋게 래핑)
         function num(v, def) {
             const n = parseInt(v, 10);
             return isFinite(n) ? n : def == null ? 0 : def;
         }
-        // 현재 페이지 크기(항상 숫자)
         $scope.pageSizeNum = function () {
             return Math.max(1, num($scope.pageSize, 10));
         };
-        // 총 페이지 수(항상 1 이상)
         $scope.pagesCount = function () {
             const total = ($scope.filtered || []).length;
             const size = $scope.pageSizeNum();
             return Math.max(1, Math.ceil(total / size));
         };
 
-        // 검색 매칭: username / role
         function matchRow(row, q) {
             const kw = String(q.keyword || '')
                 .trim()
@@ -1354,22 +1441,15 @@
         function repage() {
             const size = $scope.pageSizeNum();
             const pages = $scope.pagesCount();
-
-            // 현재 page가 범위를 벗어나면 보정
             if ($scope.page >= pages) $scope.page = pages - 1;
             if ($scope.page < 0) $scope.page = 0;
 
             const start = $scope.page * size;
             $scope.paged = ($scope.filtered || []).slice(start, start + size);
-
-            // ✅ 템플릿이 rows로 렌더링하더라도 페이지가 적용되도록 rows를 슬라이스 결과로 덮어씀
             $scope.rows = $scope.paged;
-
-            // ✅ 템플릿이 {{ pages }}와 ng-disabled="page>=pages-1"를 쓰므로 동기화
             $scope.pages = pages;
         }
         function refilter() {
-            // ✅ 필터는 항상 원본(sourceRows)을 기준으로
             $scope.filtered = ($scope.sourceRows || []).filter((r) => matchRow(r, $scope.q));
             $scope.page = 0;
             repage();
@@ -1383,7 +1463,6 @@
             refilter();
         };
 
-        // pager controls (뷰에서 pagesCount()를 쓰므로 여기서도 동일 기준 사용)
         $scope.onSize = function () {
             $scope.page = 0;
             repage();
@@ -1432,7 +1511,6 @@
             return arr;
         };
 
-        // 데이터/페이지크기/필터 길이 변화 시 항상 재계산
         $scope.$watchGroup(['pageSize', () => ($scope.filtered || []).length], repage);
 
         $scope.load = function () {
@@ -1440,16 +1518,14 @@
             $http
                 .get('/api/admin/roles')
                 .then((res) => {
-                    // ✅ 원본과 뷰 데이터를 분리 관리
                     $scope.sourceRows = Array.isArray(res.data) ? res.data : [];
-                    $scope.rows = $scope.sourceRows.slice(0); // 초기엔 전체를 복사해 놓고,
+                    $scope.rows = $scope.sourceRows.slice(0);
                     notify('info', '권한 목록을 불러왔습니다.', 1200);
-                    refilter(); // 즉시 필터/페이지 계산 → rows가 현재 페이지로 대체됨
+                    refilter();
                 })
                 .catch((err) => {
                     if (err && err.status === 403) notify('error', '관리자 전용 페이지입니다.', 2500);
                     else notify('error', '권한 목록을 불러오지 못했습니다.', 2500);
-                    // 실패 시 안전 초기화
                     $scope.sourceRows = [];
                     $scope.rows = [];
                     $scope.filtered = [];
@@ -1472,10 +1548,9 @@
                 .then(() => {
                     row.role = target;
                     notify('success', '저장되었습니다.', 1200);
-                    // 원본(sourceRows)에도 반영해 일관성 유지
                     const idx = ($scope.sourceRows || []).findIndex((r) => r.username === row.username);
                     if (idx >= 0) $scope.sourceRows[idx].role = target;
-                    refilter(); // 검색/페이지 다시 반영
+                    refilter();
                 })
                 .catch((err) => notify('error', err && err.data ? err.data : '저장 중 오류가 발생했습니다.', 2500))
                 .finally(() => {
@@ -1498,14 +1573,12 @@
     });
 
     // ───────────────── DB Users ─────────────────
-    // ───────────────── DB Users ─────────────────
     app.controller('DbUsersCtrl', function ($scope, $http, $q, $location, AuthService) {
         $scope.isAdmin = false;
         $scope.users = [];
         $scope.userStatusMessage = '';
         $scope.userStatusType = '';
 
-        // ✅ 검색 + 페이지네이션 상태
         $scope.q = { type: 'username', keyword: '' };
         $scope.pageSizes = [5, 10, 15, 20];
         $scope.pageSize = 10;
@@ -1514,8 +1587,7 @@
         $scope.filtered = [];
         $scope.paged = [];
 
-        // ★ 숫자 보정 유틸 (문자열 '5' → 5)
-        function toInt(v, def) {
+        function toIntLocal(v, def) {
             if (typeof v === 'number' && isFinite(v)) return v;
             const n = parseInt(v, 10);
             return isFinite(n) ? n : def == null ? 0 : def;
@@ -1549,7 +1621,6 @@
             });
         }
 
-        // ── 필터링(사용자/이메일/전화/권한) ──
         function matchUser(u, q) {
             const kw = String(q.keyword || '')
                 .trim()
@@ -1579,9 +1650,8 @@
             return true;
         }
 
-        // ★ 페이지 계산(항상 숫자 보정해서 계산)
         function repage() {
-            const size = Math.max(1, toInt($scope.pageSize, 10)); // ← 숫자화
+            const size = Math.max(1, toIntLocal($scope.pageSize, 10));
             const total = ($scope.filtered || []).length;
             $scope.pages = Math.max(1, Math.ceil(total / size));
             if ($scope.page >= $scope.pages) $scope.page = $scope.pages - 1;
@@ -1605,10 +1675,8 @@
             refilter();
         };
 
-        // pager controls
         $scope.onSize = function () {
-            // ← select 변경
-            $scope.pageSize = toInt($scope.pageSize, 10); // ★ 숫자화
+            $scope.pageSize = toIntLocal($scope.pageSize, 10);
             $scope.page = 0;
             repage();
         };
@@ -1637,7 +1705,7 @@
             }
         };
         $scope.go = function (p) {
-            p = toInt(p, 0);
+            p = toIntLocal(p, 0);
             if (p >= 0 && p < $scope.pages && p !== $scope.page) {
                 $scope.page = p;
                 repage();
@@ -1651,7 +1719,6 @@
             return arr;
         };
 
-        // ★ 안전망: page/pageSize/filtered 길이가 바뀌면 자동 재계산
         $scope.$watchGroup(['page', 'pageSize', () => ($scope.filtered || []).length], repage);
 
         $scope.loadUsers = function () {
@@ -1667,7 +1734,7 @@
                     attachRolesToUsers(users, makeRoleIndex(roles));
                     $scope.users = users;
                     setUserStatus('success', `👤 사용자 ${$scope.users.length}명 불러왔습니다.`, 1500);
-                    refilter(); // ← 목록 불러온 뒤 필터/페이지 갱신
+                    refilter();
                 })
                 .catch(function () {
                     setUserStatus('error', '❌ 사용자 목록을 불러오지 못했습니다.', 2500);

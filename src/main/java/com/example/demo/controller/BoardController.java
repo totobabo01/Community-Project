@@ -54,6 +54,7 @@ public class BoardController {
     public PageDTO<PostDto> list(                                     // 페이지 DTO(PostDto 목록/카운트/페이지/사이즈) 반환
             // @PathVariable은 Spring MVC(스프링 프레임워크) 에서 URL 경로의 일부를 변수처럼 받아오는 기능
             @PathVariable String code,                                 // 경로 변수로 게시판 코드 수신("BUS"/"NORM" 등)
+            // defaultvalue: "값이 주어지지 않았을 때 대신 사용되는 “미리 정해둔 값”
             @RequestParam(defaultValue = "0") int page,                // 쿼리 파라미터 page(기본 0)
             @RequestParam(defaultValue = "10") int size) {             // 쿼리 파라미터 size(기본 10)
 

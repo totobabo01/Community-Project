@@ -162,16 +162,38 @@ public class PostDao {
         var s = ensurePostResolved();
         if (boardColumnIsUuid(s)) { // boardColumnIsUuid(s)는 PostDao 안의 아주 작은 헬퍼 메서드
             String sql =
-                "SELECT COUNT(*) " +
-                "FROM " + s.table + " p JOIN board b ON p." + s.board + " = b.uuid " +
-                "WHERE b.board_code = ?";
+                "SELECT COUNT(*) " +                                         // 1) 전체 행(레코드) 개수를 세기 위한 COUNT 쿼리의 SELECT 부분
+                "FROM " + s.table + " p JOIN board b ON p." + s.board + " = b.uuid " + 
+                // 2) FROM 절: 게시글 테이블(s.table)을 p라는 별칭으로 사용하고,
+                //    board 테이블을 b라는 별칭으로 JOIN.
+                //    JOIN 조건: p.(게시글의 보드 FK 컬럼 = s.board) = b.uuid
+                //    → 즉, '이 글이 어느 게시판(board)에 속하는지'를 board.uuid로 연결함.
+                "WHERE b.board_code = ?";                                   // 3) WHERE 절: board_code가 특정 값(물음표 자리)인 게시판의 글만 대상으로 COUNT
+                                                                 //    ?는 PreparedStatement에서 바인딩할 파라미터(예: 'bus', 'notice' 등 게시판 코드)
             Long cnt = jdbc.queryForObject(sql, Long.class, code); // 카운트 단일 값 조회
             return cnt == null ? 0L : cnt;
-        } else {
+        } else {                                                              // 앞의 if (boardColumnIsUuid(s)) 아닐 때 실행되는 분기.
             String sql =
-                "SELECT COUNT(*) FROM " + s.table + " WHERE " + s.board + " = ?";
-            Long cnt = jdbc.queryForObject(sql, Long.class, code);
-            return cnt == null ? 0L : cnt;
+            "SELECT COUNT(*) FROM " + s.table + " WHERE " + s.board + " = ?"; 
+        // SQL 문자열 조립:
+        // - s.table : 게시글 테이블 이름 (예: "posts")
+        // - s.board : 게시글 테이블 안에서 보드를 가리키는 FK 컬럼명 (예: "board_id")
+        // 최종 SQL 예시: "SELECT COUNT(*) FROM posts WHERE board_id = ?"
+        // → 특정 board_id에 해당하는 게시글이 몇 개 있는지 세는 쿼리.
+
+        Long cnt = jdbc.queryForObject(sql, Long.class, code);
+        // jdbc.queryForObject:
+        //   - 첫 번째 인자: 방금 만든 SQL
+        //   - 두 번째 인자: 결과를 매핑할 타입 (여기선 Long.class, 즉 COUNT(*) 결과를 Long으로 받음)
+        //   - 세 번째 인자: ? 자리에 들어갈 값 (여기선 code, 보드 식별값)
+        // 실행 결과:
+        //   - board_id = code 인 행의 개수를 Long 타입으로 돌려받음
+        //   - 결과가 없으면 null 이 들어올 수도 있음(드라이버/설정에 따라 다르지만, 방어 코드로 처리).
+
+         return cnt == null ? 0L : cnt;
+        // cnt가 null이면 0L(0이라는 Long 값)을 반환하고,
+        // null이 아니면 실제 COUNT 결과(cnt)를 그대로 반환.
+        // → 호출하는 쪽에서는 "해당 게시판 글 개수"를 항상 Long 값으로 안전하게 받게 됨.
         }
     }
 
