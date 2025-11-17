@@ -180,6 +180,7 @@
                 border: 1px solid #dbe2ee;
                 background: #fff;
                 border-radius: 8px;
+                cursor: pointer;
             }
             .btn-page.active {
                 background: #e9f0ff;
@@ -187,6 +188,13 @@
             }
             .muted {
                 color: #8b95a1;
+            }
+            /* 🔢 가운데 숫자 버튼 묶음 (버스 게시판과 동일 패턴) */
+            .pager-pages {
+                display: inline-flex;
+                gap: 4px;
+                margin: 0 8px;
+                vertical-align: middle;
             }
         </style>
         <!-- ▲▲ 검색툴바 전용 스타일 ▲▲ -->
@@ -409,44 +417,52 @@
                 style="margin-top: 10px"
             >
                 <div class="left">
-                    <span class="muted">페이지 {{ (page || 0) + 1 }} / {{ pages || 1 }}</span>
+                    <span class="muted"> 페이지 {{ (page || 0) + 1 }} / {{ pages || 1 }} </span>
                 </div>
                 <div class="right">
                     <button
                         class="btn-page"
+                        type="button"
                         ng-click="first()"
-                        ng-disabled="page<=0"
+                        ng-disabled="page <= 0"
                     >
                         « 처음
                     </button>
                     <button
                         class="btn-page"
+                        type="button"
                         ng-click="prev()"
-                        ng-disabled="page<=0"
+                        ng-disabled="page <= 0"
                     >
                         ‹ 이전
                     </button>
 
-                    <button
-                        class="btn-page"
-                        ng-repeat="p in pageRange()"
-                        ng-class="{active:p===page}"
-                        ng-click="go(p)"
-                    >
-                        {{ p + 1 }}
-                    </button>
+                    <!-- 🔢 가운데 숫자 버튼: pageRange() 기반 -->
+                    <span class="pager-pages">
+                        <button
+                            class="btn-page"
+                            type="button"
+                            ng-repeat="p in pageRange() track by p"
+                            ng-class="{ active: p === page }"
+                            ng-click="go(p)"
+                        >
+                            {{ p + 1 }}
+                        </button>
+                    </span>
 
                     <button
                         class="btn-page"
+                        type="button"
                         ng-click="next()"
-                        ng-disabled="page>=pages-1"
+                        ng-disabled="page >= pages - 1"
                     >
                         다음 ›
                     </button>
                     <button
                         class="btn-page"
+                        type="button"
                         ng-click="last()"
-                        ng-disabled="page>=pages-1"
+                        ng-disabled="page >= pages - 1"
                     >
                         끝 »
                     </button>

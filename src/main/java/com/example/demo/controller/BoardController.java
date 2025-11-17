@@ -2,9 +2,16 @@
 
 package com.example.demo.controller;                                  // 컨트롤러 클래스가 속한 패키지
 
+import java.io.IOException;                                           // 입출력 예외
+import java.nio.file.Files;                                           // 파일/디렉터리 조작 유틸
+import java.nio.file.Path;                                            // 경로 표현
+import java.nio.file.Paths;                                           // 경로 생성 유틸
 import java.util.List;                                                // 목록 타입 사용을 위한 import
+import java.util.UUID;                                                // 랜덤 UUID 생성용
 
+import org.springframework.beans.factory.annotation.Value;            // application.properties 값 주입
 import org.springframework.http.HttpStatus;                           // HTTP 상태코드 상수(403/404 등) 사용
+import org.springframework.http.MediaType;                            // 요청/응답 Content-Type 상수
 import org.springframework.http.ResponseEntity;                       // 응답 본문/상태를 함께 반환할 때 사용
 import org.springframework.security.core.Authentication;              // 현재 인증 정보(로그인 사용자/권한) 접근 인터페이스
 import org.springframework.security.core.GrantedAuthority;            // 권한 한 개(예: "ROLE_ADMIN") 표현 타입
@@ -17,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestBody;           // 요청 
 import org.springframework.web.bind.annotation.RequestMapping;        // 공통 URL prefix 지정
 import org.springframework.web.bind.annotation.RequestParam;          // 쿼리스트링 파라미터(page/size 등) 바인딩
 import org.springframework.web.bind.annotation.RestController;        // @Controller + @ResponseBody(메서드 반환을 JSON으로 직렬화)
+import org.springframework.web.multipart.MultipartFile;               // 업로드 파일 표현 타입
 
 import com.example.demo.dao.PostDao;                                  // 게시글 관련 DB 접근 DAO
 import com.example.demo.dto.PageDTO;                                  // 페이지네이션 응답 DTO(목록/전체건수/페이지/사이즈)
@@ -27,6 +35,9 @@ import com.example.demo.dto.PostDto;                                  // 게시�
 public class BoardController {
 
     private final PostDao postDao;                                    // 의존 DAO(게시글 CRUD/카운트/조건부 업데이트 등)
+
+    @Value("${file.upload-dir:uploads}")                              // 첨부파일 저장 디렉터리(application.properties에서 주입)
+    private String uploadDir;
 
     public BoardController(PostDao postDao) {                         // 생성자 주입(스프링이 PostDao 빈을 주입)
         this.postDao = postDao;                                       // 필드에 할당
@@ -56,10 +67,27 @@ public class BoardController {
             @PathVariable String code,                                 // 경로 변수로 게시판 코드 수신("BUS"/"NORM" 등)
             // defaultvalue: "값이 주어지지 않았을 때 대신 사용되는 “미리 정해둔 값”
             @RequestParam(defaultValue = "0") int page,                // 쿼리 파라미터 page(기본 0)
-            @RequestParam(defaultValue = "10") int size) {             // 쿼리 파라미터 size(기본 10)
+            @RequestParam(defaultValue = "10") int size,               // 쿼리 파라미터 size(기본 10)
+            // 🔎 검색/기간 조건용 쿼리 파라미터 (없으면 null로 들어옴 → DAO에서 무시)
+            @RequestParam(required = false) String type,               // 예: author / content / title / author_content / time
+            @RequestParam(required = false) String keyword,            // 검색 키워드(제목/내용/작성자 등)
+            @RequestParam(required = false) String from,               // 기간 검색 시작일(예: "2025-11-10")
+            @RequestParam(required = false) String to                  // 기간 검색 종료일(예: "2025-11-12")
+    ) {
 
-        long total = postDao.countByBoard(code);                       // 전체 행 수(해당 게시판 코드의 게시글 총 개수) 조회
-        List<PostDto> rows = postDao.findByBoardPaged(code, page, size);// 해당 페이지의 게시글 목록 조회(limit/offset 적용)
+        // 🔐 방어 코드: 페이지/사이즈 음수/0 방지 + 공백 문자열 정리
+        if (page < 0) page = 0;                                       // page는 최소 0페이지부터
+        if (size <= 0) size = 10;                                     // size는 최소 1 이상(기본값 10)
+
+        if (type != null && type.isBlank()) type = null;              // 빈 문자열은 null로 정리
+        if (keyword != null && keyword.isBlank()) keyword = null;
+        if (from != null && from.isBlank()) from = null;
+        if (to != null && to.isBlank()) to = null;
+
+        // 👉 여기서부터는 “검색 조건을 포함한” 카운트 + 페이지 목록 DAO 호출
+        long total = postDao.countByBoard(code, type, keyword, from, to); // 전체 행 수(검색 조건 포함) 조회
+        List<PostDto> rows = postDao.findByBoardPaged(                   // 해당 페이지의 게시글 목록 조회(limit/offset + 검색조건)
+                code, page, size, type, keyword, from, to);
         return new PageDTO<>(rows, total, page, size);                 // 프런트가 바로 쓰기 좋은 페이지 응답으로 래핑해 반환
     }
 
@@ -104,25 +132,121 @@ public class BoardController {
         return ResponseEntity.ok(p);
     }
 
-    /** 게시글 생성 */
-    @PostMapping("/boards/{code}/posts")                              // 예: POST /api/boards/NORM/posts (JSON 본문으로 글 데이터)
+    /** 게시글 생성 (파일 업로드 지원) */
+    @PostMapping(
+            value = "/boards/{code}/posts",                            // 예: POST /api/boards/NORM/posts
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE             // 본문 타입: multipart/form-data
+    )
     public ResponseEntity<PostDto> create(                            // 생성된 글 데이터를 본문으로 200 OK 반환
             @PathVariable String code,                                 // 게시판 코드
-            @RequestBody PostDto req,                                  // 요청 본문(JSON) → PostDto로 바인딩
-            Authentication auth) {                                     // 현재 사용자 인증(로그인 안 했을 수도 있음)
+            @RequestParam("title") String title,                       // 폼 필드: 제목
+            @RequestParam("content") String content,                   // 폼 필드: 내용
+            @RequestParam(name = "file", required = false) MultipartFile file, // 폼 필드: 첨부파일(없을 수 있음)
+            Authentication auth) throws IOException {                  // 현재 사용자 인증(로그인 안 했을 수도 있음)
 
-        req.setBoardCode(code);                                        // 서버 신뢰를 위해 boardCode는 URL에서 확정(본문 무시)
+        // 요청 본문을 직접 PostDto로 받지 않고, 서버쪽에서 안전하게 DTO 생성
+        PostDto req = new PostDto();
+
+        req.setBoardCode(code);                                        // 서버 신뢰를 위해 boardCode는 URL에서 확정
+        req.setTitle(title);                                           // 제목 설정
+        req.setContent(content);                                       // 내용 설정
+
         if (auth != null) {                                            // 로그인한 사용자라면 작성자 정보 설정
             req.setWriterId(auth.getName());                           // 서버가 보증하는 writerId(Principal)
             req.setWriterName(auth.getName());                         // 단순히 name도 동일 설정(필요 시 별도 조회 가능)
         }
+
+        // ───────────── 첨부파일 처리 ─────────────
+        if (file != null && !file.isEmpty()) {                         // 파일이 실제로 업로드된 경우에만
+            String originalName = file.getOriginalFilename();          // 원본 파일명
+            String contentType = file.getContentType();                // MIME 타입(image/png 등)
+
+            // 저장 파일명: UUID_원본이름 (충돌 방지)
+            String safeName = (originalName == null) ? "" : originalName.replaceAll("\\s+", "_");
+            String savedName = UUID.randomUUID().toString() + "_" + safeName;
+
+            // 업로드 디렉터리 생성(없으면)
+            Path uploadPath = Paths.get(uploadDir).toAbsolutePath();   // application.properties의 file.upload-dir 기준
+            Files.createDirectories(uploadPath);                       // 디렉터리 없으면 생성
+
+            // 실제 저장 경로
+            Path target = uploadPath.resolve(savedName);
+            file.transferTo(target.toFile());                          // 파일 저장
+
+            // 파일 타입 판별: 이미지 / 일반파일 / 폴더
+            String fileType;
+            boolean isImage = (contentType != null && contentType.toLowerCase().startsWith("image/"));
+            if (isImage) {
+                fileType = "IMAGE";
+            } else if (originalName != null && !originalName.contains(".")) {
+                // 간단 규칙: 확장자가 없으면 "폴더처럼" 취급 → 폴더 아이콘
+                fileType = "FOLDER";
+            } else {
+                fileType = "FILE";
+            }
+
+            // DTO에 첨부파일 정보 세팅
+            req.setFileUrl("/uploads/" + savedName);                   // 웹에서 접근할 URL (WebMvcConfig에서 매핑)
+            req.setFileType(fileType);                                 // IMAGE / FILE / FOLDER
+            req.setFileName(originalName);                              // 원본 파일명
+            req.setFileContentType(contentType);                        // MIME 타입
+        }
+
         Long id = postDao.insert(req);                                 // DAO를 통해 DB에 INSERT 수행 → 생성된 PK(ID) 수신
         req.setPostId(id);                                             // 응답 객체에 생성된 식별자 세팅
         return ResponseEntity.ok(req);                                 // 200 OK + 생성된 리소스 정보 반환
     }
 
-    /** 게시글 수정(공통 라우트): 관리자=무제한, 일반=본인만 */
-    @PutMapping("/posts/{id}")                                        // 예: PUT /api/posts/123  또는 /api/posts/UUID
+    /* =========================
+     * 파일 교체용 유틸 (수정에서 재사용)
+     * ========================= */
+    private void replaceFile(PostDto target, MultipartFile file) throws IOException {
+        if (file == null || file.isEmpty()) return;
+
+        // 기존 파일 삭제 (있을 때만)
+        String oldUrl = target.getFileUrl();
+        if (oldUrl != null && oldUrl.startsWith("/uploads/")) {
+            Path uploadPath = Paths.get(uploadDir).toAbsolutePath();
+            Path oldPath = uploadPath.resolve(oldUrl.substring("/uploads/".length()));
+            Files.deleteIfExists(oldPath);
+        }
+
+        String originalName = file.getOriginalFilename();
+        String contentType = file.getContentType();
+
+        String safeName = (originalName == null) ? "" : originalName.replaceAll("\\s+", "_");
+        String savedName = UUID.randomUUID().toString() + "_" + safeName;
+
+        Path uploadPath = Paths.get(uploadDir).toAbsolutePath();
+        Files.createDirectories(uploadPath);
+        Path targetPath = uploadPath.resolve(savedName);
+        file.transferTo(targetPath.toFile());
+
+        String fileType;
+        boolean isImage = (contentType != null && contentType.toLowerCase().startsWith("image/"));
+        if (isImage) {
+            fileType = "IMAGE";
+        } else if (originalName != null && !originalName.contains(".")) {
+            fileType = "FOLDER";
+        } else {
+            fileType = "FILE";
+        }
+
+        target.setFileUrl("/uploads/" + savedName);
+        target.setFileType(fileType);
+        target.setFileName(originalName);
+        target.setFileContentType(contentType);
+    }
+
+    /* =========================
+     * 게시글 수정 (JSON 전용 – 기존 방식 유지)
+     * ========================= */
+
+    /** 게시글 수정(공통 라우트): 관리자=무제한, 일반=본인만 (JSON 본문) */
+    @PutMapping(
+            value = "/posts/{id}",
+            consumes = MediaType.APPLICATION_JSON_VALUE
+    )                                                                  // 예: PUT /api/posts/123  또는 /api/posts/UUID
     public ResponseEntity<Void> updateById(                           // 본문 없음(상태코드로 결과 표현)
             @PathVariable String id,                                   // 경로의 식별자(숫자 PK 또는 문자열 키)
             @RequestBody PostDto req,                                  // 변경 내용이 담긴 DTO(제목/내용 등)
@@ -144,8 +268,11 @@ public class BoardController {
                 : ResponseEntity.status(HttpStatus.FORBIDDEN).build(); // 일반 사용자라면 권한 없음(403 Forbidden)
     }
 
-    /** 게시글 수정(별도 문자열 키 라우트) */
-    @PutMapping("/posts/key/{key}")                                   // 예: PUT /api/posts/key/abcd-efgh (키로 접근)
+    /** 게시글 수정(별도 문자열 키 라우트, JSON 본문) */
+    @PutMapping(
+            value = "/posts/key/{key}",
+            consumes = MediaType.APPLICATION_JSON_VALUE
+    )                                                                  // 예: PUT /api/posts/key/abcd-efgh (키로 접근)
     public ResponseEntity<Void> updateByKey(                          // 위와 동일 로직, 경로 변수명만 다름
             @PathVariable String key,                                  // 문자열 키 수신
             @RequestBody PostDto req,                                  // 변경 DTO
@@ -165,6 +292,81 @@ public class BoardController {
         return isAdmin(auth)                                           // 실패 시 관리자/일반 분기
                 ? ResponseEntity.notFound().build()                    // 관리자: 대상 없음(404)
                 : ResponseEntity.status(HttpStatus.FORBIDDEN).build(); // 일반: 권한 없음(403)
+    }
+
+    /* =========================
+     * 게시글 수정 (multipart/form-data – 파일 교체 포함)
+     * ========================= */
+
+    /** 게시글 수정 + 파일 교체 (ID 기준, multipart/form-data) */
+    @PutMapping(
+            value = "/posts/{id}",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
+    public ResponseEntity<Void> updateByIdMultipart(
+            @PathVariable String id,
+            @RequestParam("title") String title,
+            @RequestParam("content") String content,
+            @RequestParam(name = "file", required = false) MultipartFile file,
+            Authentication auth) throws IOException {
+
+        PostDto existing = loadOneByIdOrKey(id);
+        if (existing == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        existing.setTitle(title);
+        existing.setContent(content);
+
+        // 새 파일이 있으면 교체
+        if (file != null && !file.isEmpty()) {
+            replaceFile(existing, file);
+        }
+
+        int affected = isAdmin(auth)
+                ? postDao.update(existing)
+                : postDao.updateIfOwner(existing, username(auth));
+
+        if (affected > 0) return ResponseEntity.ok().build();
+
+        return isAdmin(auth)
+                ? ResponseEntity.notFound().build()
+                : ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+    }
+
+    /** 게시글 수정 + 파일 교체 (문자열 키 기준, multipart/form-data) */
+    @PutMapping(
+            value = "/posts/key/{key}",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
+    public ResponseEntity<Void> updateByKeyMultipart(
+            @PathVariable String key,
+            @RequestParam("title") String title,
+            @RequestParam("content") String content,
+            @RequestParam(name = "file", required = false) MultipartFile file,
+            Authentication auth) throws IOException {
+
+        PostDto existing = loadOneByIdOrKey(key);
+        if (existing == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        existing.setTitle(title);
+        existing.setContent(content);
+
+        if (file != null && !file.isEmpty()) {
+            replaceFile(existing, file);
+        }
+
+        int affected = isAdmin(auth)
+                ? postDao.update(existing)
+                : postDao.updateIfOwner(existing, username(auth));
+
+        if (affected > 0) return ResponseEntity.ok().build();
+
+        return isAdmin(auth)
+                ? ResponseEntity.notFound().build()
+                : ResponseEntity.status(HttpStatus.FORBIDDEN).build();
     }
 
     /** 게시글 삭제(공통 라우트): 관리자=무제한, 일반=본인만 */

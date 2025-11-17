@@ -32,6 +32,26 @@
         });
     }
 
+    // ───────────────── 파일 입력 바인딩 디렉티브 ─────────────────
+    // <input type="file" file-model="newPost.file"> 처럼 사용하면
+    // 선택한 파일이 $scope.newPost.file 에 자동으로 들어가도록 하는 도우미.
+    app.directive('fileModel', function ($parse) {
+        return {
+            restrict: 'A',
+            link: function (scope, element, attrs) {
+                const model = $parse(attrs.fileModel); // 'newPost.file' 같은 표현식을 파싱
+                element.bind('change', function () {
+                    const files = element[0].files;
+                    // 선택된 파일이 있으면 첫 번째 파일, 없으면 null
+                    const file = files && files.length ? files[0] : null;
+                    scope.$apply(function () {
+                        model.assign(scope, file);
+                    });
+                });
+            },
+        };
+    });
+
     // ───────────────── MenuService ─────────────────
     app.factory('MenuService', function ($http) {
         function fetchAll() {
@@ -352,7 +372,12 @@
     // ✅ 안전한 정수 변환(페이지/페이지크기 보호)
     function toInt(v, fallback) {
         var n = parseInt(v, 10);
-        return isFinite(n) && n > 0 ? n : fallback || 10;
+        // 정상적인 양의 정수면 그대로 사용
+        if (isFinite(n) && n > 0) return n;
+        // fallback이 숫자로 명시돼 있으면 그 값을 그대로 사용 (0도 허용!)
+        if (typeof fallback === 'number') return fallback;
+        // 둘 다 아니면 기본값 10
+        return 10;
     }
 
     // ✅ 응답 정규화 유틸
@@ -565,11 +590,11 @@
         };
     });
 
-    // ───────────────── 게시판 공통 (페이지네이션 포함) ─────────────────
+    // ───────────────── 게시판 공통 (페이지네이션 + 서버 검색) ─────────────────
     app.controller('BoardBaseCtrl', function ($scope, $http, AuthService) {
         $scope.posts = [];
         $scope.loading = false;
-        $scope.newPost = { title: '', content: '' };
+        $scope.newPost = { title: '', content: '', file: null }; // ← 파일 필드 추가
         $scope.showComposer = false;
 
         $scope.pageSizes = [5, 10, 15, 20];
@@ -623,90 +648,7 @@
             return $scope.q.type === 'time' // 검색 타입이 'time'이면
                 ? $scope.q.from || $scope.q.to // from 또는 to 중 하나라도 지정되어 있으면 활성(true)
                 : !!kw; // 그 외 타입('author','content' 등)은 키워드가 비어있지 않으면 활성.
-        }; // → 이 함수가 true면 필터링 로직을 수행.
-
-        function toTs(d) {
-            // 날짜/시간 값(d)을 타임스탬프(ms)로 변환하는 헬퍼.
-            if (!d) return null; // 값이 없으면 null 반환.
-            const t = new Date(d).getTime(); // Date로 파싱 후 ms 단위 숫자 취득(NaN 가능).
-            return isFinite(t) ? t : null; // 유효 숫자면 그대로, 아니면 null(파싱 실패 방어).
-        }
-
-        function matchPostRow(row) {
-            // 단일 게시글 row가 현재 검색 조건에 “매치”되는지 판단.
-            const t = String($scope.q.type || 'author'); // 검색 타입을 문자열로, 기본값은 'author'.
-            if (t === 'time') {
-                // ① 시간 범위 검색일 때
-                const from = toTs($scope.q.from), //   시작일(from)을 타임스탬프 변환
-                    to = toTs($scope.q.to); //   종료일(to)을 타임스탬프 변환
-                const cand = toTs(
-                    //   후보 시간: row의 대표 시각(업데이트/생성/작성일 순으로 존재하는 것)
-                    row.updatedAt ||
-                        row.createdAt || //   → 백엔드/DB 필드 명 혼재를 포괄적으로 대응
-                        row.writeTime ||
-                        row.created_at
-                );
-                if (cand == null) return true; //   해당 row에 시간이 없으면 필터링에서 제외하지 않고 통과시킴.
-                if (from != null && cand < from) return false; //   시작일 이전이면 제외.
-                if (to != null && cand > to + 24 * 60 * 60 * 1000 - 1)
-                    //   종료일의 “하루 끝(23:59:59.999)”을 포함하도록 보정.
-                    return false; //   그보다 크면 제외.
-                return true; //   범위 안이면 매치 성공.
-            }
-            const kw = String($scope.q.keyword || '') // ② 텍스트 검색일 때: 키워드 준비
-                .trim()
-                .toLowerCase();
-            if (!kw) return true; //   키워드가 비어 있으면 필터링하지 않고 통과.
-            const authorStr = [
-                //   작성자 관련 텍스트를 모두 모아 하나의 문자열로
-                row.writerName, //   (프로퍼티명이 환경마다 다를 수 있어 포괄적으로 결합)
-                row.writerId,
-                row.author,
-                row.username,
-            ]
-                .filter(Boolean)
-                .join(' ')
-                .toLowerCase(); //   존재하는 값만 합치고 소문자화.
-            const contentStr = [row.title, row.content] //   제목 + 본문 텍스트
-                .filter(Boolean)
-                .join(' ')
-                .toLowerCase();
-            if (t === 'author') return authorStr.indexOf(kw) >= 0; //   작성자 필드만 검색.
-            if (t === 'content') return contentStr.indexOf(kw) >= 0; //   제목/본문만 검색.
-            if (t === 'author_content')
-                return (
-                    authorStr.indexOf(kw) >= 0 || //   작성자 또는 제목/본문 중 하나라도 포함.
-                    contentStr.indexOf(kw) >= 0
-                );
-            return true; //   정의 외 타입이면 필터 미적용(통과).
-        }
-
-        function filterAndSlice(list) {
-            // 목록을 필터링하고, 현재 페이지의 “슬라이스”를 계산하는 핵심 함수.
-            const src = Array.isArray(list) ? list : []; // 방어적: 리스트가 아니면 빈 배열로 처리.
-            const filtered = $scope.searchActive() // 검색이 활성 상태면
-                ? src.filter(matchPostRow) //   위에서 정의한 규칙으로 필터링,
-                : src; // 아니면 전체 사용.
-
-            const size = toInt($scope.pageSize, 10); // 페이지 크기(pageSize)를 정수 변환(외부의 toInt 헬퍼 전제).
-            $scope.total = filtered.length; // 필터링 이후 총 건수.
-            $scope.pages = Math.max(1, Math.ceil($scope.total / size)); // 총 페이지 수(최소 1페이지 보장).
-            if ($scope.page >= $scope.pages)
-                // 현재 페이지 인덱스가 범위를 넘으면
-                $scope.page = $scope.pages - 1; // 마지막 페이지로 보정(0-based 인덱스).
-
-            const start = $scope.page * size; // 현재 페이지의 시작 인덱스 계산.
-            const pageRows = filtered.slice(start, start + size); // 해당 페이지에 보여줄 부분배열(슬라이스).
-
-            $scope.posts = pageRows.map((p, i) => {
-                // 화면 렌더링용으로 각 row에 파생 필드를 부여.
-                const r = resolvePostKey(p); // 게시글 식별 키(숫자/문자) 판별 및 추출(외부 헬퍼 전제).
-                p._keyType = r.type; //   예: 'id' | 'uuid'
-                p._key = r.key; //   실제 키 값(예: 123, '550e8-...')
-                p._uid = makePostUid(p, i); //   리스트 렌더링 안정용 고유 식별자(외부 헬퍼 전제).
-                return p; //   변형된 객체를 반환(원본 p에 메타 붙여서 재사용).
-            });
-        }
+        }; // → 이 함수는 이제 "검색 조건 유무" 체크만 하고, 실제 필터링은 DAO/SQL에서 수행.
 
         // 🔍 검색 적용: 검색어가 입력되면 첫 페이지부터 다시 게시글을 로드
         $scope.applySearch = function () {
@@ -771,34 +713,38 @@
             return 'tmp-' + Date.now() + '-' + (idx == null ? Math.random().toString(36).slice(2) : idx);
         }
 
-        // 📥 게시글 목록 로드 함수  (← 여기 부분이 에러 나던 곳, 깔끔하게 다시 정리)
+        // 📥 게시글 목록 로드 함수
+        //  ➜ **중요 변경점**: 더 이상 JS에서 리스트를 필터링하지 않고,
+        //     검색 조건(type/keyword/from/to)을 그대로 서버로 넘겨서
+        //     DAO(SQL)에서 WHERE 조건으로 필터링하도록 변경.
         $scope.loadPosts = function () {
             // 게시판 코드가 없으면 종료 (boardCode는 어떤 게시판인지 구분)
             if (!$scope.boardCode) return;
 
             $scope.loading = true; // 로딩 상태 활성화 (로딩 스피너 등 표시용)
 
-            // 검색이 활성화되어 있는지 여부 확인
-            const isSearching = $scope.searchActive(); // 지금 검색 조건이 실제로 켜져 있는지
-
-            // 요청 파라미터 객체 정의
+            // 요청 파라미터 객체 정의 (페이지네이션은 항상 서버에서 처리)
             const params = {
-                // 검색 중이면 항상 첫 페이지부터 로드, 아니면 현재 페이지 사용
-                page: isSearching ? 0 : $scope.page,
-                // 검색 중이면 한 번에 200개 불러오고, 아니면 페이지 크기(pageSize) 사용
-                size: isSearching ? 200 : toInt($scope.pageSize, 10),
+                page: $scope.page, // 0-based 페이지 번호
+                size: toInt($scope.pageSize, 10), // 페이지 크기
             };
 
             // 📅 검색 타입이 기간(time)인 경우 날짜 범위를 파라미터로 추가
             if ($scope.q.type === 'time') {
-                if ($scope.q.from) params.from = $scope.q.from; // 시작일
+                // type = 'time' 으로 넘겨서 서버에서 "기간 검색"임을 인식할 수 있게 함
+                params.type = 'time';
+                if ($scope.q.from) params.from = $scope.q.from; // 시작일 (예: '2025-11-10')
                 if ($scope.q.to) params.to = $scope.q.to; // 종료일
-                params.qType = 'time'; // 검색 유형 표시
             }
             // 🔤 키워드 기반 검색인 경우
-            else if (($scope.q.keyword || '').trim()) {
-                params.qType = $scope.q.type; // 검색 기준(author, title 등)
-                params.q = $scope.q.keyword.trim(); // 실제 검색어
+            else {
+                const kw = ($scope.q.keyword || '').trim();
+                if (kw) {
+                    // type: author / content / author_content 등
+                    params.type = $scope.q.type || 'author';
+                    // keyword: 실제 검색어 문자열
+                    params.keyword = kw;
+                }
             }
 
             $http
@@ -821,92 +767,68 @@
                             ? data // ⑨ data 자체가 배열이면 그걸 사용 (응답이 바로 배열인 경우)
                             : []; // ⑩ 위에 모두 해당 안 되면 그냥 빈 배열 사용 (에러 방지용 기본값)
 
-                    // 검색/비검색 공통: 프런트에서 필터 + 슬라이스
-                    filterAndSlice(list);
+                    const src = Array.isArray(list) ? list : [];
 
-                    // ─── 서버 페이지/전체 수치 동기화(비검색일 때 서버 값을 우선) ───
-                    if (!isSearching) {
-                        // isSearching이 false일 때만 서버 페이지 정보를 반영.
-                        // 현재 페이지/페이지 크기
-                        $scope.page =
-                            typeof data.page === 'number'
-                                ? data.page // 1순위: data.page
-                                : typeof data.number === 'number'
-                                ? data.number // 2순위: data.number
-                                : $scope.page; // 없으면 기존 유지
+                    // 🔁 서버에서 이미 WHERE + LIMIT + OFFSET으로 필터링/페이징 된 리스트를 그대로 사용
+                    //    (JS에서 matchPostRow/filterAndSlice로 다시 필터링하지 않음)
+                    $scope.posts = src.map((p, i) => {
+                        const r = resolvePostKey(p); // 게시글 식별 키(숫자/문자) 판별 및 추출
+                        p._keyType = r.type;
+                        p._key = r.key;
+                        p._uid = makePostUid(p, i);
+                        return p;
+                    });
 
-                        $scope.pageSize = toInt(
-                            typeof data.size === 'number' ? data.size : $scope.pageSize, // 서버 size 우선
-                            10
+                    // ─── 서버 페이지/전체 수치 동기화 ───
+                    // 현재 페이지/페이지 크기
+                    $scope.page =
+                        typeof data.page === 'number'
+                            ? data.page // 1순위: data.page
+                            : typeof data.number === 'number'
+                            ? data.number // 2순위: data.number
+                            : $scope.page; // 없으면 기존 유지
+
+                    $scope.pageSize = toInt(
+                        typeof data.size === 'number' ? data.size : $scope.pageSize, // 서버 size 우선
+                        10
+                    );
+
+                    // 총합/총페이지 robust 파싱
+                    const hasTotal =
+                        typeof data.total === 'number' || // 1) 응답 객체 data에
+                        typeof data.totalElements === 'number'; //    - data.total 또는 data.totalElements 중
+
+                    const serverTotal =
+                        typeof data.total === 'number'
+                            ? data.total // 2) 우선순위 1: data.total 필드가 숫자면 그대로 사용.
+                            : data.totalElements; //    그렇지 않으면 data.totalElements(Spring Page 스타일)를 사용.
+
+                    const serverTotalPages =
+                        typeof data.totalPages === 'number'
+                            ? data.totalPages // 3) 우선순위 1: data.totalPages(페이지 개수)가 있으면 사용.
+                            : typeof data.pages === 'number'
+                            ? data.pages //    우선순위 2: totalPages 대신 pages라는 이름으로 올 수도 있으므로 체크.
+                            : undefined; //    둘 다 없으면 "정의되지 않음"(undefined)으로 둠.
+
+                    if (hasTotal) {
+                        // total 또는 totalElements가 있을 때
+                        $scope.total = serverTotal; // 4) 서버가 알려준 total(또는 totalElements)을 그대로 전체 개수로 채택.
+                        $scope.pages = Math.max(
+                            1, //    최소 1페이지는 보장(0페이지는 말이 안 됨)
+                            Math.ceil($scope.total / Math.max(1, toInt($scope.pageSize, 10)))
                         );
+                    } else if (serverTotalPages !== undefined) {
+                        // totalElements 없이 totalPages만 있을 때
+                        $scope.pages = Math.max(1, serverTotalPages);
 
-                        // 총합/총페이지 robust 파싱
-                        const hasTotal =
-                            typeof data.total === 'number' || // 1) 응답 객체 data에
-                            typeof data.totalElements === 'number'; //    - data.total 또는 data.totalElements 중
-                        //    어느 하나라도 "숫자"로 존재하는지 확인.
-                        //    → 둘 중 하나라도 숫자면, 서버가 총 개수(total)를
-                        //      명시적으로 보내준다고 판단.
-
-                        const serverTotal =
-                            typeof data.total === 'number'
-                                ? data.total // 2) 우선순위 1: data.total 필드가 숫자면 그대로 사용.
-                                : data.totalElements; //    그렇지 않으면 data.totalElements(Spring Page 스타일)를 사용.
-
-                        const serverTotalPages =
-                            typeof data.totalPages === 'number'
-                                ? data.totalPages // 3) 우선순위 1: data.totalPages(페이지 개수)가 있으면 사용.
-                                : typeof data.pages === 'number'
-                                ? data.pages //    우선순위 2: totalPages 대신 pages라는 이름으로 올 수도 있으므로 체크.
-                                : undefined; //    둘 다 없으면 "정의되지 않음"(undefined)으로 둠.
-
-                        if (hasTotal) {
-                            // total 또는 totalElements가 있을 때
-                            $scope.total = serverTotal; // 4) 서버가 알려준 total(또는 totalElements)을 그대로 전체 개수로 채택.
-                            $scope.pages = Math.max(
-                                1, //    최소 1페이지는 보장(0페이지는 말이 안 됨)
-                                Math.ceil(
-                                    $scope.total / //    전체 개수를
-                                        Math.max(1, toInt($scope.pageSize, 10)) //    페이지 크기(최소 1 이상 보정)로 나누어
-                                ) //    올림 → 페이지 개수 계산.
-                            );
-                        } else if (serverTotalPages !== undefined) {
-                            // totalElements 없이 totalPages만 있을 때
-                            $scope.pages = Math.max(
-                                1,
-                                serverTotalPages // 5) 총 페이지 수만 알고 있을 경우, 그 값을 그대로 사용
-                            ); //    (역시 최소 1 보장).
-
-                            $scope.total =
-                                $scope.pages * // 6) totalElements가 없으므로,
-                                Math.max(1, toInt($scope.pageSize, 10)); //    "페이지 수 × 페이지 크기"로 전체 개수를 근사치로 추정.
-                            //    → UI에서 "총 N건" 같이 표시할 때 쓰는 대략적인 값.
-                        } else {
-                            // 어떤 메타도 없으면 현재 목록 길이 기준으로 보수 계산
-                            const curLen = Array.isArray(list) ? list.length : 0;
-                            // 7) 서버가 total / totalElements / totalPages 같은 메타 정보를 전혀 안 줄 때:
-                            //    이번에 받아온 목록(list)이 배열이면 그 길이(length)를 사용하고, 아니면 0으로 처리.
-
-                            $scope.total = Math.max(
-                                $scope.total || 0, // 8) 기존에 계산해 둔 total이 있으면 그 값과 비교해서
-                                curLen +
-                                    $scope.page * //    "현재 페이지까지 최소 몇 개의 데이터가 있었을 것인지"
-                                        Math.max(1, toInt($scope.pageSize, 10)) //    대략 계산: (지금까지 지나온 페이지 수 × 페이지크기) + 현재 페이지 길이
-                            ); //    그 중 더 큰 값을 total로 사용해 "적어도 이 정도는 있다"는 보수적 추정.
-
-                            $scope.pages = Math.max(
-                                1,
-                                Math.ceil(
-                                    $scope.total / Math.max(1, toInt($scope.pageSize, 10)) // 9) 위에서 추정한 total을 기준으로 다시 페이지 수를 계산.
-                                )
-                            );
-                            // → 요약:
-                            //   서버가 아무 메타를 안 줄 때도, 지금까지 본 데이터 양을 기반으로
-                            //   "총 건수/페이지 수"를 대략 추정해서 UI가 깨지지 않게 하는 방어 로직.
-                        }
+                        $scope.total = $scope.pages * Math.max(1, toInt($scope.pageSize, 10));
+                    } else {
+                        // 어떤 메타도 없으면 현재 목록 길이 기준으로 보수 계산
+                        const curLen = Array.isArray(src) ? src.length : 0;
+                        $scope.total = Math.max($scope.total || 0, curLen * Math.max(1, toInt($scope.pageSize, 10)));
+                        $scope.pages = Math.max(1, Math.ceil($scope.total / Math.max(1, toInt($scope.pageSize, 10))));
                     }
                 })
-
                 .catch(() => {
                     // HTTP 요청이 실패한 경우(네트워크/서버 에러 등)
                     $scope.posts = []; // 게시글 목록은 빈 배열로
@@ -965,13 +887,21 @@
             $scope.changeSize();
         };
 
+        // ⭐ 여기 수정됨: 최소 1페이지 보장 + 첫 페이지(0페이지)에서도 숫자 버튼이 항상 보이도록 보정
         $scope.pageRange = function () {
-            const totalPages = toInt($scope.pages, 1);
-            const cur = toInt($scope.page, 0);
-            const arr = [];
-            const start = Math.max(0, cur - 2);
-            const end = Math.min(totalPages - 1, cur + 2);
-            for (let i = start; i <= end; i++) arr.push(i);
+            // 전체 페이지 수
+            var totalPages = parseInt($scope.pages, 10);
+            if (!isFinite(totalPages) || totalPages < 1) totalPages = 1;
+
+            // 현재 페이지 (0 기반)
+            var cur = parseInt($scope.page, 10);
+            if (!isFinite(cur) || cur < 0) cur = 0;
+            if (cur > totalPages - 1) cur = totalPages - 1;
+
+            var arr = [];
+            var start = Math.max(0, cur - 2);
+            var end = Math.min(totalPages - 1, cur + 2);
+            for (var i = start; i <= end; i++) arr.push(i);
             return arr;
         };
 
@@ -1115,16 +1045,48 @@
 
         // ====== ★ 게시글 CRUD(추가) — 저장 후 항상 새로고침 ======
 
-        // 작성
+        // 작성 (※ JSON → multipart/form-data 전송으로 변경)
         $scope.createPost = function () {
             const title = ($scope.newPost.title || '').trim();
             const content = ($scope.newPost.content || '').trim();
+
+            // 🔽 파일 찾기: 1) fileModel로 바인딩된 파일, 2) 없으면 DOM에서 id="postFile"로 직접 찾기
+            let file = $scope.newPost.file || null; // fileModel 디렉티브로 바인딩된 파일 (있으면 우선 사용)
+            if (!file) {
+                const input = document.getElementById('postFile');
+                if (input && input.files && input.files.length > 0) {
+                    file = input.files[0]; // bus.html에서 선택한 실제 파일
+                }
+            }
+            // 🔼 여기까지가 "어디서 파일을 가져올지"에 대한 통합 처리
+
             if (!title) return alert('제목을 입력하세요.');
+
             const url = '/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts';
+
+            // 📦 FormData를 만들어 title, content, file을 함께 담아서 전송
+            const form = new FormData();
+            form.append('title', title);
+            form.append('content', content);
+            if (file) {
+                // 서버 BoardController에서 @RequestPart("file") MultipartFile file 로 받음
+                form.append('file', file);
+            }
+
             $http
-                .post(url, { title, content })
+                .post(url, form, {
+                    // Angular가 FormData를 건드리지 않도록 원본 그대로 전송
+                    transformRequest: angular.identity,
+                    // Content-Type을 명시하지 않으면 브라우저가 boundary 포함해서 자동 세팅
+                    headers: { 'Content-Type': undefined },
+                })
                 .then(function () {
-                    $scope.newPost = { title: '', content: '' };
+                    // 작성 폼 초기화
+                    $scope.newPost = { title: '', content: '', file: null };
+                    // input[type=file] DOM도 비워 주고 싶으면 여기서 초기화 (선택 사항)
+                    const input = document.getElementById('postFile');
+                    if (input) input.value = '';
+
                     $scope.page = 0;
                     $scope.loadPosts();
                 })
@@ -1207,166 +1169,91 @@
 
             var type = p._keyType === 'num' ? 'num' : 'str';
             // type 변수에 'num' 또는 'str' 중 하나를 넣음.
-            //  - p._keyType 값이 'num' 이면 그대로 'num'
-            //  - 그 외에는 모두 'str' 로 간주
-            //    → URL 패턴에서 /edit/num/123  또는 /edit/str/UUID  이렇게 쓰기 위해 미리 구분.
 
             var code = ($scope.boardCode || '').toLowerCase(); // 'BUS' → 'bus'
-            // 현재 게시판의 코드(예: 'BUS', 'NORM')를 소문자로 변환.
-            //  - $scope.boardCode 가 없으면 빈 문자열 '' 사용 (에러 방어)
-            //  - toLowerCase() 로 'BUS' → 'bus'
-            //    → 라우팅 규칙이 /board/bus, /board/normal 이런 식이기 때문.
 
-            window.location.hash =
-                '#/board/' +
-                encodeURIComponent(code) + // 게시판 코드 부분 (예: 'bus')
-                '/edit/' +
-                type + // 키 타입: 'num' 또는 'str'
-                '/' +
-                encodeURIComponent(p._key); // 실제 글의 키 값(숫자 id 또는 uuid 등)
-
-            // 최종적으로 hash 값 예시:
-            //   #/board/bus/edit/num/42
-            //   #/board/bus/edit/str/550e8400-e29b-41d4-a716-446655440000
-            //
-            // 이렇게 location.hash 를 바꾸면,
-            //   → AngularJS의 ngRoute 가 URL을 감지해서
-            //   app.config(...) 에서 정의한 이 라우트로 이동함:
-            //
-            //   .when('/board/:code/edit/:type/:key', {
-            //       templateUrl: '/tpl/board/edit.html',
-            //       controller: 'BoardEditCtrl',
-            //   })
-            //
-            // 그래서 이 함수의 역할은:
-            //   "현재 목록에서 선택한 글을, 분리된 '수정 전용 화면(BoardEditCtrl)'으로
-            //    옮기기 위한 hash URL 을 만들어서 브라우저 주소에 세팅" 하는 것.
+            window.location.hash = '#/board/' + encodeURIComponent(code) + '/edit/' + type + '/' + encodeURIComponent(p._key);
         };
 
         // ====== // 게시글 CRUD 끝 ======
     });
 
     // ───────────────── 게시글 편집 전용 컨트롤러 ─────────────────
-    // 게시글 "수정 전용 화면"을 담당하는 컨트롤러 정의
     app.controller('BoardEditCtrl', function ($scope, $http, $routeParams, $location) {
-        // 화면 상단에 로딩 스피너/비활성화에 사용할 상태값들
-        $scope.loading = true; // 데이터(게시글 한 건)를 불러오는 중인지 여부
-        $scope.saving = false; // 저장(수정) 요청 중인지 여부
-        $scope.deleting = false; // 삭제 요청 중인지 여부
+        $scope.newFile = null;
 
-        // URL 파라미터에서 게시판 코드, 키 타입, 키 값을 꺼내서 사용
-        // 예: #/board/bus/edit/str/550e8400-...  → code='BUS', type='str', key='550e8...'
-        const code = String($routeParams.code || '').toUpperCase(); // 'bus' → 'BUS', 'norm' → 'NORM'
-        const type = String($routeParams.type || 'str'); // 'num' 또는 'str' (기본값 'str')
-        const key = $routeParams.key; // 글을 식별하는 실제 값(id 또는 uuid 등)
+        $scope.loading = true;
+        $scope.saving = false;
+        $scope.deleting = false;
 
-        // ▶ 목록 화면으로 돌아가는 공통 함수
+        const code = String($routeParams.code || '').toUpperCase();
+        const type = String($routeParams.type || 'str');
+        const key = $routeParams.key;
+
         function backToList() {
-            const path = '/board/' + code.toLowerCase(); // 'BUS' → '/board/bus'
-            $location
-                .path(path) // 라우트 경로를 목록 페이지로 변경
-                .search({}); // URL 쿼리 파라미터는 모두 초기화
+            const path = '/board/' + code.toLowerCase();
+            $location.path(path).search({});
         }
-        // backToList는 "목록 화면으로 돌아가기" 전용으로 만든 작은 함수 이름
-        $scope.cancel = backToList; // 취소 버튼에서 사용하기 위해 $scope에 연결
+        $scope.cancel = backToList;
 
-        // ▶ 게시글 1건을 서버에서 가져와서 form에 채워 넣는 함수
         function fetchOne() {
-            $scope.loading = true; // 로딩 시작 표시
+            $scope.loading = true;
             let url = null;
-            if (type === 'num')
-                // 키 타입이 숫자라면: /api/posts/{id}
-                // encodeURIComponent는 자바스크립트에서 문자열을 URL 안에 안전하게 넣기 위해 특수문자들을 인코딩(변환)해 주는 함수
-                url = '/api/posts/' + encodeURIComponent(key);
-            // 문자열 키(uuid 등)라면: /api/posts/key/{key}
+            if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
             else url = '/api/posts/key/' + encodeURIComponent(key);
 
             $http
-                .get(url) // 서버에 GET 요청 → 게시글 한 건 조회
+                .get(url)
                 .then(function (res) {
-                    const p = res.data || {}; // 응답이 없을 경우를 대비해 빈 객체로 방어
-                    // 실제 수정 폼에 바인딩할 데이터
+                    const p = res.data || {};
                     $scope.form = {
-                        title: p.title || '', // 제목
-                        content: p.content || '', // 내용
+                        title: p.title || '',
+                        content: p.content || '',
                     };
-                    // 화면에 참고용으로 보여줄 메타 정보(작성자, 시간 등)
                     $scope.meta = {
-                        writerId: p.writerId || p.author || '', // 작성자 ID(백엔드 필드 이름이 다를 수 있어 여러 후보 중 하나 사용)
-                        writerName: p.writerName || p.username || '', // 작성자 이름
-                        // 작성일(필드명이 상황에 따라 다를 수 있어서 여러 개 중 하나 선택)
+                        writerId: p.writerId || p.author || '',
+                        writerName: p.writerName || p.username || '',
                         createdAt: p.createdAt || p.writeTime || p.created_at || '',
-                        updatedAt: p.updatedAt || '', // 수정일
+                        updatedAt: p.updatedAt || '',
                     };
                 })
                 .catch(function () {
-                    // 조회 실패 시
-                    alert('게시글을 불러오지 못했습니다.'); // 에러 안내
-                    backToList(); // 목록으로 되돌아감
+                    alert('게시글을 불러오지 못했습니다.');
+                    backToList();
                 })
                 .finally(function () {
-                    // 성공/실패 상관없이 마지막에 항상 호출
-                    $scope.loading = false; // 로딩 종료
+                    $scope.loading = false;
                 });
         }
-        fetchOne(); // 컨트롤러가 생성되자마자 바로 게시글을 한 번 조회
+        fetchOne();
 
-        // ▶ [저장] 버튼을 눌렀을 때 호출되는 함수 (게시글 수정)
+        // 🔥 여기만 다시 JSON 방식으로 수정
         $scope.save = function () {
-            const title = ($scope.form.title || '').trim(); // 제목에서 앞뒤 공백 제거
-            const content = ($scope.form.content || '').trim(); // 내용에서 앞뒤 공백 제거
-            if (!title) return alert('제목을 입력하세요.'); // 제목이 비어 있으면 경고 후 중단
+            const title = ($scope.form.title || '').trim();
+            const content = ($scope.form.content || '').trim();
+            if (!title) return alert('제목을 입력하세요.');
 
-            $scope.saving = true; // 저장 중 상태 on → 버튼 비활성화 등에 사용
+            $scope.saving = true;
+
             let url = null;
-            if (type === 'num')
-                // 숫자 키일 경우
-                url = '/api/posts/' + encodeURIComponent(key);
-            // 문자열 키일 경우
+            if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
             else url = '/api/posts/key/' + encodeURIComponent(key);
 
+            // ❗ multipart 말고, 기존처럼 JSON으로 보냄
+            const payload = { title: title, content: content };
+
             $http
-                .put(url, { title, content }) // PUT 요청으로 서버에 수정 내용 전송
+                .put(url, payload)
                 .then(function () {
-                    // 성공 시
-                    backToList(); // 다시 목록 화면으로 이동 (수정된 내용은 목록을 새로 로드해서 보여주게 됨)
+                    alert('수정이 완료되었습니다.');
+                    backToList();
                 })
-                .catch(function () {
-                    // 실패 시
+                .catch(function (err) {
+                    console.error('수정 실패', err);
                     alert('저장에 실패했습니다.');
                 })
                 .finally(function () {
-                    // 성공/실패 상관없이
-                    $scope.saving = false; // 저장 중 상태 해제
-                });
-        };
-
-        // ▶ [삭제] 버튼을 눌렀을 때 호출되는 함수 (게시글 삭제)
-        $scope.remove = function () {
-            // 사용자에게 한 번 더 확인
-            if (!confirm('정말 삭제할까요?')) return; // 취소 누르면 아무 것도 안 함
-            $scope.deleting = true; // 삭제 중 상태 on
-
-            let url = null;
-            if (type === 'num')
-                // 숫자 키일 경우
-                url = '/api/posts/' + encodeURIComponent(key);
-            // 문자열 키(uuid 등)일 경우
-            else url = '/api/posts/key/' + encodeURIComponent(key);
-
-            $http
-                .delete(url) // DELETE 요청으로 서버에 삭제 요청
-                .then(function () {
-                    // 성공 시
-                    backToList(); // 목록 화면으로 이동
-                })
-                .catch(function () {
-                    // 실패 시
-                    alert('삭제에 실패했습니다.');
-                })
-                .finally(function () {
-                    // 성공/실패 상관없이
-                    $scope.deleting = false; // 삭제 중 상태 해제
+                    $scope.saving = false;
                 });
         };
     });
@@ -1389,8 +1276,8 @@
         $scope.loading = true;
         $scope.saving = false;
 
-        $scope.rows = []; // 화면용 데이터
-        $scope.sourceRows = []; // 서버 전체 원본
+        $scope.rows = [];
+        $scope.sourceRows = [];
 
         $scope.msg = '';
         $scope.msgType = 'info';

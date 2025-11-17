@@ -23,6 +23,12 @@ public class PostDto {                                             // 게시글 
     private String title;                                          // 제목
     private String content;                                        // 본문(텍스트/HTML/마크다운 등)
 
+    /** 첨부파일 관련 필드 */
+    private String fileUrl;                                        // 업로드 파일 접근 URL(/uploads/xxx.png 등)
+    private String fileType;                                       // 파일 종류(IMAGE / FILE / FOLDER)
+    private String fileName;                                       // 원본 파일명
+    private String fileContentType;                                // MIME 타입(image/png, application/pdf 등)
+
     private String writerId;                                       // 작성자 ID(로그인 ID/이메일 등)
     private String writerName;                                     // 작성자 표시명(닉네임 등)
 
@@ -61,6 +67,45 @@ public class PostDto {                                             // 게시글 
 
     public String getContent() { return content; }                 // content 게터
     public void setContent(String content) { this.content = content; } // content 세터
+
+    // ─── 첨부파일 getter / setter ───
+    public String getFileUrl() { return fileUrl; }                 // fileUrl 게터
+    public void setFileUrl(String fileUrl) {                       // fileUrl 세터
+        // 빈 문자열("")이 들어올 때는 null로 정규화해서
+        // DAO에서 "값이 null이면 기존 파일 유지" 로직이 잘 동작하게 함
+        if (fileUrl != null && fileUrl.isBlank()) {
+            this.fileUrl = null;
+        } else {
+            this.fileUrl = fileUrl;
+        }
+    }
+
+    public String getFileType() { return fileType; }               // fileType 게터
+    public void setFileType(String fileType) {                     // fileType 세터
+        if (fileType != null && fileType.isBlank()) {
+            this.fileType = null;
+        } else {
+            this.fileType = fileType;
+        }
+    }
+
+    public String getFileName() { return fileName; }               // fileName 게터
+    public void setFileName(String fileName) {                     // fileName 세터
+        if (fileName != null && fileName.isBlank()) {
+            this.fileName = null;
+        } else {
+            this.fileName = fileName;
+        }
+    }
+
+    public String getFileContentType() { return fileContentType; } // fileContentType 게터
+    public void setFileContentType(String fileContentType) {       // fileContentType 세터
+        if (fileContentType != null && fileContentType.isBlank()) {
+            this.fileContentType = null;
+        } else {
+            this.fileContentType = fileContentType;
+        }
+    }
 
     public String getWriterId() { return writerId; }               // writerId 게터
     public void setWriterId(String writerId) { this.writerId = writerId; } // writerId 세터
@@ -137,6 +182,10 @@ public class PostDto {                                             // 게시글 
                 ", boardCode='" + boardCode + '\'' +
                 ", title='" + title + '\'' +
                 // content는 길 수 있어 보통 로깅에서 생략하는 편(필요 시 추가)
+                ", fileUrl='" + fileUrl + '\'' +
+                ", fileType='" + fileType + '\'' +
+                ", fileName='" + fileName + '\'' +
+                ", fileContentType='" + fileContentType + '\'' +
                 ", writerId='" + writerId + '\'' +
                 ", writerName='" + writerName + '\'' +
                 ", createdAt=" + createdAt +

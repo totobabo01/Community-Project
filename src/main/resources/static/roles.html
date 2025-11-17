@@ -132,6 +132,7 @@
                     border-radius: 8px;
                     padding: 6px 10px;
                     margin-left: 4px;
+                    cursor: pointer;
                 }
                 .btn-page.active {
                     background: #4c84ff;
@@ -156,6 +157,13 @@
                 }
                 .user-table tbody td {
                     padding: 12px 10px;
+                }
+                /* 🔢 가운데 숫자 버튼 묶음 (DB 사용자 화면과 동일 패턴) */
+                .pager-pages {
+                    display: inline-flex;
+                    gap: 4px;
+                    margin: 0 8px;
+                    vertical-align: middle;
                 }
             </style>
 
@@ -284,7 +292,7 @@
                 style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center"
             >
                 <div class="left">
-                    <span class="muted"> 페이지 {{ (page||0)+1 }} / {{ pagesCount() }} </span>
+                    <span class="muted"> 페이지 {{ (page || 0) + 1 }} / {{ pagesCount() }} </span>
                 </div>
                 <div class="right">
                     <button
@@ -305,16 +313,18 @@
                         ‹ 이전
                     </button>
 
-                    <!-- ✅ 클릭 안정화: track by p -->
-                    <button
-                        type="button"
-                        class="btn-page"
-                        ng-repeat="p in pageRange() track by p"
-                        ng-class="{active:p===page}"
-                        ng-click="go(p)"
-                    >
-                        {{ p + 1 }}
-                    </button>
+                    <!-- ✅ 가운데 숫자 버튼: pageRange() 기반 -->
+                    <span class="pager-pages">
+                        <button
+                            type="button"
+                            class="btn-page"
+                            ng-repeat="p in pageRange() track by p"
+                            ng-class="{active:p===page}"
+                            ng-click="go(p)"
+                        >
+                            {{ p + 1 }}
+                        </button>
+                    </span>
 
                     <button
                         type="button"

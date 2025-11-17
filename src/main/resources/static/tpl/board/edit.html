@@ -9,6 +9,7 @@
                 <span class="dot"></span>
                 <h2 style="margin: 0">게시글 수정</h2>
             </div>
+
             <div class="actions">
                 <button
                     class="btn"
@@ -16,6 +17,7 @@
                 >
                     목록
                 </button>
+
                 <button
                     class="btn danger"
                     ng-click="remove()"
@@ -23,6 +25,7 @@
                 >
                     삭제
                 </button>
+
                 <button
                     class="btn blue"
                     ng-click="save()"
@@ -33,6 +36,7 @@
             </div>
         </div>
 
+        <!-- 로딩 표시 -->
         <div
             ng-if="loading"
             class="status-box"
@@ -40,12 +44,16 @@
             ⏳ 불러오는 중...
         </div>
 
+        <!-- ▶ 본문 -->
         <div ng-if="!loading">
+            <!-- 제목 -->
             <input
                 class="inline-input"
                 placeholder="제목"
                 ng-model="form.title"
             />
+
+            <!-- 내용 -->
             <textarea
                 class="inline-input"
                 style="height: 300px; margin-top: 8px"
@@ -53,13 +61,80 @@
                 ng-model="form.content"
             ></textarea>
 
-            <div style="margin-top: 10px; color: #7b8794; font-size: 12px">
+            <!-- ===============================
+                 🔥 현재 첨부파일 미리보기
+            ================================= -->
+            <div
+                style="margin-top: 16px; padding-top: 14px; border-top: 1px solid #e2e8f0"
+                ng-if="meta.fileUrl"
+            >
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px">현재 첨부 파일</div>
+
+                <!-- 이미지 파일인 경우 -->
+                <div
+                    ng-if="meta.fileType === 'IMAGE'"
+                    style="max-width: 260px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden"
+                >
+                    <img
+                        ng-src="{{ meta.fileUrl }}"
+                        alt="첨부 이미지"
+                        style="width: 100%; display: block"
+                    />
+                </div>
+
+                <!-- 그 외 파일 -->
+                <div
+                    ng-if="meta.fileType !== 'IMAGE'"
+                    style="font-size: 13px; margin-top: 6px"
+                >
+                    <a
+                        ng-href="{{ meta.fileUrl }}"
+                        target="_blank"
+                        style="text-decoration: underline; color: #2563eb"
+                    >
+                        {{ meta.fileName || '첨부 파일 열기' }}
+                    </a>
+                </div>
+            </div>
+
+            <!-- ===============================
+                 🔥 새 파일 업로드 선택
+            ================================= -->
+            <div style="margin-top: 18px; padding: 12px; border-radius: 10px; border: 1px dashed #94a3b8; background: #f8fafc">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 6px">새로운 파일 업로드 (선택 사항)</div>
+
+                <label
+                    for="editFile"
+                    style="display: inline-block; padding: 6px 12px; border-radius: 6px; cursor: pointer; background: #fff; border: 1px solid #d1d5db; font-size: 13px"
+                >
+                    파일 선택
+                    <input
+                        id="editFile"
+                        type="file"
+                        file-model="newFile"
+                        style="display: none"
+                    />
+                </label>
+
+                <span
+                    ng-if="newFile && newFile.name"
+                    style="margin-left: 8px; color: #475569; font-size: 13px"
+                >
+                    선택된 파일: {{ newFile.name }}
+                </span>
+
+                <div style="font-size: 12px; margin-top: 6px; color: #6b7280">※ 새 파일을 선택하지 않으면 기존 첨부 파일은 그대로 유지됩니다.</div>
+            </div>
+
+            <!-- 작성자/날짜 -->
+            <div style="margin-top: 20px; color: #6b7280; font-size: 13px">
                 <div>작성자: {{ meta.writerName || meta.writerId }}</div>
                 <div>작성일: {{ meta.createdAt }}</div>
                 <div>수정일: {{ meta.updatedAt }}</div>
             </div>
 
-            <div style="margin-top: 12px">
+            <!-- 하단 버튼 -->
+            <div style="margin-top: 16px">
                 <button
                     class="btn"
                     ng-click="cancel()"

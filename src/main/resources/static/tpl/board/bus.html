@@ -27,7 +27,7 @@
                     aria-hidden="true"
                 >
                     <path
-                        d="M10.5 3a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zm8.85 13.56 2.79 2.79a1 1 0 1 1-1.42 1.42l-2.79-2.79a 1 1 0 0 1 1.42-1.42z"
+                        d="M10.5 3a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zm8.85 13.56 2.79 2.79a1 1 0 1 1-1.42 1.42l-2.79-2.79a1 1 0 0 1 1.42-1.42z"
                         fill="currentColor"
                     />
                 </svg>
@@ -172,6 +172,18 @@
                 placeholder="내용"
                 aria-label="내용"
             ></textarea>
+
+            <!-- 🔽 첨부 파일 선택 인풋 추가 (id / name 중요) -->
+            <div style="margin-top: 8px">
+                <input
+                    type="file"
+                    id="postFile"
+                    name="file"
+                    aria-label="첨부 파일 선택"
+                />
+            </div>
+            <!-- 🔼 첨부 파일 선택 인풋 끝 -->
+
             <div style="margin-top: 8px; text-align: right">
                 <button
                     class="btn primary"
@@ -222,17 +234,23 @@
                 ‹ 이전
             </button>
 
-            <button
-                class="btn-page"
-                type="button"
-                ng-repeat="p in pageRange() track by p"
-                ng-class="{ active: p === page }"
-                ng-click="go(p)"
-                ng-disabled="loading"
-                aria-label="{{ p + 1 }} 페이지"
+            <!-- 🔢 가운데 숫자 버튼: pages > 1 일 때 항상 표시 -->
+            <span
+                class="pager-pages"
+                ng-if="pages > 1"
             >
-                {{ p + 1 }}
-            </button>
+                <button
+                    class="btn-page"
+                    type="button"
+                    ng-repeat="p in pageRange() track by p"
+                    ng-class="{ active: p === page }"
+                    ng-click="go(p)"
+                    ng-disabled="loading"
+                    aria-label="{{ p + 1 }} 페이지"
+                >
+                    {{ p + 1 }}
+                </button>
+            </span>
 
             <button
                 class="btn-page"
@@ -273,7 +291,46 @@
         >
             <!-- 제목/내용/댓글 -->
             <div class="c-title">
-                <div class="post-title"><strong>{{ p.title }}</strong></div>
+                <!-- 🔽 제목 + 첨부파일 표시라인 -->
+                <div class="post-title-line">
+                    <div class="post-title">
+                        <strong>{{ p.title }}</strong>
+                    </div>
+
+                    <!-- 첨부파일이 있을 때만 표시 -->
+                    <div
+                        class="post-file-indicator"
+                        ng-if="p.fileUrl"
+                    >
+                        <!-- 이미지인 경우: 썸네일 -->
+                        <img
+                            ng-if="p.fileType === 'IMAGE'"
+                            ng-src="{{ p.fileUrl }}"
+                            alt="첨부 이미지"
+                            class="post-file-thumb"
+                        />
+
+                        <!-- 일반 파일인 경우: 파일 아이콘 -->
+                        <span
+                            ng-if="p.fileType === 'FILE'"
+                            class="post-file-icon"
+                            title="{{ p.fileName }}"
+                        >
+                            📄
+                        </span>
+
+                        <!-- 폴더 타입인 경우: 폴더 아이콘 -->
+                        <span
+                            ng-if="p.fileType === 'FOLDER'"
+                            class="post-file-icon"
+                            title="{{ p.fileName }}"
+                        >
+                            📁
+                        </span>
+                    </div>
+                </div>
+                <!-- 🔼 제목 + 첨부파일 표시라인 끝 -->
+
                 <div
                     class="post-snippet"
                     ng-if="p.content"
@@ -305,7 +362,7 @@
                         <div>
                             <strong>{{ c.writerName || c.writerId }}</strong> :
                             <span>{{ c.content }}</span>
-                            <small style="color: #777"> · {{ (c.updatedAt || c.createdAt) | date:'MM-dd HH:mm' }}</small>
+                            <small style="color: #777"> · {{ (c.updatedAt || c.createdAt) | date:'MM-dd HH:mm' }} </small>
 
                             <button
                                 class="btn btn-warning"
@@ -458,16 +515,22 @@
                 ‹ 이전
             </button>
 
-            <button
-                class="btn-page"
-                type="button"
-                ng-repeat="p in pageRange() track by p"
-                ng-class="{ active: p === page }"
-                ng-click="go(p)"
-                ng-disabled="loading"
+            <!-- 🔢 하단 숫자 버튼: pages > 1 일 때 항상 표시 -->
+            <span
+                class="pager-pages"
+                ng-if="pages > 1"
             >
-                {{ p + 1 }}
-            </button>
+                <button
+                    class="btn-page"
+                    type="button"
+                    ng-repeat="p in pageRange() track by p"
+                    ng-class="{ active: p === page }"
+                    ng-click="go(p)"
+                    ng-disabled="loading"
+                >
+                    {{ p + 1 }}
+                </button>
+            </span>
 
             <button
                 class="btn-page"
@@ -697,15 +760,38 @@
         padding: 24px 16px;
         color: #8a94a6;
     }
+
+    .post-title-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 4px;
+    }
     .post-title {
         font-weight: 600;
-        margin-bottom: 6px;
+        margin-bottom: 2px;
     }
     .post-snippet {
         color: #6b7280;
         font-size: 13px;
         margin-bottom: 8px;
     }
+    .post-file-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .post-file-thumb {
+        max-width: 60px;
+        max-height: 60px;
+        border-radius: 4px;
+        border: 1px solid #e5e7eb;
+    }
+    .post-file-icon {
+        font-size: 18px;
+        line-height: 1;
+    }
+
     .badge {
         display: inline-block;
         padding: 4px 8px;
@@ -728,6 +814,13 @@
     }
     .pager .muted {
         color: #6b7280;
+    }
+    /* 🔢 가운데 페이지 숫자 버튼 묶음 */
+    .pager-pages {
+        display: inline-flex;
+        gap: 4px;
+        margin: 0 8px;
+        vertical-align: middle;
     }
     @media (max-width: 1024px) {
         .table-head,
