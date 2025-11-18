@@ -8,6 +8,9 @@ import java.nio.file.Path;                                            // 경로 
 import java.nio.file.Paths;                                           // 경로 생성 유틸
 import java.util.List;                                                // 목록 타입 사용을 위한 import
 import java.util.UUID;                                                // 랜덤 UUID 생성용
+import java.util.ArrayList;                                           // 여러 파일 메타데이터 리스트
+import java.util.HashMap;                                             // 파일 메타데이터 맵
+import java.util.Map;                                                 // 파일 메타데이터 맵 인터페이스
 
 import org.springframework.beans.factory.annotation.Value;            // application.properties 값 주입
 import org.springframework.http.HttpStatus;                           // HTTP 상태코드 상수(403/404 등) 사용
@@ -29,6 +32,8 @@ import org.springframework.web.multipart.MultipartFile;               // 업로�
 import com.example.demo.dao.PostDao;                                  // 게시글 관련 DB 접근 DAO
 import com.example.demo.dto.PageDTO;                                  // 페이지네이션 응답 DTO(목록/전체건수/페이지/사이즈)
 import com.example.demo.dto.PostDto;                                  // 게시글 데이터 전송 객체
+
+import com.fasterxml.jackson.databind.ObjectMapper;                   // file_list_json 직렬화용
 
 @RestController                                                       // REST API 컨트롤러 선언(JSON 반환)
 @RequestMapping("/api")                                              // 이 클래스의 모든 핸들러는 "/api" 하위 경로
@@ -65,7 +70,7 @@ public class BoardController {
     public PageDTO<PostDto> list(                                     // 페이지 DTO(PostDto 목록/카운트/페이지/사이즈) 반환
             // @PathVariable은 Spring MVC(스프링 프레임워크) 에서 URL 경로의 일부를 변수처럼 받아오는 기능
             @PathVariable String code,                                 // 경로 변수로 게시판 코드 수신("BUS"/"NORM" 등)
-            // defaultvalue: "값이 주어지지 않았을 때 대신 사용되는 “미리 정해둔 값”
+            // defaultvalue: "값이 주어지지 않았을 때 대신 사용되는 “미리 정해둔 값” 
             @RequestParam(defaultValue = "0") int page,                // 쿼리 파라미터 page(기본 0)
             @RequestParam(defaultValue = "10") int size,               // 쿼리 파라미터 size(기본 10)
             // 🔎 검색/기간 조건용 쿼리 파라미터 (없으면 null로 들어옴 → DAO에서 무시)
@@ -132,7 +137,7 @@ public class BoardController {
         return ResponseEntity.ok(p);
     }
 
-    /** 게시글 생성 (파일 업로드 지원) */
+    /** 게시글 생성 (파일 업로드 + 폴더 타입 지원) */
     @PostMapping(
             value = "/boards/{code}/posts",                            // 예: POST /api/boards/NORM/posts
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE             // 본문 타입: multipart/form-data
@@ -141,7 +146,11 @@ public class BoardController {
             @PathVariable String code,                                 // 게시판 코드
             @RequestParam("title") String title,                       // 폼 필드: 제목
             @RequestParam("content") String content,                   // 폼 필드: 내용
-            @RequestParam(name = "file", required = false) MultipartFile file, // 폼 필드: 첨부파일(없을 수 있음)
+            // ✅ 여러 파일 수신: files[] 로 여러 개, file(단일)도 겸용 지원
+            @RequestParam(name = "files", required = false) List<MultipartFile> files,
+            @RequestParam(name = "file", required = false) MultipartFile legacyFile, // 예전 단일 파일 필드 호환
+            @RequestParam(name = "isFolder", required = false) Boolean isFolder, // 폴더 여부(체크박스)
+            @RequestParam(name = "folderName", required = false) String folderName, // 폴더 이름
             Authentication auth) throws IOException {                  // 현재 사용자 인증(로그인 안 했을 수도 있음)
 
         // 요청 본문을 직접 PostDto로 받지 않고, 서버쪽에서 안전하게 DTO 생성
@@ -156,40 +165,102 @@ public class BoardController {
             req.setWriterName(auth.getName());                         // 단순히 name도 동일 설정(필요 시 별도 조회 가능)
         }
 
-        // ───────────── 첨부파일 처리 ─────────────
-        if (file != null && !file.isEmpty()) {                         // 파일이 실제로 업로드된 경우에만
-            String originalName = file.getOriginalFilename();          // 원본 파일명
-            String contentType = file.getContentType();                // MIME 타입(image/png 등)
+        // ───────────── 첨부파일 / 폴더 처리 ─────────────
+        // 🔹 체크박스만 켜져 있어도 폴더로 인정하고, 이름이 비면 제목을 대신 사용
+        boolean folderFlag = Boolean.TRUE.equals(isFolder);
 
-            // 저장 파일명: UUID_원본이름 (충돌 방지)
-            String safeName = (originalName == null) ? "" : originalName.replaceAll("\\s+", "_");
-            String savedName = UUID.randomUUID().toString() + "_" + safeName;
+        if (folderFlag) {
+            // 📁 실파일 없이 "폴더 글"만 등록
+            String name = (folderName == null || folderName.isBlank())
+                    ? title
+                    : folderName.trim();
 
-            // 업로드 디렉터리 생성(없으면)
-            Path uploadPath = Paths.get(uploadDir).toAbsolutePath();   // application.properties의 file.upload-dir 기준
-            Files.createDirectories(uploadPath);                       // 디렉터리 없으면 생성
+            req.setFileUrl(null);                                      // 물리 파일 없음
+            req.setFileType("FOLDER");                                 // 폴더 타입
+            req.setFileName(name);                                     // 폴더 이름(또는 제목)
+            req.setFileContentType(null);
+            // 폴더 글이라서 실제 파일 리스트는 없음
+            // (file_list_json 도 null 그대로)
+        } else {
+            // 🔹 일반 게시글 + 여러 파일/이미지 업로드 모드
+            //   - files 리스트에 담긴 것 + legacyFile(단일)까지 합쳐서 처리
+            List<MultipartFile> effective = new ArrayList<>();
 
-            // 실제 저장 경로
-            Path target = uploadPath.resolve(savedName);
-            file.transferTo(target.toFile());                          // 파일 저장
-
-            // 파일 타입 판별: 이미지 / 일반파일 / 폴더
-            String fileType;
-            boolean isImage = (contentType != null && contentType.toLowerCase().startsWith("image/"));
-            if (isImage) {
-                fileType = "IMAGE";
-            } else if (originalName != null && !originalName.contains(".")) {
-                // 간단 규칙: 확장자가 없으면 "폴더처럼" 취급 → 폴더 아이콘
-                fileType = "FOLDER";
-            } else {
-                fileType = "FILE";
+            if (files != null) {
+                for (MultipartFile f : files) {
+                    if (f != null && !f.isEmpty()) {
+                        effective.add(f);
+                    }
+                }
+            }
+            if (effective.isEmpty() && legacyFile != null && !legacyFile.isEmpty()) {
+                effective.add(legacyFile); // 옛날 단일 필드로 올라온 경우
             }
 
-            // DTO에 첨부파일 정보 세팅
-            req.setFileUrl("/uploads/" + savedName);                   // 웹에서 접근할 URL (WebMvcConfig에서 매핑)
-            req.setFileType(fileType);                                 // IMAGE / FILE / FOLDER
-            req.setFileName(originalName);                              // 원본 파일명
-            req.setFileContentType(contentType);                        // MIME 타입
+            if (!effective.isEmpty()) {
+                // ✅ 전체 첨부 목록을 JSON 으로 만들기 위한 리스트
+                List<Map<String, Object>> metaList = new ArrayList<>();
+
+                Path uploadPath = Paths.get(uploadDir).toAbsolutePath();   // application.properties의 file.upload-dir 기준
+                Files.createDirectories(uploadPath);                       // 디렉터리 없으면 생성
+
+                for (int i = 0; i < effective.size(); i++) {
+                    MultipartFile file = effective.get(i);
+
+                    String originalName = file.getOriginalFilename();      // 원본 파일명
+                    String contentType = file.getContentType();            // MIME 타입(image/png 등)
+                    long size = file.getSize();                            // 파일 크기
+
+                    // 저장 파일명: UUID_원본이름 (충돌 방지)
+                    String safeName = (originalName == null) ? "" : originalName.replaceAll("\\s+", "_");
+                    String savedName = UUID.randomUUID().toString() + "_" + safeName;
+
+                    // 실제 저장 경로
+                    Path target = uploadPath.resolve(savedName);
+                    file.transferTo(target.toFile());                      // 파일 저장
+
+                    // 파일 타입 판별: 이미지 / 일반파일
+                    String fileType;
+                    boolean isImage = (contentType != null && contentType.toLowerCase().startsWith("image/"));
+                    if (isImage) {
+                        fileType = "IMAGE";
+                    } else if (originalName != null && !originalName.contains(".")) {
+                        // 간단 규칙: 확장자가 없으면 "폴더처럼" 취급 → 폴더 아이콘
+                        fileType = "FOLDER";
+                    } else {
+                        fileType = "FILE";
+                    }
+
+                    String url = "/uploads/" + savedName;                 // 웹에서 접근할 URL (WebMvcConfig에서 매핑)
+
+                    // 🔸 대표 파일(첫 번째) 정보는 기존 컬럼에 세팅
+                    if (i == 0) {
+                        req.setFileUrl(url);
+                        req.setFileType(fileType);
+                        req.setFileName(originalName);
+                        req.setFileContentType(contentType);
+                    }
+
+                    // 🔸 file_list_json 에 들어갈 메타 정보 한 건
+                    Map<String, Object> meta = new HashMap<>();
+                    meta.put("name", originalName);
+                    meta.put("url", url);
+                    meta.put("contentType", contentType);
+                    meta.put("size", size);
+                    meta.put("fileType", fileType);
+
+                    metaList.add(meta);
+                }
+
+                // 리스트가 비어 있지 않으면 JSON 으로 직렬화해서 DTO에 저장
+                if (!metaList.isEmpty()) {
+                    ObjectMapper om = new ObjectMapper();
+                    String json = om.writeValueAsString(metaList);
+                    // PostDto 에 fileListJson 필드가 있어야 함 (get/setFileListJson)
+                    req.setFileListJson(json);
+                }
+            }
+            // effective 가 비어 있으면 첨부 없는 일반 글 → file_* 칼럼, file_list_json 모두 null
         }
 
         Long id = postDao.insert(req);                                 // DAO를 통해 DB에 INSERT 수행 → 생성된 PK(ID) 수신
@@ -236,6 +307,10 @@ public class BoardController {
         target.setFileType(fileType);
         target.setFileName(originalName);
         target.setFileContentType(contentType);
+
+        // 단일 교체에서는 대표 1개만 있으니, 여러 개 리스트는 초기화하는 쪽이 안전
+        // (여기서 전부 지우고 새 파일 1개만 있다고 보는 설계)
+        target.setFileListJson(null);
     }
 
     /* =========================
@@ -252,20 +327,31 @@ public class BoardController {
             @RequestBody PostDto req,                                  // 변경 내용이 담긴 DTO(제목/내용 등)
             Authentication auth) {                                     // 인증 정보(권한 판단/소유자 확인)
 
-        if (id != null && id.matches("\\d+"))                          // id가 순수 숫자라면 PK(Long)로 간주
-            req.setPostId(Long.parseLong(id));                         // DTO의 postId에 세팅
-        else                                                            // 숫자가 아니면
-            req.setUuid(id);                                           // 문자열 키(UUID 등)로 간주하여 uuid 필드에 세팅
+        // ① 기존 글 로드
+        PostDto existing = loadOneByIdOrKey(id);
+        if (existing == null) {
+            return ResponseEntity.notFound().build();
+        }
 
-        int affected = isAdmin(auth)                                   // 관리자면
-                ? postDao.update(req)                                  //   조건 없이 업데이트 허용
-                : postDao.updateIfOwner(req, username(auth));          // 아니면 본인 소유 게시글일 때만 업데이트
+        // ② 권한 체크: 관리자 또는 작성자만
+        String me = username(auth);
+        if (!(isAdmin(auth) || (me != null && me.equals(existing.getWriterId())))) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
+        // ③ 수정할 필드만 덮어쓰기(파일 정보는 유지)
+        if (req.getTitle() != null) {
+            existing.setTitle(req.getTitle());
+        }
+        if (req.getContent() != null) {
+            existing.setContent(req.getContent());
+        }
+
+        int affected = postDao.update(existing);                       // 최종 DTO로 UPDATE 실행
 
         if (affected > 0) return ResponseEntity.ok().build();          // 영향 행이 1 이상이면 200 OK(수정 성공)
 
-        return isAdmin(auth)                                           // 영향 행 없음: 관리자 여부로 분기
-                ? ResponseEntity.notFound().build()                    // 관리자라면 대상 없음(404 Not Found)
-                : ResponseEntity.status(HttpStatus.FORBIDDEN).build(); // 일반 사용자라면 권한 없음(403 Forbidden)
+        return ResponseEntity.notFound().build();                      // 여기까지 왔는데 0행이면 404로 처리
     }
 
     /** 게시글 수정(별도 문자열 키 라우트, JSON 본문) */
@@ -276,29 +362,40 @@ public class BoardController {
     public ResponseEntity<Void> updateByKey(                          // 위와 동일 로직, 경로 변수명만 다름
             @PathVariable String key,                                  // 문자열 키 수신
             @RequestBody PostDto req,                                  // 변경 DTO
-            Authentication auth) {                                      // 인증
+            Authentication auth) {                                     // 인증
 
-        if (key != null && key.matches("\\d+"))                        // key가 숫자면
-            req.setPostId(Long.parseLong(key));                        //   postId로 매핑
-        else                                                            // 아니면
-            req.setUuid(key);                                          //   uuid로 매핑
+        // ① 기존 글 로드
+        PostDto existing = loadOneByIdOrKey(key);
+        if (existing == null) {
+            return ResponseEntity.notFound().build();
+        }
 
-        int affected = isAdmin(auth)                                   // 관리자면 무제한 수정
-                ? postDao.update(req)
-                : postDao.updateIfOwner(req, username(auth));          // 일반 유저는 본인 글만
+        // ② 권한 체크
+        String me = username(auth);
+        if (!(isAdmin(auth) || (me != null && me.equals(existing.getWriterId())))) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
 
-        if (affected > 0) return ResponseEntity.ok().build();          // 성공 시 200 OK
+        // ③ 수정 필드 적용(파일 정보는 유지)
+        if (req.getTitle() != null) {
+            existing.setTitle(req.getTitle());
+        }
+        if (req.getContent() != null) {
+            existing.setContent(req.getContent());
+        }
 
-        return isAdmin(auth)                                           // 실패 시 관리자/일반 분기
-                ? ResponseEntity.notFound().build()                    // 관리자: 대상 없음(404)
-                : ResponseEntity.status(HttpStatus.FORBIDDEN).build(); // 일반: 권한 없음(403)
+        int affected = postDao.update(existing);
+
+        if (affected > 0) return ResponseEntity.ok().build();
+
+        return ResponseEntity.notFound().build();
     }
 
     /* =========================
-     * 게시글 수정 (multipart/form-data – 파일 교체 포함)
+     * 게시글 수정 (multipart/form-data – 파일/폴더 교체 포함)
      * ========================= */
 
-    /** 게시글 수정 + 파일 교체 (ID 기준, multipart/form-data) */
+    /** 게시글 수정 + 파일/폴더 교체 (ID 기준, multipart/form-data) */
     @PutMapping(
             value = "/posts/{id}",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE
@@ -308,6 +405,8 @@ public class BoardController {
             @RequestParam("title") String title,
             @RequestParam("content") String content,
             @RequestParam(name = "file", required = false) MultipartFile file,
+            @RequestParam(name = "isFolder", required = false) Boolean isFolder,
+            @RequestParam(name = "folderName", required = false) String folderName,
             Authentication auth) throws IOException {
 
         PostDto existing = loadOneByIdOrKey(id);
@@ -315,26 +414,49 @@ public class BoardController {
             return ResponseEntity.notFound().build();
         }
 
+        // 권한 체크
+        String me = username(auth);
+        if (!(isAdmin(auth) || (me != null && me.equals(existing.getWriterId())))) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
         existing.setTitle(title);
         existing.setContent(content);
 
-        // 새 파일이 있으면 교체
-        if (file != null && !file.isEmpty()) {
+        // 🔹 체크박스 기준으로 폴더 여부 판단, 이름이 비면 제목 사용
+        boolean folderFlag = Boolean.TRUE.equals(isFolder);
+
+        if (folderFlag) {
+            // 📁 폴더로 변경하는 경우: 기존 물리 파일 삭제 후 폴더 메타만 남김
+            String oldUrl = existing.getFileUrl();
+            if (oldUrl != null && oldUrl.startsWith("/uploads/")) {
+                Path uploadPath = Paths.get(uploadDir).toAbsolutePath();
+                Path oldPath = uploadPath.resolve(oldUrl.substring("/uploads/".length()));
+                Files.deleteIfExists(oldPath);
+            }
+            String name = (folderName == null || folderName.isBlank())
+                    ? title
+                    : folderName.trim();
+
+            existing.setFileUrl(null);
+            existing.setFileType("FOLDER");
+            existing.setFileName(name);
+            existing.setFileContentType(null);
+            existing.setFileListJson(null); // 폴더 글로 바뀌면 리스트도 초기화
+        } else if (file != null && !file.isEmpty()) {
+            // 새 파일이 있으면 교체
             replaceFile(existing, file);
         }
+        // 둘 다 없으면 기존 첨부 유지
 
-        int affected = isAdmin(auth)
-                ? postDao.update(existing)
-                : postDao.updateIfOwner(existing, username(auth));
+        int affected = postDao.update(existing);
 
         if (affected > 0) return ResponseEntity.ok().build();
 
-        return isAdmin(auth)
-                ? ResponseEntity.notFound().build()
-                : ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        return ResponseEntity.notFound().build();
     }
 
-    /** 게시글 수정 + 파일 교체 (문자열 키 기준, multipart/form-data) */
+    /** 게시글 수정 + 파일/폴더 교체 (문자열 키 기준, multipart/form-data) */
     @PutMapping(
             value = "/posts/key/{key}",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE
@@ -344,6 +466,8 @@ public class BoardController {
             @RequestParam("title") String title,
             @RequestParam("content") String content,
             @RequestParam(name = "file", required = false) MultipartFile file,
+            @RequestParam(name = "isFolder", required = false) Boolean isFolder,
+            @RequestParam(name = "folderName", required = false) String folderName,
             Authentication auth) throws IOException {
 
         PostDto existing = loadOneByIdOrKey(key);
@@ -351,29 +475,50 @@ public class BoardController {
             return ResponseEntity.notFound().build();
         }
 
+        // 권한 체크
+        String me = username(auth);
+        if (!(isAdmin(auth) || (me != null && me.equals(existing.getWriterId())))) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
         existing.setTitle(title);
         existing.setContent(content);
 
-        if (file != null && !file.isEmpty()) {
+        // 🔹 체크박스 기준으로 폴더 여부 판단, 이름이 비면 제목 사용
+        boolean folderFlag = Boolean.TRUE.equals(isFolder);
+
+        if (folderFlag) {
+            String oldUrl = existing.getFileUrl();
+            if (oldUrl != null && oldUrl.startsWith("/uploads/")) {
+                Path uploadPath = Paths.get(uploadDir).toAbsolutePath();
+                Path oldPath = uploadPath.resolve(oldUrl.substring("/uploads/".length()));
+                Files.deleteIfExists(oldPath);
+            }
+            String name = (folderName == null || folderName.isBlank())
+                    ? title
+                    : folderName.trim();
+
+            existing.setFileUrl(null);
+            existing.setFileType("FOLDER");
+            existing.setFileName(name);
+            existing.setFileContentType(null);
+            existing.setFileListJson(null);
+        } else if (file != null && !file.isEmpty()) {
             replaceFile(existing, file);
         }
 
-        int affected = isAdmin(auth)
-                ? postDao.update(existing)
-                : postDao.updateIfOwner(existing, username(auth));
+        int affected = postDao.update(existing);
 
         if (affected > 0) return ResponseEntity.ok().build();
 
-        return isAdmin(auth)
-                ? ResponseEntity.notFound().build()
-                : ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        return ResponseEntity.notFound().build();
     }
 
     /** 게시글 삭제(공통 라우트): 관리자=무제한, 일반=본인만 */
     @DeleteMapping("/posts/{id}")                                     // 예: DELETE /api/posts/123  또는 /api/posts/UUID
     public ResponseEntity<Void> delete(                               // 삭제는 보통 본문 없이 상태코드로 결과 전달
             @PathVariable String id,                                   // 삭제 대상 식별자
-            Authentication auth) {                                      // 인증(권한 확인용)
+            Authentication auth) {                                     // 인증(권한 확인용)
 
         int affected = isAdmin(auth)                                   // 관리자면
                 ? postDao.deleteAny(id)                                //   어떤 글이든 삭제 허용
@@ -390,7 +535,7 @@ public class BoardController {
     @DeleteMapping("/posts/key/{key}")                                // 예: DELETE /api/posts/key/abcd-efgh
     public ResponseEntity<Void> deleteByKey(                          // 위의 delete와 동일, 경로만 다름
             @PathVariable String key,                                  // 문자열 키
-            Authentication auth) {                                      // 인증
+            Authentication auth) {                                     // 인증
 
         int affected = isAdmin(auth)                                   // 관리자/일반 분기 동일
                 ? postDao.deleteAny(key)

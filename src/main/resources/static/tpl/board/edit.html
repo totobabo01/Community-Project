@@ -66,7 +66,7 @@
             ================================= -->
             <div
                 style="margin-top: 16px; padding-top: 14px; border-top: 1px solid #e2e8f0"
-                ng-if="meta.fileUrl"
+                ng-if="meta && meta.fileUrl"
             >
                 <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px">현재 첨부 파일</div>
 
@@ -108,19 +108,21 @@
                     style="display: inline-block; padding: 6px 12px; border-radius: 6px; cursor: pointer; background: #fff; border: 1px solid #d1d5db; font-size: 13px"
                 >
                     파일 선택
+                    <!-- 🔹 컨트롤러와 맞추기: form.file 로 통일 -->
                     <input
                         id="editFile"
                         type="file"
-                        file-model="newFile"
+                        file-model="form.file"
                         style="display: none"
                     />
                 </label>
 
+                <!-- 🔹 선택된 파일명 표시도 form.file 기준 -->
                 <span
-                    ng-if="newFile && newFile.name"
+                    ng-if="form.file && form.file.name"
                     style="margin-left: 8px; color: #475569; font-size: 13px"
                 >
-                    선택된 파일: {{ newFile.name }}
+                    선택된 파일: {{ form.file.name }}
                 </span>
 
                 <div style="font-size: 12px; margin-top: 6px; color: #6b7280">※ 새 파일을 선택하지 않으면 기존 첨부 파일은 그대로 유지됩니다.</div>

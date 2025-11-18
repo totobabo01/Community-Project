@@ -173,16 +173,63 @@
                 aria-label="내용"
             ></textarea>
 
-            <!-- 🔽 첨부 파일 선택 인풋 추가 (id / name 중요) -->
+            <!-- 🔽 첨부 파일 / 폴더 선택 인풋 -->
             <div style="margin-top: 8px">
-                <input
-                    type="file"
-                    id="postFile"
-                    name="file"
-                    aria-label="첨부 파일 선택"
-                />
+                <!-- 폴더로 등록 체크 -->
+                <label style="margin-right: 8px">
+                    <input
+                        type="checkbox"
+                        ng-model="newPost.isFolder"
+                    />
+                    폴더로 등록
+                </label>
+
+                <!-- 폴더가 아닐 때: 일반 파일/이미지 업로드 -->
+                <div
+                    ng-if="!newPost.isFolder"
+                    style="margin-top: 4px"
+                >
+                    <!-- ✅ 여러 개 선택 가능한 파일 입력 -->
+                    <input
+                        type="file"
+                        id="postFile"
+                        name="file"
+                        multiple
+                        file-model="newPost.files"
+                        aria-label="첨부 파일 선택"
+                    />
+                    <!-- ✅ 선택된 파일들의 정보 표시 -->
+                    <span
+                        class="file-meta"
+                        ng-if="newPost.files && newPost.files.length"
+                    >
+                        선택된 파일 {{ newPost.files.length }}개:
+                        <span ng-repeat="f in newPost.files"> {{ f.name }} ({{ getFileExt(f) || '확장자 없음' }}, {{ formatFileSize(f.size) }}){{$last ? '' : ', '}} </span>
+                        <!-- 현재 구조상 첫 번째 파일만 실제 업로드/저장 -->
+                    </span>
+                    <span
+                        class="file-meta muted"
+                        ng-if="!newPost.files || !newPost.files.length"
+                    >
+                        선택된 파일 없음
+                    </span>
+                </div>
+
+                <!-- 폴더일 때: 폴더 이름만 입력 -->
+                <div
+                    ng-if="newPost.isFolder"
+                    style="margin-top: 4px"
+                >
+                    <input
+                        class="inline-input input-like"
+                        type="text"
+                        placeholder="폴더 이름을 입력하세요"
+                        ng-model="newPost.folderName"
+                        aria-label="폴더 이름"
+                    />
+                </div>
             </div>
-            <!-- 🔼 첨부 파일 선택 인풋 끝 -->
+            <!-- 🔼 첨부 파일 / 폴더 선택 인풋 끝 -->
 
             <div style="margin-top: 8px; text-align: right">
                 <button
@@ -300,7 +347,7 @@
                     <!-- 첨부파일이 있을 때만 표시 -->
                     <div
                         class="post-file-indicator"
-                        ng-if="p.fileUrl"
+                        ng-if="p.fileUrl || p.fileType === 'FOLDER'"
                     >
                         <!-- 이미지인 경우: 썸네일 -->
                         <img
@@ -330,6 +377,19 @@
                     </div>
                 </div>
                 <!-- 🔼 제목 + 첨부파일 표시라인 끝 -->
+
+                <!-- 첨부 파일 메타 정보 (이름 / 확장자 / 크기 / MIME) -->
+                <div
+                    class="post-file-meta"
+                    ng-if="p.fileName"
+                >
+                    <span class="file-name">{{ p.fileName }}</span>
+                    <span class="file-extra">
+                        ({{ getFileExt(p.fileName) }}
+                        <span ng-if="p.fileSize"> · {{ formatFileSize(p.fileSize) }}</span>
+                        <span ng-if="p.fileContentType"> · {{ p.fileContentType }}</span>)
+                    </span>
+                </div>
 
                 <div
                     class="post-snippet"
@@ -494,7 +554,7 @@
         style="margin-top: 10px"
     >
         <div class="left">
-            <span class="muted">페이지 {{ (page || 0) + 1 }} / {{ pages || 1 }}</span>
+            <span class="muted"> 페이지 {{ (page || 0) + 1 }} / {{ pages || 1 }} </span>
         </div>
 
         <div class="right">
@@ -760,7 +820,6 @@
         padding: 24px 16px;
         color: #8a94a6;
     }
-
     .post-title-line {
         display: flex;
         align-items: center;
@@ -791,7 +850,12 @@
         font-size: 18px;
         line-height: 1;
     }
-
+    /* 선택된 파일 정보(글쓰기 쪽) */
+    .file-meta {
+        font-size: 12px;
+        color: #6b7280;
+        margin-left: 6px;
+    }
     .badge {
         display: inline-block;
         padding: 4px 8px;
@@ -821,6 +885,19 @@
         gap: 4px;
         margin: 0 8px;
         vertical-align: middle;
+    }
+    /* 게시글 목록에서 파일 메타 정보 라인 */
+    .post-file-meta {
+        font-size: 12px;
+        color: #6b7280;
+        margin-bottom: 4px;
+    }
+    .post-file-meta .file-name {
+        font-weight: 500;
+    }
+    .post-file-meta .file-extra {
+        margin-left: 4px;
+        color: #9ca3af;
     }
     @media (max-width: 1024px) {
         .table-head,

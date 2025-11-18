@@ -46,6 +46,9 @@ public class PostDao {
         String fileType;                       // file_type
         String fileName;                       // file_name
         String fileContentType;                // file_content_type
+
+        // ★ 추가됨: file_list_json - 첨부파일 목록(JSON 문자열) 컬럼
+        String fileListJson;                   // file_list_json
     }
 
     private volatile SchemaInfo cachedPost;    // 멀티스레드 환경에서도 보관/읽기가 안전하도록 volatile로 캐시
@@ -128,6 +131,9 @@ public class PostDao {
                 si.fileType = pick(cols, "file_type");
                 si.fileName = pick(cols, "file_name");
                 si.fileContentType = pick(cols, "file_content_type");
+
+                // ★ 추가됨: file_list_json 컬럼 자동 탐지
+                si.fileListJson = pick(cols, "file_list_json");
 
                 cachedPost = si;                                               // 캐시 저장
                 return si;
@@ -419,6 +425,10 @@ public class PostDao {
         if (s.fileContentType != null) {
             try { d.setFileContentType(rs.getString(s.fileContentType)); } catch (SQLException ignore) {}
         }
+        // ★ 추가됨: file_list_json 매핑
+        if (s.fileListJson != null) {
+            try { d.setFileListJson(rs.getString(s.fileListJson)); } catch (SQLException ignore) {}
+        }
 
         if (s.writerId != null)   { try { d.setWriterId(rs.getString(s.writerId)); } catch (SQLException ignore) {} }
         if (s.writerName != null) { try { d.setWriterName(rs.getString(s.writerName)); } catch (SQLException ignore) {} }
@@ -439,89 +449,158 @@ public class PostDao {
     }
 
     // ───────────────────────── 등록(Create) ─────────────────────────
+    // ✅ 게시글(Post)을 DB에 INSERT 하고, 생성된 PK(숫자형이면)를 리턴하는 메서드
     public Long insert(PostDto d) {
+        // 현재 사용 중인 게시글 테이블 스키마 정보를 가져옴
+        // (테이블명, PK 컬럼명, board 컬럼명, created_at/updated_at 등)
         var s = ensurePostResolved();
 
+        // INSERT 시 사용할 컬럼 이름들을 담을 리스트
         List<String> cols = new ArrayList<>();      // INSERT 컬럼 리스트
+        // 각 컬럼에 매핑될 실제 값(바인딩 파라미터)을 담을 리스트
         List<Object> vals = new ArrayList<>();      // INSERT 값 리스트(바인딩 파라미터)
 
+        // PK 컬럼(s.id)이 존재하고, 그 이름이 "uuid"인지 검사
+        // → PK가 uuid 컬럼(문자열 UUID)인지 여부
         boolean idIsUuid = (s.id != null && "uuid".equalsIgnoreCase(s.id)); // PK가 uuid 컬럼인지 여부
+        // 서버에서 생성한 uuid 값을 임시로 저장할 변수
         String generatedUuid = null;
+
+        // 만약 PK가 uuid 컬럼인 스키마라면,
         if (idIsUuid) {                              // uuid PK 스키마면 서버에서 UUID 생성해 함께 INSERT
+            // 자바에서 랜덤 UUID 생성
             generatedUuid = java.util.UUID.randomUUID().toString();
-            cols.add(s.id); vals.add(generatedUuid);
+            // INSERT에 사용할 컬럼 리스트에 PK 컬럼(s.id = "uuid") 추가
+            cols.add(s.id);
+            // 해당 PK 값으로 방금 생성한 uuid 값 추가
+            vals.add(generatedUuid);
         }
 
-        // ★ 핵심: post.board 컬럼이 board_uuid이면, code→uuid 변환 후 넣는다
+        // ★ 핵심: post.board 컬럼이 board_uuid 컬럼인지, board_code 컬럼인지에 따라 다르게 처리
+        // boardColumnIsUuid(s) == true 이면 게시판을 uuid 기준으로 연결하는 스키마라는 뜻
         if (boardColumnIsUuid(s)) {
+            // DTO에 들어있는 boardCode(예: "BUS", "NORM")를 이용해 실제 board 테이블의 uuid 조회
             String boardUuid = findBoardUuidByCode(d.getBoardCode());
+            // 만약 code에 해당하는 board를 찾지 못하면 예외 발생
             if (boardUuid == null)
                 throw new IllegalStateException("board_code를 찾을 수 없습니다: " + d.getBoardCode());
-            cols.add(s.board); vals.add(boardUuid);
+            // INSERT 컬럼에 board 컬럼명(s.board = "board_uuid" 같은 값) 추가
+            cols.add(s.board);
+            // 값으로는 방금 구한 boardUuid를 넣음
+            vals.add(boardUuid);
         } else {
-            cols.add(s.board); vals.add(d.getBoardCode());      // board_code 스키마면 코드 그대로 저장
+            // board 컬럼이 코드 문자열을 직접 저장하는 스키마(예: board_code)라면
+            cols.add(s.board);               // 컬럼 이름 추가
+            vals.add(d.getBoardCode());      // 값은 "BUS", "NORM" 같은 코드 그대로 저장
         }
 
-        cols.add(s.title);   vals.add(d.getTitle());            // 제목
-        cols.add(s.content); vals.add(d.getContent());          // 본문
+        // 게시글 제목 컬럼을 INSERT 목록에 추가하고, DTO에서 제목 값 가져와 함께 넣음
+        cols.add(s.title);
+        vals.add(d.getTitle());            // 제목
 
-        // 🔽 첨부파일 필드가 있고 DTO에 값이 있으면 함께 INSERT
+        // 게시글 본문(content) 컬럼을 INSERT 목록에 추가하고, DTO에서 내용 값 가져와 함께 넣음
+        cols.add(s.content);
+        vals.add(d.getContent());          // 본문
+
+        // 🔽 첨부파일 관련 컬럼이 스키마에 존재하는 경우에만 INSERT에 포함
+        //    (스키마마다 있을 수도, 없을 수도 있어서 null 체크 후 조건부 추가)
+
+        // s.fileUrl 컬럼명이 존재할 경우
         if (s.fileUrl != null) {
-            cols.add(s.fileUrl);
-            vals.add(d.getFileUrl());
+            cols.add(s.fileUrl);               // file_url 같은 컬럼 이름 추가
+            vals.add(d.getFileUrl());          // DTO의 파일 URL 값 추가 (없으면 null 들어갈 수도 있음)
         }
+        // s.fileType 컬럼명이 존재할 경우
         if (s.fileType != null) {
-            cols.add(s.fileType);
-            vals.add(d.getFileType());
+            cols.add(s.fileType);              // file_type 컬럼
+            vals.add(d.getFileType());         // DTO의 파일 타입 값
         }
+        // s.fileName 컬럼명이 존재할 경우
         if (s.fileName != null) {
-            cols.add(s.fileName);
-            vals.add(d.getFileName());
+            cols.add(s.fileName);              // file_name 컬럼
+            vals.add(d.getFileName());         // DTO의 원본 파일명
         }
+        // s.fileContentType 컬럼명이 존재할 경우
         if (s.fileContentType != null) {
-            cols.add(s.fileContentType);
-            vals.add(d.getFileContentType());
+            cols.add(s.fileContentType);       // file_content_type 컬럼
+            vals.add(d.getFileContentType());  // DTO의 MIME 타입 값
+        }
+        // ★ 추가됨: file_list_json 컬럼 INSERT
+        if (s.fileListJson != null) {
+            cols.add(s.fileListJson);          // file_list_json 컬럼
+            vals.add(d.getFileListJson());     // DTO의 파일 리스트 JSON 문자열
         }
 
-        if (s.writerId != null)   { cols.add(s.writerId);   vals.add(d.getWriterId()); }
-        if (s.writerName != null) { cols.add(s.writerName); vals.add(d.getWriterName()); }
+        // 작성자 아이디 컬럼이 존재하면 INSERT에 포함 (예: writer_id)
+        if (s.writerId != null)   {
+            cols.add(s.writerId);
+            vals.add(d.getWriterId());
+        }
+        // 작성자 이름 컬럼이 존재하면 INSERT에 포함 (예: writer_name)
+        if (s.writerName != null) {
+            cols.add(s.writerName);
+            vals.add(d.getWriterName());
+        }
 
+        // created_at 컬럼이 테이블에 있는지 여부
         boolean hasCreated = s.createdAt != null;               // created_at 컬럼 존재 여부
+        // updated_at 컬럼이 테이블에 있는지 여부
         boolean hasUpdated = s.updatedAt != null;               // updated_at 컬럼 존재 여부
 
-        // created_at/updated_at 컬럼이 있으면 NOW()로 자동세팅
-        String sql = "INSERT INTO " + s.table + " (" +
-                String.join(", ", cols) +
-                (hasCreated ? ", " + s.createdAt : "") +
-                (hasUpdated ? ", " + s.updatedAt : "") +
+        // created_at/updated_at 컬럼이 존재하면 NOW() 함수를 이용해 DB 현재 시각으로 자동 세팅하는 INSERT SQL을 만듦
+        String sql = "INSERT INTO " + s.table + " (" +         // INSERT INTO post( ...
+                String.join(", ", cols) +                      // 지금까지 모은 컬럼들 나열
+                (hasCreated ? ", " + s.createdAt : "") +       // created_at 있으면 컬럼명 추가
+                (hasUpdated ? ", " + s.updatedAt : "") +       // updated_at 있으면 컬럼명 추가
                 ") VALUES (" +
+                // 컬럼 개수만큼 ? 플레이스홀더 생성
                 String.join(", ", Collections.nCopies(cols.size(), "?")) +
-                (hasCreated ? ", NOW()" : "") +
-                (hasUpdated ? ", NOW()" : "") +
+                (hasCreated ? ", NOW()" : "") +                // created_at 있으면 VALUES에 NOW() 추가
+                (hasUpdated ? ", NOW()" : "") +                // updated_at 있으면 VALUES에 NOW() 추가
                 ")";
 
+        // 자동 증가된 키(숫자 PK)를 받기 위한 KeyHolder 객체
         KeyHolder kh = new GeneratedKeyHolder();                // 자동 증가 키 수신용
         try {
+            // jdbc.update(...) 로 실제 INSERT 실행 (람다로 PreparedStatement 생성 로직 전달)
             jdbc.update(conn -> {                               // PreparedStatement 생성 콜백
+                // 생성한 SQL과 함께, 자동 생성 키를 돌려받기 위해 RETURN_GENERATED_KEYS 옵션 사용
                 PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
-                for (int i = 0; i < vals.size(); i++) ps.setObject(i + 1, vals.get(i)); // ? 바인딩
-                return ps;
-            }, kh);
+                // ? 에 실제 값들(vals 리스트)을 순서대로 바인딩
+                for (int i = 0; i < vals.size(); i++)
+                    ps.setObject(i + 1, vals.get(i));          // 1번부터 시작해서 차례대로 세팅
+                return ps;                                     // 완성된 PreparedStatement 리턴
+            }, kh);                                             // 실행 후 생성된 키는 kh에 담김
         } catch (DataAccessException e) {
-            // created_at/updated_at 미존재 스키마 호환(위 쿼리 실패 시 컬럼 제외 버전 재시도)
-            String sql2 = "INSERT INTO " + s.table + " (" + String.join(", ", cols) + ") VALUES (" +
+            // 만약 위 SQL이 실패하면,
+            // (예: created_at/updated_at 컬럼이 실제로는 없는데 hasCreated/hasUpdated가 잘못 true인 경우 등)
+            // created_at/updated_at 컬럼을 빼고 INSERT를 다시 시도하는 SQL로 재시도
+            String sql2 = "INSERT INTO " + s.table + " (" +
+                    String.join(", ", cols) + ") VALUES (" +
                     String.join(", ", Collections.nCopies(cols.size(), "?")) + ")";
+
+            // created_at/updated_at 없이 다시 INSERT 수행
             jdbc.update(conn -> {
                 PreparedStatement ps = conn.prepareStatement(sql2, Statement.RETURN_GENERATED_KEYS);
-                for (int i = 0; i < vals.size(); i++) ps.setObject(i + 1, vals.get(i));
+                for (int i = 0; i < vals.size(); i++)
+                    ps.setObject(i + 1, vals.get(i));
                 return ps;
             }, kh);
         }
 
-        if (idIsUuid) { d.setUuid(generatedUuid); return null; } // uuid PK면 DB 자동키 없음 → 응답 DTO에 uuid만 채움
+        // PK가 uuid 컬럼인 스키마라면, 자동 증가 숫자 키가 아니라
+        // 우리가 직접 만든 generatedUuid를 DTO에 세팅해주고, 메서드 리턴값은 null 처리
+        if (idIsUuid) {                         // uuid PK면 DB 자동키 없음 → 응답 DTO에 uuid만 채움
+            d.setUuid(generatedUuid);           // DTO에 uuid 저장
+            return null;                        // 숫자형 PK가 없으므로 null 반환
+        }
+
+        // 숫자 PK 스키마라면, INSERT 시 생성된 자동 증가 키를 KeyHolder에서 꺼냄
         Number key = kh.getKey();                                // 숫자 PK 스키마면 생성된 키 수신
+        // key가 존재하면 long 타입으로 변환해서 반환, 없으면 null 반환
         return (key != null) ? key.longValue() : null;           // 있으면 long 변환 반환, 없으면 null
     }
+
 
     // ───────────────────────── 수정(Update: 관리자 전용) ─────────────────────────
     public int update(PostDto d) {
@@ -555,6 +634,11 @@ public class PostDao {
         if (s.fileContentType != null && d.getFileContentType() != null) {
             sb.append(", ").append(s.fileContentType).append(" = ?");
             params.add(d.getFileContentType());
+        }
+        // ★ 추가됨: file_list_json 업데이트 (null 아닐 때만)
+        if (s.fileListJson != null && d.getFileListJson() != null) {
+            sb.append(", ").append(s.fileListJson).append(" = ?");
+            params.add(d.getFileListJson());
         }
 
         if (s.updatedAt != null) sb.append(", ").append(s.updatedAt).append(" = NOW()"); // 수정시간 갱신(있을 때만)
@@ -599,6 +683,11 @@ public class PostDao {
             sb.append(", ").append(s.fileContentType).append(" = ?");
             params.add(d.getFileContentType());
         }
+        // ★ 추가됨: file_list_json 업데이트 (null 아닐 때만)
+        if (s.fileListJson != null && d.getFileListJson() != null) {
+            sb.append(", ").append(s.fileListJson).append(" = ?");
+            params.add(d.getFileListJson());
+        }
 
         if (s.updatedAt != null) {
             sb.append(", ").append(s.updatedAt).append(" = NOW()");
@@ -639,6 +728,11 @@ public class PostDao {
                 if (s.fileContentType != null && d.getFileContentType() != null) {
                     sb2.append(", ").append(s.fileContentType).append(" = ?");
                     p2.add(d.getFileContentType());
+                }
+                // ★ 추가됨: file_list_json 재시도 쿼리에도 포함
+                if (s.fileListJson != null && d.getFileListJson() != null) {
+                    sb2.append(", ").append(s.fileListJson).append(" = ?");
+                    p2.add(d.getFileListJson());
                 }
 
                 // 여기서는 updatedAt 미포함

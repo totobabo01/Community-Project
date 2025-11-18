@@ -39,13 +39,11 @@
         return {
             restrict: 'A',
             link: function (scope, element, attrs) {
-                const model = $parse(attrs.fileModel); // 'newPost.file' 같은 표현식을 파싱
+                var model = $parse(attrs.fileModel);
                 element.bind('change', function () {
-                    const files = element[0].files;
-                    // 선택된 파일이 있으면 첫 번째 파일, 없으면 null
-                    const file = files && files.length ? files[0] : null;
                     scope.$apply(function () {
-                        model.assign(scope, file);
+                        // FileList 통째로 넘김 (files[0], files.length 등 사용 가능)
+                        model.assign(scope, element[0].files);
                     });
                 });
             },
@@ -594,7 +592,7 @@
     app.controller('BoardBaseCtrl', function ($scope, $http, AuthService) {
         $scope.posts = [];
         $scope.loading = false;
-        $scope.newPost = { title: '', content: '', file: null }; // ← 파일 필드 추가
+        $scope.newPost = { title: '', content: '', files: null }; // ← 파일 필드 추가
         $scope.showComposer = false;
 
         $scope.pageSizes = [5, 10, 15, 20];
@@ -607,6 +605,36 @@
         $scope.q = { type: 'author', keyword: '', from: null, to: null };
         const isNum = (v) => typeof v === 'number' && isFinite(v);
         const isNonEmptyStr = (s) => typeof s === 'string' && s.trim().length > 0;
+
+        // 파일 확장자 구하기 (File 객체 또는 파일 이름 문자열 둘 다 지원)
+        $scope.getFileExt = function (fileOrName) {
+            if (!fileOrName) return '확장자 없음';
+
+            var name = fileOrName;
+            if (fileOrName.name) {
+                // File 객체인 경우
+                name = fileOrName.name;
+            }
+            var idx = name.lastIndexOf('.');
+            if (idx < 0) return '확장자 없음';
+            return name.substring(idx + 1).toLowerCase();
+        };
+
+        // 파일 크기를 사람이 보기 좋게 포맷
+        $scope.formatFileSize = function (size) {
+            if (!angular.isNumber(size)) return '알 수 없음';
+
+            if (size < 1024) return size + ' B';
+
+            var kb = size / 1024;
+            if (kb < 1024) return kb.toFixed(1) + ' KB';
+
+            var mb = kb / 1024;
+            if (mb < 1024) return mb.toFixed(2) + ' MB';
+
+            var gb = mb / 1024;
+            return gb.toFixed(2) + ' GB';
+        };
 
         // ──────── [ADD] 검색 창 토글/닫기 ────────
         $scope.searchOpen = false; // 검색 패널(툴바) 열림/닫힘 상태를 보관하는 플래그. 초깃값은 닫힘(false).
@@ -1046,110 +1074,190 @@
         // ====== ★ 게시글 CRUD(추가) — 저장 후 항상 새로고침 ======
 
         // 작성 (※ JSON → multipart/form-data 전송으로 변경)
+        // app.js 의 BoardBaseCtrl 안
+        // ✅ 새 게시글(폴더/파일/일반글) 생성 함수
         $scope.createPost = function () {
+            // newPost 객체가 없다면 빈 객체로 초기화 (안전장치)
+            if (!$scope.newPost) $scope.newPost = {};
+
+            // 제목과 내용을 문자열로 가져온 뒤, 앞뒤 공백 제거
             const title = ($scope.newPost.title || '').trim();
             const content = ($scope.newPost.content || '').trim();
 
-            // 🔽 파일 찾기: 1) fileModel로 바인딩된 파일, 2) 없으면 DOM에서 id="postFile"로 직접 찾기
-            let file = $scope.newPost.file || null; // fileModel 디렉티브로 바인딩된 파일 (있으면 우선 사용)
-            if (!file) {
-                const input = document.getElementById('postFile');
-                if (input && input.files && input.files.length > 0) {
-                    file = input.files[0]; // bus.html에서 선택한 실제 파일
+            // 제목이 비어 있으면 경고 후 함수 종료
+            if (!title) {
+                alert('제목을 입력하세요.');
+                return;
+            }
+
+            // 체크박스 등에서 넘어온 isFolder 값을 boolean으로 변환
+            const isFolder = !!$scope.newPost.isFolder;
+            // 폴더 이름이 있을 경우 공백 제거 후 사용
+            const folderName = ($scope.newPost.folderName || '').trim();
+
+            // 🔹 newPost 를 files 배열로 사용하도록 변경
+            //    (file-model="newPost.files" 로 연결되어 있음)
+            const files = $scope.newPost.files || [];
+            const file = files && files.length ? files[0] : null; // 현재는 첫 번째 파일만 업로드
+
+            // 🔹 HTML 파일 인풋 요소를 직접 가져옴 (id="postFile")
+            //    업로드 후 값을 비워 주기 위해 사용
+            const fileInput = document.getElementById('postFile');
+
+            // 서버에 multipart/form-data로 보낼 FormData 객체 생성
+            const fd = new FormData();
+            // 제목을 FormData에 추가
+            fd.append('title', title);
+            // 내용을 FormData에 추가
+            fd.append('content', content);
+
+            if (isFolder) {
+                // 🔹 폴더 게시글일 때: 파일 업로드는 하지 않고 폴더 정보만 전송
+                fd.append('isFolder', 'true'); // 서버에서 폴더 여부를 인식하기 위한 플래그
+                if (folderName) {
+                    // 폴더 이름이 있다면 함께 전송
+                    fd.append('folderName', folderName);
+                }
+            } else {
+                // 🔹 일반 게시글 + 파일/이미지 업로드 모드
+                if (file) {
+                    // 사용자가 선택한 파일이 있다면 FormData에 'file'로 추가
+                    fd.append('file', file);
                 }
             }
-            // 🔼 여기까지가 "어디서 파일을 가져올지"에 대한 통합 처리
 
-            if (!title) return alert('제목을 입력하세요.');
+            // 로딩 상태 ON: 버튼 비활성화, 스피너 표시 등에 사용
+            $scope.loading = true;
 
-            const url = '/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts';
-
-            // 📦 FormData를 만들어 title, content, file을 함께 담아서 전송
-            const form = new FormData();
-            form.append('title', title);
-            form.append('content', content);
-            if (file) {
-                // 서버 BoardController에서 @RequestPart("file") MultipartFile file 로 받음
-                form.append('file', file);
-            }
-
+            // 게시글/폴더/파일을 서버에 전송 (POST 요청)
             $http
-                .post(url, form, {
-                    // Angular가 FormData를 건드리지 않도록 원본 그대로 전송
-                    transformRequest: angular.identity,
-                    // Content-Type을 명시하지 않으면 브라우저가 boundary 포함해서 자동 세팅
-                    headers: { 'Content-Type': undefined },
-                })
+                .post(
+                    '/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts', // 게시판 코드에 맞는 URL
+                    fd, // FormData 전송
+                    {
+                        // Content-Type을 undefined로 두면 브라우저가 boundary 포함한 multipart/form-data 자동 설정
+                        headers: { 'Content-Type': undefined },
+                        // Angular가 데이터를 건드리지 않고 그대로 보내도록 설정
+                        transformRequest: angular.identity,
+                    }
+                )
                 .then(function () {
-                    // 작성 폼 초기화
-                    $scope.newPost = { title: '', content: '', file: null };
-                    // input[type=file] DOM도 비워 주고 싶으면 여기서 초기화 (선택 사항)
-                    const input = document.getElementById('postFile');
-                    if (input) input.value = '';
-
-                    $scope.page = 0;
-                    $scope.loadPosts();
+                    // 요청이 성공했을 때 실행
+                    alert('등록되었습니다.');
+                    // 폼 데이터 초기화 (제목/내용/폴더 옵션 등)
+                    $scope.newPost = {};
+                    // 파일 배열도 초기화
+                    $scope.newPost.files = null;
+                    // 파일 인풋이 존재한다면 선택된 파일 초기화
+                    if (fileInput) fileInput.value = '';
+                    // 게시글 목록을 다시 불러오기 (reload가 있으면 그걸 사용, 없으면 loadPosts 사용)
+                    $scope.loadPosts && $scope.loadPosts();
                 })
-                .catch(function () {
-                    alert('등록 실패');
+                .catch(function (err) {
+                    // 요청 실패 시 로그와 사용자 알림
+                    console.error('게시글 등록 실패', err);
+                    alert('등록에 실패했습니다.');
+                })
+                .finally(function () {
+                    // 성공/실패 상관 없이 로딩 상태 OFF
+                    $scope.loading = false;
                 });
         };
 
+        // ✅ 게시글 수정 모드로 전환 (인라인 수정 시작)
         $scope.startEditPost = function (p) {
+            // 현재 로그인 사용자가 이 글을 수정할 수 있는 권한이 있는지 체크
             if (!canEditPost(p)) return alert('본인이 쓴 글만 수정할 수 있습니다.');
+
+            // 이 게시글을 "수정 중" 상태로 표시 (템플릿에서 ng-if/ng-show로 사용)
             p._editing = true;
+            // 수정용 임시 제목 필드에 기존 제목 복사
             p._editTitle = p.title;
+            // 수정용 임시 내용 필드에 기존 내용 복사
             p._editContent = p.content;
         };
+
+        // ✅ 게시글 수정 취소
         $scope.cancelEditPost = function (p) {
+            // 수정 모드 해제
             p._editing = false;
+            // 임시 제목/내용 초기화(비움)
             p._editTitle = '';
             p._editContent = '';
         };
 
+        // ✅ 게시글 수정 저장 요청
         $scope.savePost = function (p) {
+            // 수정 권한 체크 (작성자 또는 관리자만)
             if (!canEditPost(p)) return alert('본인이 쓴 글만 수정할 수 있습니다.');
+
+            // 임시 입력값에서 제목과 내용을 가져와 공백 제거
             const title = (p._editTitle || '').trim();
             const content = (p._editContent || '').trim();
+
+            // 제목이 비어 있으면 경고 후 리턴
             if (!title) return alert('제목을 입력하세요.');
 
-            const keyType = p._keyType;
-            const key = p._key;
+            // 이 게시글을 식별하기 위해 준비해 둔 키 타입/값
+            const keyType = p._keyType; // 'str' 또는 'num'
+            const key = p._key; // 실제 key 값(uuid 또는 숫자 PK 등)
             let url = null;
-            if (keyType === 'str') url = '/api/posts/key/' + encodeURIComponent(key);
-            else if (keyType === 'num') url = '/api/posts/' + encodeURIComponent(key);
+
+            // key 타입에 따라 사용할 API URL 분기
+            if (keyType === 'str')
+                // 문자열 키(uuid 등)를 사용할 때
+                url = '/api/posts/key/' + encodeURIComponent(key);
+            else if (keyType === 'num')
+                // 숫자형 PK를 사용할 때
+                url = '/api/posts/' + encodeURIComponent(key);
+            // 둘 다 아니면 어떤 키로 수정해야 하는지 알 수 없으므로 에러
             else return alert('이 글의 수정용 키를 알 수 없습니다.');
 
+            // PUT 요청으로 서버에 제목/내용 수정 요청
             $http
-                .put(url, { title, content })
+                .put(url, { title, content }) // 바디에 수정된 제목과 내용 전송
                 .then(function () {
+                    // 성공 시: 수정 모드 종료 및 임시 필드 초기화
                     p._editing = false;
                     p._editTitle = '';
                     p._editContent = '';
+
+                    // reload 함수가 있으면 그걸 호출, 없으면 기본 loadPosts()로 목록 새로고침
                     $scope.reload ? $scope.reload() : $scope.loadPosts();
                 })
                 .catch(function () {
+                    // 실패 시 알림
                     alert('저장 실패');
                 });
         };
 
+        // ✅ 게시글 삭제
         $scope.deletePost = function (p) {
+            // 삭제 권한 체크 (작성자 또는 관리자만)
             if (!canEditPost(p)) return alert('본인이 쓴 글만 삭제할 수 있습니다.');
+
+            // 사용자에게 정말 삭제할 것인지 확인
             if (!confirm('정말 삭제할까요?')) return;
 
+            // 게시글의 식별 키 타입과 값
             const keyType = p._keyType;
             const key = p._key;
             let url = null;
-            if (keyType === 'str') url = '/api/posts/key/' + encodeURIComponent(key);
-            else if (keyType === 'num') url = '/api/posts/' + encodeURIComponent(key);
+
+            // key 타입에 따라 삭제용 API URL 결정
+            if (keyType === 'str') url = '/api/posts/key/' + encodeURIComponent(key); // 문자열 키
+            else if (keyType === 'num') url = '/api/posts/' + encodeURIComponent(key); // 숫자 키
             else return alert('이 글의 삭제용 키를 알 수 없습니다.');
 
+            // DELETE 요청으로 서버에 삭제 요청
             $http
                 .delete(url)
                 .then(function () {
+                    // 성공 시 목록 새로고침 (reload 우선, 없으면 loadPosts)
                     $scope.reload ? $scope.reload() : $scope.loadPosts();
                 })
                 .catch(function () {
+                    // 실패 시 알림
                     alert('삭제 실패');
                 });
         };
@@ -1180,14 +1288,12 @@
 
     // ───────────────── 게시글 편집 전용 컨트롤러 ─────────────────
     app.controller('BoardEditCtrl', function ($scope, $http, $routeParams, $location) {
-        $scope.newFile = null;
-
         $scope.loading = true;
         $scope.saving = false;
         $scope.deleting = false;
 
-        const code = String($routeParams.code || '').toUpperCase();
-        const type = String($routeParams.type || 'str');
+        const code = String($routeParams.code || '').toUpperCase(); // 'BUS' / 'NORM'
+        const type = String($routeParams.type || 'str'); // 'num' | 'str'
         const key = $routeParams.key;
 
         function backToList() {
@@ -1196,8 +1302,17 @@
         }
         $scope.cancel = backToList;
 
+        // 파일 선택 핸들러 (file-model 디렉티브를 쓰고 있으면 이 부분은 생략 가능)
+        $scope.onFileChange = function (element) {
+            $scope.$apply(function () {
+                $scope.form = $scope.form || {};
+                $scope.form.file = element.files[0] || null;
+            });
+        };
+
         function fetchOne() {
             $scope.loading = true;
+
             let url = null;
             if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
             else url = '/api/posts/key/' + encodeURIComponent(key);
@@ -1209,48 +1324,101 @@
                     $scope.form = {
                         title: p.title || '',
                         content: p.content || '',
+                        file: null, // 새 파일은 사용자가 선택할 때만 채움
                     };
                     $scope.meta = {
-                        writerId: p.writerId || p.author || '',
-                        writerName: p.writerName || p.username || '',
-                        createdAt: p.createdAt || p.writeTime || p.created_at || '',
-                        updatedAt: p.updatedAt || '',
+                        writerId: p.writerId,
+                        writerName: p.writerName,
+                        postId: p.postId,
+                        uuid: p.uuid,
+                        createdAt: p.createdAt,
+                        updatedAt: p.updatedAt,
+
+                        // 🔽 첨부파일 메타도 같이 넣어줌
+                        fileUrl: p.fileUrl,
+                        fileType: p.fileType,
+                        fileName: p.fileName,
                     };
-                })
-                .catch(function () {
-                    alert('게시글을 불러오지 못했습니다.');
-                    backToList();
                 })
                 .finally(function () {
                     $scope.loading = false;
                 });
         }
-        fetchOne();
 
-        // 🔥 여기만 다시 JSON 방식으로 수정
         $scope.save = function () {
-            const title = ($scope.form.title || '').trim();
-            const content = ($scope.form.content || '').trim();
-            if (!title) return alert('제목을 입력하세요.');
+            if ($scope.saving) return;
 
             $scope.saving = true;
+
+            // 🔹 FormData로 multipart/form-data 요청 구성
+            const fd = new FormData();
+            fd.append('title', $scope.form.title || '');
+            fd.append('content', $scope.form.content || '');
+
+            // 새 파일이 선택된 경우에만 전송
+            if ($scope.form.file) {
+                fd.append('file', $scope.form.file);
+            }
 
             let url = null;
             if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
             else url = '/api/posts/key/' + encodeURIComponent(key);
 
-            // ❗ multipart 말고, 기존처럼 JSON으로 보냄
-            const payload = { title: title, content: content };
+            $http
+                .put(url, fd, {
+                    headers: { 'Content-Type': undefined }, // ← 브라우저가 boundary 포함해서 자동 설정
+                    transformRequest: angular.identity, // ← FormData 그대로 보내기
+                })
+                .then(function () {
+                    alert('수정 완료');
+                    backToList();
+                })
+                .catch(function (err) {
+                    console.error(err);
+                    alert('수정 실패: ' + (err.status || '오류'));
+                })
+                .finally(function () {
+                    $scope.saving = false;
+                });
+        };
+
+        fetchOne();
+
+        // 🔥 수정: 파일까지 같이 보내는 multipart/form-data 버전
+        $scope.save = function () {
+            const title = ($scope.form.title || '').trim();
+            const content = ($scope.form.content || '').trim();
+            if (!title) return alert('제목을 입력하세요.');
+            if ($scope.saving) return; // 중복 클릭 방지
+
+            $scope.saving = true;
+
+            // 폼데이터 구성
+            const fd = new FormData();
+            fd.append('title', title);
+            fd.append('content', content);
+            // 파일을 새로 선택했을 때만 추가
+            if ($scope.form.file) {
+                // 'file' 이름은 @RequestParam("file") 이랑 반드시 같아야 함
+                fd.append('file', $scope.form.file);
+            }
+
+            let url = null;
+            if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
+            else url = '/api/posts/key/' + encodeURIComponent(key);
 
             $http
-                .put(url, payload)
+                .put(url, fd, {
+                    headers: { 'Content-Type': undefined }, // 브라우저가 boundary 포함해서 자동 설정
+                    transformRequest: angular.identity, // FormData 그대로 전송
+                })
                 .then(function () {
                     alert('수정이 완료되었습니다.');
                     backToList();
                 })
                 .catch(function (err) {
                     console.error('수정 실패', err);
-                    alert('저장에 실패했습니다.');
+                    alert('저장에 실패했습니다. (' + (err.status || '오류') + ')');
                 })
                 .finally(function () {
                     $scope.saving = false;

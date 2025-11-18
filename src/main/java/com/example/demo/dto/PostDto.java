@@ -29,6 +29,9 @@ public class PostDto {                                             // 게시글 
     private String fileName;                                       // 원본 파일명
     private String fileContentType;                                // MIME 타입(image/png, application/pdf 등)
 
+    /** 여러 첨부파일 전체 메타정보(JSON 배열 문자열로 저장) */
+    private String fileListJson;                                   // DB 컬럼: file_list_json (TEXT) – [{"name":...,"url":...}, …]
+
     private String writerId;                                       // 작성자 ID(로그인 ID/이메일 등)
     private String writerName;                                     // 작성자 표시명(닉네임 등)
 
@@ -104,6 +107,18 @@ public class PostDto {                                             // 게시글 
             this.fileContentType = null;
         } else {
             this.fileContentType = fileContentType;
+        }
+    }
+
+    /** 여러 첨부파일 전체 메타정보(JSON 문자열) 게터 */
+    public String getFileListJson() { return fileListJson; }       // fileListJson 게터
+
+    /** 여러 첨부파일 전체 메타정보(JSON 문자열) 세터 */
+    public void setFileListJson(String fileListJson) {             // fileListJson 세터
+        if (fileListJson != null && fileListJson.isBlank()) {
+            this.fileListJson = null;                              // 빈 문자열이면 null로 정규화
+        } else {
+            this.fileListJson = fileListJson;
         }
     }
 
@@ -186,6 +201,7 @@ public class PostDto {                                             // 게시글 
                 ", fileType='" + fileType + '\'' +
                 ", fileName='" + fileName + '\'' +
                 ", fileContentType='" + fileContentType + '\'' +
+                ", fileListJson='" + fileListJson + '\'' +
                 ", writerId='" + writerId + '\'' +
                 ", writerName='" + writerName + '\'' +
                 ", createdAt=" + createdAt +
