@@ -55,6 +55,27 @@ public class PostDto {                                             // 게시글 
         this.updatedAt = updatedAt;                                // 수정 시각 초기화
     }
 
+    // 🔧 파일 정보까지 한 번에 채우고 싶을 때 사용할 수 있는 보조 생성자
+    public PostDto(Long postId, String uuid, String boardCode, String title, String content,
+                   String fileUrl, String fileType, String fileName, String fileContentType, String fileListJson,
+                   String writerId, String writerName,
+                   LocalDateTime createdAt, LocalDateTime updatedAt) {
+        this.postId = postId;
+        this.uuid = uuid;
+        this.boardCode = boardCode;
+        this.title = title;
+        this.content = content;
+        this.fileUrl = fileUrl;
+        this.fileType = fileType;
+        this.fileName = fileName;
+        this.fileContentType = fileContentType;
+        this.fileListJson = fileListJson;
+        this.writerId = writerId;
+        this.writerName = writerName;
+        this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
+    }
+
     // ───────────── getters / setters ─────────────
     public Long getPostId() { return postId; }                     // postId 게터
     public void setPostId(Long postId) { this.postId = postId; }   // postId 세터
@@ -187,6 +208,15 @@ public class PostDto {                                             // 게시글 
         if (postId != null) return postId;                         // 1) 숫자 PK 우선
         if (uuid != null && !uuid.isBlank()) return uuid;          // 2) 그 다음 uuid
         return null;                                               // 3) 없으면 null
+    }
+
+    // 🔍 첨부 타입이 폴더인지/이미지인지 간단히 체크하는 헬퍼 (프런트 로직에서 쓰기 좋음)
+    public boolean isFolderType() {
+        return "FOLDER".equalsIgnoreCase(fileType);
+    }
+
+    public boolean isImageType() {
+        return "IMAGE".equalsIgnoreCase(fileType);
     }
 
     @Override

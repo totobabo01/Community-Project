@@ -53,8 +53,9 @@
                 ng-model="form.title"
             />
 
-            <!-- 내용 -->
+            <!-- 내용 : 토큰이 그대로 보이는 텍스트 영역 -->
             <textarea
+                id="editContent"
                 class="inline-input"
                 style="height: 300px; margin-top: 8px"
                 placeholder="내용"
@@ -62,38 +63,161 @@
             ></textarea>
 
             <!-- ===============================
-                 🔥 현재 첨부파일 미리보기
+                 🔥 현재 첨부파일 미리보기 + 본문에 넣기
             ================================= -->
             <div
                 style="margin-top: 16px; padding-top: 14px; border-top: 1px solid #e2e8f0"
-                ng-if="meta && meta.fileUrl"
+                ng-if="meta"
             >
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px">현재 첨부 파일</div>
-
-                <!-- 이미지 파일인 경우 -->
-                <div
-                    ng-if="meta.fileType === 'IMAGE'"
-                    style="max-width: 260px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden"
-                >
-                    <img
-                        ng-src="{{ meta.fileUrl }}"
-                        alt="첨부 이미지"
-                        style="width: 100%; display: block"
-                    />
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px">
+                    현재 첨부 파일
+                    <span
+                        ng-if="meta.fileList && meta.fileList.length > 0"
+                        style="font-size: 13px; color: #666"
+                    >
+                        ({{ meta.fileList.length }}개)
+                    </span>
                 </div>
 
-                <!-- 그 외 파일 -->
-                <div
-                    ng-if="meta.fileType !== 'IMAGE'"
-                    style="font-size: 13px; margin-top: 6px"
-                >
-                    <a
-                        ng-href="{{ meta.fileUrl }}"
-                        target="_blank"
-                        style="text-decoration: underline; color: #2563eb"
+                <!-- ✅ file_list_json 기반: 여러 개 첨부파일 -->
+                <div ng-if="meta.fileList && meta.fileList.length > 0">
+                    <ul style="margin: 0; padding-left: 0">
+                        <li
+                            ng-repeat="f in meta.fileList track by $index"
+                            style="margin-bottom: 14px; list-style: none; display: flex; gap: 12px"
+                        >
+                            <!-- 이미지 파일 미리보기 : 크기 버튼 값 반영 -->
+                            <div
+                                ng-if="f.fileType === 'IMAGE'"
+                                style="flex: 0 0 auto; max-width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; padding: 6px; background: #fff"
+                            >
+                                <img
+                                    ng-src="{{ f.url }}"
+                                    alt="{{ f.fileName || ('첨부 이미지 ' + ($index + 1)) }}"
+                                    ng-style="{
+                                        width: (previewWidths[$index] || 100) + '%',
+                                        maxWidth: '100%',
+                                        display: 'block'
+                                    }"
+                                />
+                            </div>
+
+                            <div style="flex: 1 1 auto; min-width: 0">
+                                <!-- 파일 링크 / 이름 -->
+                                <div style="font-size: 13px; margin-bottom: 4px">
+                                    <span style="color: #6b7280; margin-right: 4px">[{{ $index + 1 }}]</span>
+                                    <a
+                                        ng-href="{{ f.url }}"
+                                        target="_blank"
+                                        rel="noopener"
+                                        style="text-decoration: underline; color: #2563eb"
+                                    >
+                                        {{ f.fileName || ('첨부파일 ' + ($index + 1)) }}
+                                    </a>
+                                </div>
+
+                                <!-- 본문에 넣기 + 크기 옵션 -->
+                                <div style="font-size: 12px; color: #4b5563; margin-top: 2px">
+                                    본문에 넣기:
+                                    <button
+                                        type="button"
+                                        class="btn light sm"
+                                        ng-click="setFileWidth($index, 30)"
+                                    >
+                                        작게(30%)
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn light sm"
+                                        ng-click="setFileWidth($index, 60)"
+                                    >
+                                        보통(60%)
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn light sm"
+                                        ng-click="setFileWidth($index, 100)"
+                                    >
+                                        크게(100%)
+                                    </button>
+                                </div>
+
+                                <div style="font-size: 11px; color: #9ca3af; margin-top: 4px">현재 적용 크기: {{ previewWidths[$index] || 100 }}%</div>
+                            </div>
+                        </li>
+                    </ul>
+
+                    <div style="font-size: 12px; color: #6b7280; margin-top: 4px">
+                        ※ 본문에는
+                        <code>[[file:n width=60]]</code>
+                        형식의 토큰이 들어가며, 보기 화면에서 실제 이미지/파일로 바뀝니다.
+                    </div>
+                </div>
+
+                <!-- ✅ 구(旧) 스키마: fileList 없고 fileUrl만 있는 경우 -->
+                <div ng-if="(!meta.fileList || meta.fileList.length === 0) && meta.fileUrl">
+                    <!-- 이미지 파일인 경우 -->
+                    <div
+                        ng-if="meta.fileType === 'IMAGE'"
+                        style="max-width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin-bottom: 4px; padding: 6px; background: #fff"
                     >
-                        {{ meta.fileName || '첨부 파일 열기' }}
-                    </a>
+                        <img
+                            ng-src="{{ meta.fileUrl }}"
+                            alt="첨부 이미지"
+                            ng-style="{
+                                width: (previewWidths[0] || 100) + '%',
+                                maxWidth: '100%',
+                                display: 'block'
+                            }"
+                        />
+                    </div>
+
+                    <!-- 그 외 파일 + 본문에 넣기 -->
+                    <div style="font-size: 13px; margin-top: 6px">
+                        <span style="color: #6b7280; margin-right: 4px">[1]</span>
+                        <a
+                            ng-href="{{ meta.fileUrl }}"
+                            target="_blank"
+                            style="text-decoration: underline; color: #2563eb"
+                        >
+                            {{ meta.fileName || '첨부 파일 열기' }}
+                        </a>
+
+                        <div style="font-size: 12px; color: #4b5563; margin-top: 4px">
+                            본문에 넣기:
+                            <button
+                                type="button"
+                                class="btn light sm"
+                                ng-click="setFileWidth(0, 30)"
+                            >
+                                작게(30%)
+                            </button>
+                            <button
+                                type="button"
+                                class="btn light sm"
+                                ng-click="setFileWidth(0, 60)"
+                            >
+                                보통(60%)
+                            </button>
+                            <button
+                                type="button"
+                                class="btn light sm"
+                                ng-click="setFileWidth(0, 100)"
+                            >
+                                크게(100%)
+                            </button>
+                        </div>
+
+                        <div style="font-size: 11px; color: #9ca3af; margin-top: 4px">현재 적용 크기: {{ previewWidths[0] || 100 }}%</div>
+                    </div>
+                </div>
+
+                <!-- 첨부가 완전히 없을 때 -->
+                <div
+                    ng-if="(!meta.fileList || meta.fileList.length === 0) && !meta.fileUrl"
+                    style="font-size: 13px; color: #9ca3af"
+                >
+                    첨부된 파일이 없습니다.
                 </div>
             </div>
 
@@ -108,31 +232,42 @@
                     style="display: inline-block; padding: 6px 12px; border-radius: 6px; cursor: pointer; background: #fff; border: 1px solid #d1d5db; font-size: 13px"
                 >
                     파일 선택
-                    <!-- 🔹 컨트롤러와 맞추기: form.file 로 통일 -->
+                    <!-- 🔹 여러 개 파일 선택 허용 + onFileChange 호출 -->
                     <input
                         id="editFile"
                         type="file"
-                        file-model="form.file"
+                        multiple
                         style="display: none"
+                        onchange="angular.element(this).scope().onFileChange(this)"
                     />
                 </label>
 
-                <!-- 🔹 선택된 파일명 표시도 form.file 기준 -->
+                <!-- 🔹 선택된 파일명들 표시 (여러 개) -->
                 <span
-                    ng-if="form.file && form.file.name"
+                    ng-if="form.files && form.files.length"
                     style="margin-left: 8px; color: #475569; font-size: 13px"
                 >
-                    선택된 파일: {{ form.file.name }}
+                    선택된 파일: {{ form.files.length }}개
                 </span>
 
-                <div style="font-size: 12px; margin-top: 6px; color: #6b7280">※ 새 파일을 선택하지 않으면 기존 첨부 파일은 그대로 유지됩니다.</div>
+                <ul
+                    ng-if="form.files && form.files.length"
+                    style="margin-top: 6px; padding-left: 18px; font-size: 12px; color: #4b5563"
+                >
+                    <li ng-repeat="f in form.files">{{ f.name }}</li>
+                </ul>
+
+                <div style="font-size: 12px; margin-top: 6px; color: #6b7280">
+                    ※ 새 파일을 선택하지 않으면 기존 첨부 파일은 그대로 유지됩니다.<br />
+                    ※ 본문에 삽입된 <code>[[file:n width=...]]</code> 토큰은 첨부파일 순서 / 크기에 따라 이미지/파일로 표시됩니다.
+                </div>
             </div>
 
             <!-- 작성자/날짜 -->
             <div style="margin-top: 20px; color: #6b7280; font-size: 13px">
                 <div>작성자: {{ meta.writerName || meta.writerId }}</div>
-                <div>작성일: {{ meta.createdAt }}</div>
-                <div>수정일: {{ meta.updatedAt }}</div>
+                <div>작성일: {{ meta.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
+                <div>수정일: {{ meta.updatedAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
             </div>
 
             <!-- 하단 버튼 -->

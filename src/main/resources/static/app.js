@@ -108,10 +108,16 @@
                 controller: 'BoardNormalCtrl',
             })
             // ★★★ 게시글 '수정 전용' 화면 (분리 페이지)
-            //     예) #/board/bus/edit/num/42  또는  #/board/bus/edit/str/550e8400-...
+            // 예) #/board/bus/edit/num/42 또는 #/board/bus/edit/str/550e8400-...
             .when('/board/:code/edit/:type/:key', {
                 templateUrl: '/tpl/board/edit.html',
                 controller: 'BoardEditCtrl',
+            })
+            // ★★★ 게시글 '상세 보기' 화면 (제목 클릭 시 열리는 화면)
+            // 예) #/board/bus/view/550e8400-... (?type=str|num)
+            .when('/board/:code/view/:key', {
+                templateUrl: '/tpl/board/post-view.html',
+                controller: 'BoardViewCtrl', // ★ 추가
             })
             // 권한 관리 (현재 파일 위치가 static/roles.html 이므로 그대로)
             .when('/roles', {
@@ -134,7 +140,7 @@
         }
 
         // ★ 해시(#)가 없는 내부 링크를 자동으로 '#/...'로 변환
-        //   예) <a href="/board"> → '#/board' 로 라우팅
+        // 예) <a href="/board"> → '#/board' 로 라우팅
         $document.on('click', function (evt) {
             try {
                 let el = evt.target;
@@ -399,6 +405,7 @@
 
         $scope.loadData = function () {
             setTimed($scope, 'statusType', 'statusMessage', 'info', '⏳ 데이터를 불러오는 중입니다...', null, $timeout);
+
             const params = { pageNo: 1, numOfRows: 500 };
             if (($scope.keyword || '').trim()) params.stNm = $scope.keyword.trim();
 
@@ -407,6 +414,7 @@
                 .then(function (res) {
                     const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
                     let list = [];
+
                     if (Array.isArray(data)) list = data;
                     else if (data?.response?.body?.items) {
                         const it = data.response.body.items.item || data.response.body.items.bs || [];
@@ -415,16 +423,19 @@
                         const it = data.body.items.item || data.body.items.bs || [];
                         list = Array.isArray(it) ? it : [it];
                     }
+
                     if (!Array.isArray(list)) {
                         $scope.items = [];
                         $scope.filteredItems = [];
                         return setTimed($scope, 'statusType', 'statusMessage', 'error', '⚠️ 응답 데이터가 목록이 아닙니다.', 2000, $timeout);
                     }
+
                     $scope.items = list.map((it) => ({
                         bsNm: it.bsNm || it.stationNm || it.name || '이름 없음',
                         xPos: it.xPos || it.gpsX || it.lng || '',
                         yPos: it.yPos || it.gpsY || it.lat || '',
                     }));
+
                     $scope.filterData();
                     setTimed($scope, 'statusType', 'statusMessage', 'success', `✅ ${$scope.items.length}개의 데이터를 불러왔습니다.`, 1500, $timeout);
                 })
@@ -439,6 +450,7 @@
                 $scope.filteredItems = $scope.items.slice();
                 return setTimed($scope, 'statusType', 'statusMessage', 'info', '🔍 전체 데이터를 표시합니다.', 1000, $timeout);
             }
+
             $scope.filteredItems = $scope.items.filter((item) => ((item.bsNm || '') + '').toLowerCase().indexOf(kw) >= 0);
             setTimed(
                 $scope,
@@ -460,16 +472,19 @@
         function setUserStatus(type, msg, ms) {
             setTimed($scope, 'userStatusType', 'userStatusMessage', type, msg, ms, $timeout);
         }
+
         function buildKeySet(obj) {
             if (!obj) return new Set();
             const cand = [obj.user_id, obj.userId, obj.id, obj.email, obj.username, obj.name].filter(Boolean).map((s) => s.trim().toLowerCase());
             return new Set(cand);
         }
+
         function makeRoleIndex(roleRows) {
             const idx = new Map();
             (roleRows || []).forEach((r) => buildKeySet(r).forEach((k) => idx.set(k, { role: r.role })));
             return idx;
         }
+
         function attachRolesToUsers(users, roleIndex) {
             (users || []).forEach((u) => {
                 let matched = null;
@@ -491,6 +506,7 @@
                 .get('/api/roles')
                 .then((res) => (Array.isArray(res.data) ? res.data : []))
                 .catch(() => []);
+
             $q.all([usersP, rolesP])
                 .then(function ([users, roles]) {
                     attachRolesToUsers(users, makeRoleIndex(roles));
@@ -506,6 +522,7 @@
             const name = ($scope.newUser.name || '').trim();
             const email = ($scope.newUser.email || '').trim();
             if (!name || !email) return setUserStatus('error', '이름과 이메일을 모두 입력하세요.', 2000);
+
             if (!/^[^@\s]+@[^\s@]+\.[^\s@]+$/.test(email)) return setUserStatus('error', '이메일 형식이 올바르지 않습니다.', 2000);
 
             setUserStatus('info', '⏳ 사용자 추가 중...');
@@ -518,7 +535,7 @@
                     created._isAdmin = false;
                     $scope.users.unshift(created);
                     $scope.newUser = { name: '', email: '' };
-                    setUserStatus('success', `✅ 추가 완료 (ID: ${created.user_id || created.userId || created.id})`, 1500);
+                    setUserStatus('success', `✅ 추가 완료 (ID: ${created.user_id || created.userId || created.id || '알 수 없음'})`, 1500);
                 })
                 .catch(function () {
                     setUserStatus('error', '❌ 사용자 추가에 실패했습니다.', 2500);
@@ -540,16 +557,19 @@
         $scope.saveEdit = function (u) {
             const idKey = u && (u.user_id || u.userId || u.id);
             if (!idKey) return setUserStatus('error', 'ID를 찾을 수 없어 수정할 수 없습니다.', 2000);
+
             const payload = {};
             const name = (u._editName || '').trim();
             const phone = (u._editPhone || '').trim();
             const email = (u._editEmail || '').trim();
+
             if (name && name !== u.name) payload.name = name;
             if (phone && phone !== (u.phone || u.tel || u.phoneNumber)) payload.phone = phone;
             if (email && email !== u.email) {
                 if (!/^[^@\s]+@[^\s@]+\.[^\s@]+$/.test(email)) return setUserStatus('error', '이메일 형식이 올바르지 않습니다.', 2000);
                 payload.email = email;
             }
+
             if (!Object.keys(payload).length) return $scope.cancelEdit(u);
 
             setUserStatus('info', `⏳ 수정 중... (ID: ${idKey})`);
@@ -567,11 +587,11 @@
                     setUserStatus('error', '❌ 수정에 실패했습니다.', 2500);
                 });
         };
-
         $scope.deleteUser = function (u) {
             const idKey = u && (u.user_id || u.userId || u.id);
             if (!idKey) return setUserStatus('error', 'ID를 찾을 수 없어 삭제할 수 없습니다.', 2000);
             if (!confirm(`정말로 삭제할까요? (ID: ${idKey})`)) return;
+
             $http
                 .delete('/user/' + encodeURIComponent(idKey))
                 .then(function () {
@@ -589,12 +609,11 @@
     });
 
     // ───────────────── 게시판 공통 (페이지네이션 + 서버 검색) ─────────────────
-    app.controller('BoardBaseCtrl', function ($scope, $http, AuthService) {
+    app.controller('BoardBaseCtrl', function ($scope, $http, AuthService, $location) {
         $scope.posts = [];
         $scope.loading = false;
         $scope.newPost = { title: '', content: '', files: null }; // ← 파일 필드 추가
         $scope.showComposer = false;
-
         $scope.pageSizes = [5, 10, 15, 20];
         $scope.pageSize = 10;
         $scope.page = 0;
@@ -603,13 +622,13 @@
 
         // ──────── [ADD] 검색 상태 ────────
         $scope.q = { type: 'author', keyword: '', from: null, to: null };
+
         const isNum = (v) => typeof v === 'number' && isFinite(v);
         const isNonEmptyStr = (s) => typeof s === 'string' && s.trim().length > 0;
 
         // 파일 확장자 구하기 (File 객체 또는 파일 이름 문자열 둘 다 지원)
         $scope.getFileExt = function (fileOrName) {
             if (!fileOrName) return '확장자 없음';
-
             var name = fileOrName;
             if (fileOrName.name) {
                 // File 객체인 경우
@@ -623,18 +642,48 @@
         // 파일 크기를 사람이 보기 좋게 포맷
         $scope.formatFileSize = function (size) {
             if (!angular.isNumber(size)) return '알 수 없음';
-
             if (size < 1024) return size + ' B';
-
             var kb = size / 1024;
             if (kb < 1024) return kb.toFixed(1) + ' KB';
-
             var mb = kb / 1024;
             if (mb < 1024) return mb.toFixed(2) + ' MB';
-
             var gb = mb / 1024;
             return gb.toFixed(2) + ' GB';
         };
+
+        // ================== ✨ 본문에 파일 토큰 넣기 ==================
+        // bus.html에서 "본문에 넣기" 버튼 클릭 시 호출
+        // index: newPost.files 배열의 인덱스
+        $scope.insertAttachmentToken = function (index) {
+            // 토큰 형식은 자유롭게 변경 가능: [[att:1]], {{img1}} 등
+            // 여기선 간단히 [[file:번호]] 로 사용
+            var token = '[[file:' + (index + 1) + ']]';
+
+            var textarea = document.getElementById('newPostContent');
+            var content = $scope.newPost.content || '';
+
+            if (textarea && typeof textarea.selectionStart === 'number') {
+                // 커서 위치/선택 영역 기준으로 토큰 삽입
+                var start = textarea.selectionStart;
+                var end = textarea.selectionEnd;
+
+                var before = content.substring(0, start);
+                var after = content.substring(end);
+
+                $scope.newPost.content = before + token + after;
+
+                // Angular digest 에서 값 반영 후 커서 위치 재설정
+                setTimeout(function () {
+                    textarea.focus();
+                    var pos = start + token.length;
+                    textarea.selectionStart = textarea.selectionEnd = pos;
+                }, 0);
+            } else {
+                // textarea를 못 찾으면 그냥 뒤에 붙이기
+                $scope.newPost.content = content + (content ? '\n' : '') + token;
+            }
+        };
+        // ==========================================================
 
         // ──────── [ADD] 검색 창 토글/닫기 ────────
         $scope.searchOpen = false; // 검색 패널(툴바) 열림/닫힘 상태를 보관하는 플래그. 초깃값은 닫힘(false).
@@ -642,230 +691,143 @@
         $scope.toggleSearch = function (open) {
             // 검색 패널을 토글(또는 지정한 상태로) 여닫는 함수.
             $scope.searchOpen =
-                typeof open === 'boolean' // 인자로 불린이 왔으면 그 값 그대로 쓰고,
-                    ? open // (true/false 명시 제어)
+                typeof open === 'boolean'
+                    ? open // 인자로 불린이 왔으면 그 값 그대로 쓰고, ? open
                     : !$scope.searchOpen; // 아니면 현재 상태를 반전시킴(토글).
+
             if ($scope.searchOpen) {
                 // 패널이 이제 열렸다면,
                 setTimeout(function () {
-                    // setTimeout은 **“지정한 시간(ms) 뒤에 함수를 한 번 실행”**시키는 브라우저/Node.js 내장 타이머
-                    // DOM 렌더링이 완료된 다음에 실행하려고 0ms 지연 큐에 넣음.
-                    // getElementById()는 HTML 문서 안에서 특정 id를 가진 요소(DOM 엘리먼트)를 찾아오는 함수
-                    var el = document.getElementById('board-search-input'); // 검색 인풋 DOM 엘리먼트를 id로 가져오고,
-                    if (el) el.focus(); // 존재하면 포커스를 줘서 바로 입력할 수 있게 함.
+                    // DOM 렌더링이 완료된 다음에 실행
+                    var el = document.getElementById('board-search-input');
+                    if (el) el.focus();
                 }, 0);
             }
         };
 
         $scope.closeSearch = function (resetAlso) {
-            // 검색 패널을 닫는 함수.
-            if (resetAlso) $scope.resetSearch(); // 필요하면 검색 조건까지 초기화(별도 정의된 resetSearch 호출 전제).
-            $scope.searchOpen = false; // 패널 상태를 닫힘으로 설정.
+            if (resetAlso) $scope.resetSearch(); // 필요하면 검색 조건까지 초기화
+            $scope.searchOpen = false;
         };
 
         $scope.onSearchKey = function ($event) {
-            // 검색 입력창에서 키 이벤트를 처리하는 핸들러.
-            if ($event && $event.which === 13)
-                // Enter 키(키코드 13)를 눌렀다면,
-                $scope.applySearch(); // 검색 적용 함수 실행(별도 정의된 applySearch 호출 전제).
-        }; // → 필드에서 엔터 치면 바로 검색 실행 UX.
+            if ($event && $event.which === 13) $scope.applySearch(); // Enter 키
+        };
 
         $scope.searchActive = function () {
-            // 현재 검색 조건이 “실제로 활성”인지 판단.
-            const kw = String($scope.q.keyword || '').trim(); // 키워드를 문자열로 안전 변환 후 좌우 공백 제거.
-            return $scope.q.type === 'time' // 검색 타입이 'time'이면
-                ? $scope.q.from || $scope.q.to // from 또는 to 중 하나라도 지정되어 있으면 활성(true)
-                : !!kw; // 그 외 타입('author','content' 등)은 키워드가 비어있지 않으면 활성.
-        }; // → 이 함수는 이제 "검색 조건 유무" 체크만 하고, 실제 필터링은 DAO/SQL에서 수행.
-
-        // 🔍 검색 적용: 검색어가 입력되면 첫 페이지부터 다시 게시글을 로드
-        $scope.applySearch = function () {
-            $scope.page = 0; // 페이지 번호를 0(첫 페이지)으로 초기화
-            $scope.loadPosts(); // 게시글 목록 로드 함수 호출
+            const kw = String($scope.q.keyword || '').trim();
+            return $scope.q.type === 'time' ? $scope.q.from || $scope.q.to : !!kw;
         };
 
-        // 🔄 검색 초기화: 검색 조건을 기본값으로 되돌리고 첫 페이지 로드
+        // 🔍 검색 적용
+        $scope.applySearch = function () {
+            $scope.page = 0;
+            $scope.loadPosts();
+        };
+
+        // 🔄 검색 초기화
         $scope.resetSearch = function () {
             $scope.q = {
-                // 검색 조건 객체 초기화
-                type: 'author', // 기본 검색 기준은 작성자(author)
-                keyword: '', // 검색어 초기화
-                from: null, // 시작일 초기화
-                to: null, // 종료일 초기화
+                type: 'author',
+                keyword: '',
+                from: null,
+                to: null,
             };
-            $scope.page = 0; // 페이지 번호를 0으로 초기화
-            $scope.loadPosts(); // 게시글 목록 다시 로드
+            $scope.page = 0;
+            $scope.loadPosts();
         };
 
-        // 👤 로그인 사용자 정보 불러오기 (AuthService에서 현재 로그인한 사용자 정보 요청)
+        // 👤 로그인 사용자 정보 불러오기
         AuthService.loadMe().finally(() => {
-            $scope.me = AuthService.getMe(); // 가져온 사용자 정보를 $scope.me에 저장
+            $scope.me = AuthService.getMe();
         });
 
-        // ✏️ 게시글 수정 가능 여부 체크 함수
         function canEditPost(p) {
-            // 로그인한 사용자가 있고, 관리자이거나 자신이 작성한 글인 경우 true 반환
             return $scope.me && ($scope.me.isAdmin || $scope.me.username === p.writerId);
         }
-
-        // 💬 댓글 수정 가능 여부 체크 함수
         function canEditComment(c) {
-            // 로그인한 사용자가 있고, 관리자이거나 자신이 작성한 댓글인 경우 true 반환
             return $scope.me && ($scope.me.isAdmin || $scope.me.username === c.writerId);
         }
 
         // 🧩 게시글의 고유 키(숫자 또는 문자열) 판별 함수
         function resolvePostKey(p) {
-            // postId가 숫자이면 type='num', key=postId로 반환
             if (isNum(p.postId)) return { type: 'num', key: p.postId };
-
-            // 가능한 후보 키들을 배열에 담고, 비어있지 않은 문자열만 필터링
             const candidates = [p.postKey, p.postIdStr, p.post_uuid, p.postUuid, p.uuid, p.id, p.key].filter(isNonEmptyStr);
-
-            // 후보가 있으면 첫 번째 값을 key로 반환
             if (candidates.length) return { type: 'str', key: candidates[0] };
-
-            // 어떤 키도 없을 경우 'none' 반환
             return { type: 'none', key: null };
         }
 
         // 🪪 게시글 고유 UID 생성 함수
         function makePostUid(p, idx) {
-            // 여러 가능한 ID 후보 중 비어있지 않은 문자열만 필터링
             const cand = [isNum(p.postId) ? String(p.postId) : null, isNum(p.id) ? String(p.id) : null, p.post_uuid, p.postUuid, p.uuid, p.idStr, p.postIdStr, p.key, p._key != null ? String(p._key) : null].filter(isNonEmptyStr);
-
-            // 후보가 있으면 첫 번째 사용
             if (cand.length) return cand[0];
-
-            // 없으면 임시 UID 생성 (시간 + 랜덤값)
             return 'tmp-' + Date.now() + '-' + (idx == null ? Math.random().toString(36).slice(2) : idx);
         }
 
         // 📥 게시글 목록 로드 함수
-        //  ➜ **중요 변경점**: 더 이상 JS에서 리스트를 필터링하지 않고,
-        //     검색 조건(type/keyword/from/to)을 그대로 서버로 넘겨서
-        //     DAO(SQL)에서 WHERE 조건으로 필터링하도록 변경.
         $scope.loadPosts = function () {
-            // 게시판 코드가 없으면 종료 (boardCode는 어떤 게시판인지 구분)
             if (!$scope.boardCode) return;
+            $scope.loading = true;
 
-            $scope.loading = true; // 로딩 상태 활성화 (로딩 스피너 등 표시용)
-
-            // 요청 파라미터 객체 정의 (페이지네이션은 항상 서버에서 처리)
             const params = {
-                page: $scope.page, // 0-based 페이지 번호
-                size: toInt($scope.pageSize, 10), // 페이지 크기
+                page: $scope.page,
+                size: toInt($scope.pageSize, 10),
             };
 
-            // 📅 검색 타입이 기간(time)인 경우 날짜 범위를 파라미터로 추가
             if ($scope.q.type === 'time') {
-                // type = 'time' 으로 넘겨서 서버에서 "기간 검색"임을 인식할 수 있게 함
                 params.type = 'time';
-                if ($scope.q.from) params.from = $scope.q.from; // 시작일 (예: '2025-11-10')
-                if ($scope.q.to) params.to = $scope.q.to; // 종료일
-            }
-            // 🔤 키워드 기반 검색인 경우
-            else {
+                if ($scope.q.from) params.from = $scope.q.from;
+                if ($scope.q.to) params.to = $scope.q.to;
+            } else {
                 const kw = ($scope.q.keyword || '').trim();
                 if (kw) {
-                    // type: author / content / author_content 등
                     params.type = $scope.q.type || 'author';
-                    // keyword: 실제 검색어 문자열
                     params.keyword = kw;
                 }
             }
 
             $http
-                .get(
-                    '/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts', // ① 요청 보낼 URL 문자열
-                    { params } // ② 쿼리스트링으로 붙일 파라미터들
-                )
+                .get('/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts', { params })
                 .then((res) => {
-                    // ③ 요청이 성공했을 때 실행되는 콜백
-                    const data = res.data || {}; // ④ 응답 본문(res.data)이 없으면 빈 객체로 방어
-                    const list =
-                        // ⑤ 여기서부터 응답 구조에 따라 "실제 목록 배열"만 뽑아내는 부분
-                        Array.isArray(data.content)
-                            ? data.content // ⑥ data.content가 배열이면 그걸 리스트로 사용 (Spring Page 스타일)
-                            : Array.isArray(data.rows)
-                            ? data.rows // ⑦ data.rows가 배열이면 그걸 사용 (rows 형태 응답 지원)
-                            : Array.isArray(data.list)
-                            ? data.list // ⑧ data.list가 배열이면 그걸 사용 (list 형태 응답 지원)
-                            : Array.isArray(data)
-                            ? data // ⑨ data 자체가 배열이면 그걸 사용 (응답이 바로 배열인 경우)
-                            : []; // ⑩ 위에 모두 해당 안 되면 그냥 빈 배열 사용 (에러 방지용 기본값)
+                    const data = res.data || {};
+                    const list = Array.isArray(data.content) ? data.content : Array.isArray(data.rows) ? data.rows : Array.isArray(data.list) ? data.list : Array.isArray(data) ? data : [];
 
                     const src = Array.isArray(list) ? list : [];
-
-                    // 🔁 서버에서 이미 WHERE + LIMIT + OFFSET으로 필터링/페이징 된 리스트를 그대로 사용
-                    //    (JS에서 matchPostRow/filterAndSlice로 다시 필터링하지 않음)
                     $scope.posts = src.map((p, i) => {
-                        const r = resolvePostKey(p); // 게시글 식별 키(숫자/문자) 판별 및 추출
+                        const r = resolvePostKey(p);
                         p._keyType = r.type;
                         p._key = r.key;
                         p._uid = makePostUid(p, i);
                         return p;
                     });
-
                     // ─── 서버 페이지/전체 수치 동기화 ───
-                    // 현재 페이지/페이지 크기
-                    $scope.page =
-                        typeof data.page === 'number'
-                            ? data.page // 1순위: data.page
-                            : typeof data.number === 'number'
-                            ? data.number // 2순위: data.number
-                            : $scope.page; // 없으면 기존 유지
+                    $scope.page = typeof data.page === 'number' ? data.page : typeof data.number === 'number' ? data.number : $scope.page;
 
-                    $scope.pageSize = toInt(
-                        typeof data.size === 'number' ? data.size : $scope.pageSize, // 서버 size 우선
-                        10
-                    );
+                    $scope.pageSize = toInt(typeof data.size === 'number' ? data.size : $scope.pageSize, 10);
 
-                    // 총합/총페이지 robust 파싱
-                    const hasTotal =
-                        typeof data.total === 'number' || // 1) 응답 객체 data에
-                        typeof data.totalElements === 'number'; //    - data.total 또는 data.totalElements 중
-
-                    const serverTotal =
-                        typeof data.total === 'number'
-                            ? data.total // 2) 우선순위 1: data.total 필드가 숫자면 그대로 사용.
-                            : data.totalElements; //    그렇지 않으면 data.totalElements(Spring Page 스타일)를 사용.
-
-                    const serverTotalPages =
-                        typeof data.totalPages === 'number'
-                            ? data.totalPages // 3) 우선순위 1: data.totalPages(페이지 개수)가 있으면 사용.
-                            : typeof data.pages === 'number'
-                            ? data.pages //    우선순위 2: totalPages 대신 pages라는 이름으로 올 수도 있으므로 체크.
-                            : undefined; //    둘 다 없으면 "정의되지 않음"(undefined)으로 둠.
+                    const hasTotal = typeof data.total === 'number' || typeof data.totalElements === 'number';
+                    const serverTotal = typeof data.total === 'number' ? data.total : data.totalElements;
+                    const serverTotalPages = typeof data.totalPages === 'number' ? data.totalPages : typeof data.pages === 'number' ? data.pages : undefined;
 
                     if (hasTotal) {
-                        // total 또는 totalElements가 있을 때
-                        $scope.total = serverTotal; // 4) 서버가 알려준 total(또는 totalElements)을 그대로 전체 개수로 채택.
-                        $scope.pages = Math.max(
-                            1, //    최소 1페이지는 보장(0페이지는 말이 안 됨)
-                            Math.ceil($scope.total / Math.max(1, toInt($scope.pageSize, 10)))
-                        );
+                        $scope.total = serverTotal;
+                        $scope.pages = Math.max(1, Math.ceil($scope.total / Math.max(1, toInt($scope.pageSize, 10))));
                     } else if (serverTotalPages !== undefined) {
-                        // totalElements 없이 totalPages만 있을 때
                         $scope.pages = Math.max(1, serverTotalPages);
-
                         $scope.total = $scope.pages * Math.max(1, toInt($scope.pageSize, 10));
                     } else {
-                        // 어떤 메타도 없으면 현재 목록 길이 기준으로 보수 계산
                         const curLen = Array.isArray(src) ? src.length : 0;
                         $scope.total = Math.max($scope.total || 0, curLen * Math.max(1, toInt($scope.pageSize, 10)));
                         $scope.pages = Math.max(1, Math.ceil($scope.total / Math.max(1, toInt($scope.pageSize, 10))));
                     }
                 })
                 .catch(() => {
-                    // HTTP 요청이 실패한 경우(네트워크/서버 에러 등)
-                    $scope.posts = []; // 게시글 목록은 빈 배열로
-                    $scope.total = 0; // 총 건수 0
-                    $scope.pages = 1; // 페이지 수는 최소 1로 보정 (UI 깨지지 않게)
+                    $scope.posts = [];
+                    $scope.total = 0;
+                    $scope.pages = 1;
                 })
                 .finally(() => {
-                    // 성공/실패 상관없이 마지막에 항상 실행
-                    $scope.loading = false; // 로딩 상태 해제 → 스피너/버튼 비활성화 풀어줌
+                    $scope.loading = false;
                 });
         };
 
@@ -905,7 +867,6 @@
                 $scope.loadPosts();
             }
         };
-
         $scope.changeSize = function () {
             $scope.pageSize = toInt($scope.pageSize, 10);
             $scope.page = 0;
@@ -915,17 +876,12 @@
             $scope.changeSize();
         };
 
-        // ⭐ 여기 수정됨: 최소 1페이지 보장 + 첫 페이지(0페이지)에서도 숫자 버튼이 항상 보이도록 보정
         $scope.pageRange = function () {
-            // 전체 페이지 수
             var totalPages = parseInt($scope.pages, 10);
             if (!isFinite(totalPages) || totalPages < 1) totalPages = 1;
-
-            // 현재 페이지 (0 기반)
             var cur = parseInt($scope.page, 10);
             if (!isFinite(cur) || cur < 0) cur = 0;
             if (cur > totalPages - 1) cur = totalPages - 1;
-
             var arr = [];
             var start = Math.max(0, cur - 2);
             var end = Math.min(totalPages - 1, cur + 2);
@@ -935,26 +891,22 @@
 
         // ====== 댓글 관련 ======
         $scope.toggleComments = function (p) {
-            // 특정 게시글 p의 댓글 영역 열기/닫기 토글
-            p._showComments = !p._showComments; // 현재 표시 상태를 반전
-            if (p._showComments && !p._commentsLoaded) $scope.loadComments(p); // 처음 열 때만 서버에서 댓글을 로드
+            p._showComments = !p._showComments;
+            if (p._showComments && !p._commentsLoaded) $scope.loadComments(p);
         };
 
         function decorateComments(arr) {
-            // 댓글 배열에 화면용 보조 필드를 붙이는 함수
-            const baseTs = Date.now(); // 임시 uid 생성에 쓸 기준 타임스탬프
+            const baseTs = Date.now();
             return (arr || []).map((c, i) => {
-                // 안전하게 배열화 후 각 댓글 가공
-                if (!c) return c; // 방어: null/undefined면 그대로 반환
+                if (!c) return c;
                 c._uid = (c.uuid && 'c-' + c.uuid) || (typeof c.commentId === 'number' && isFinite(c.commentId) && 'c-' + c.commentId) || 'c-tmp-' + baseTs + '-' + i;
-                c._replying = false; // 대댓글 입력창 표시 상태(기본 숨김)
-                c._replyText = ''; // 대댓글 입력값(초기 공란)
-                return c; // 가공된 댓글 반환
+                c._replying = false;
+                c._replyText = '';
+                return c;
             });
         }
 
         $scope.loadComments = function (p) {
-            // 게시글 p의 댓글 목록을 서버에서 불러오기
             const url = p._keyType === 'num' ? '/api/posts/' + encodeURIComponent(p._key) + '/comments' : p._keyType === 'str' ? '/api/posts/key/' + encodeURIComponent(p._key) + '/comments' : null;
             if (!url) {
                 p.comments = [];
@@ -985,12 +937,10 @@
             c._replying = true;
             c._replyText = '';
         };
-
         $scope.cancelReply = function (c) {
             c._replying = false;
             c._replyText = '';
         };
-
         $scope.submitReply = function (p, parent) {
             const text = (parent._replyText || '').trim();
             if (!text) return;
@@ -1024,8 +974,11 @@
             const newText = (c._editContent || '').trim();
             if (!newText) return;
             if (!c.uuid) return alert('이 댓글은 수정용 키를 알 수 없어 수정할 수 없습니다.');
+
             $http
-                .put('/api/comments/key/' + encodeURIComponent(c.uuid), { content: newText })
+                .put('/api/comments/key/' + encodeURIComponent(c.uuid), {
+                    content: newText,
+                })
                 .then(function (res) {
                     c.content = newText;
                     if (res && res.data && res.data.updatedAt) c.updatedAt = res.data.updatedAt;
@@ -1037,9 +990,11 @@
                     else alert('수정에 실패했습니다.');
                 });
         };
+
         $scope.deleteComment = function (p, c) {
             if (!canEditComment(c)) return alert('본인이 쓴 댓글만 삭제할 수 있습니다.');
             if (!confirm('댓글을 삭제할까요?')) return;
+
             if (c && c.uuid) {
                 $http
                     .delete('/api/comments/key/' + encodeURIComponent(c.uuid))
@@ -1054,6 +1009,7 @@
                     });
                 return;
             }
+
             const id = c && c.commentId;
             if (typeof id === 'number' && isFinite(id)) {
                 $http
@@ -1073,217 +1029,153 @@
 
         // ====== ★ 게시글 CRUD(추가) — 저장 후 항상 새로고침 ======
 
-        // 작성 (※ JSON → multipart/form-data 전송으로 변경)
-        // app.js 의 BoardBaseCtrl 안
-        // ✅ 새 게시글(폴더/파일/일반글) 생성 함수
+        // 새 게시글(폴더/파일/일반글) 생성
         $scope.createPost = function () {
-            // newPost 객체가 없다면 빈 객체로 초기화 (안전장치)
             if (!$scope.newPost) $scope.newPost = {};
 
-            // 제목과 내용을 문자열로 가져온 뒤, 앞뒤 공백 제거
             const title = ($scope.newPost.title || '').trim();
             const content = ($scope.newPost.content || '').trim();
 
-            // 제목이 비어 있으면 경고 후 함수 종료
             if (!title) {
                 alert('제목을 입력하세요.');
                 return;
             }
 
-            // 체크박스 등에서 넘어온 isFolder 값을 boolean으로 변환
             const isFolder = !!$scope.newPost.isFolder;
-            // 폴더 이름이 있을 경우 공백 제거 후 사용
             const folderName = ($scope.newPost.folderName || '').trim();
 
-            // 🔹 newPost 를 files 배열로 사용하도록 변경
-            //    (file-model="newPost.files" 로 연결되어 있음)
             const files = $scope.newPost.files || [];
-            const file = files && files.length ? files[0] : null; // 현재는 첫 번째 파일만 업로드
+            const file = files && files.length ? files[0] : null;
 
-            // 🔹 HTML 파일 인풋 요소를 직접 가져옴 (id="postFile")
-            //    업로드 후 값을 비워 주기 위해 사용
             const fileInput = document.getElementById('postFile');
 
-            // 서버에 multipart/form-data로 보낼 FormData 객체 생성
             const fd = new FormData();
-            // 제목을 FormData에 추가
             fd.append('title', title);
-            // 내용을 FormData에 추가
             fd.append('content', content);
 
             if (isFolder) {
-                // 🔹 폴더 게시글일 때: 파일 업로드는 하지 않고 폴더 정보만 전송
-                fd.append('isFolder', 'true'); // 서버에서 폴더 여부를 인식하기 위한 플래그
-                if (folderName) {
-                    // 폴더 이름이 있다면 함께 전송
-                    fd.append('folderName', folderName);
-                }
+                fd.append('isFolder', 'true');
+                if (folderName) fd.append('folderName', folderName);
             } else {
-                // 🔹 일반 게시글 + 파일/이미지 업로드 모드
                 if (file) {
-                    // 사용자가 선택한 파일이 있다면 FormData에 'file'로 추가
                     fd.append('file', file);
                 }
             }
 
-            // 로딩 상태 ON: 버튼 비활성화, 스피너 표시 등에 사용
             $scope.loading = true;
 
-            // 게시글/폴더/파일을 서버에 전송 (POST 요청)
             $http
-                .post(
-                    '/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts', // 게시판 코드에 맞는 URL
-                    fd, // FormData 전송
-                    {
-                        // Content-Type을 undefined로 두면 브라우저가 boundary 포함한 multipart/form-data 자동 설정
-                        headers: { 'Content-Type': undefined },
-                        // Angular가 데이터를 건드리지 않고 그대로 보내도록 설정
-                        transformRequest: angular.identity,
-                    }
-                )
+                .post('/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts', fd, {
+                    headers: { 'Content-Type': undefined },
+                    transformRequest: angular.identity,
+                })
                 .then(function () {
-                    // 요청이 성공했을 때 실행
                     alert('등록되었습니다.');
-                    // 폼 데이터 초기화 (제목/내용/폴더 옵션 등)
                     $scope.newPost = {};
-                    // 파일 배열도 초기화
                     $scope.newPost.files = null;
-                    // 파일 인풋이 존재한다면 선택된 파일 초기화
                     if (fileInput) fileInput.value = '';
-                    // 게시글 목록을 다시 불러오기 (reload가 있으면 그걸 사용, 없으면 loadPosts 사용)
                     $scope.loadPosts && $scope.loadPosts();
                 })
                 .catch(function (err) {
-                    // 요청 실패 시 로그와 사용자 알림
                     console.error('게시글 등록 실패', err);
                     alert('등록에 실패했습니다.');
                 })
                 .finally(function () {
-                    // 성공/실패 상관 없이 로딩 상태 OFF
                     $scope.loading = false;
                 });
         };
 
-        // ✅ 게시글 수정 모드로 전환 (인라인 수정 시작)
+        // 인라인 수정 시작
         $scope.startEditPost = function (p) {
-            // 현재 로그인 사용자가 이 글을 수정할 수 있는 권한이 있는지 체크
             if (!canEditPost(p)) return alert('본인이 쓴 글만 수정할 수 있습니다.');
-
-            // 이 게시글을 "수정 중" 상태로 표시 (템플릿에서 ng-if/ng-show로 사용)
             p._editing = true;
-            // 수정용 임시 제목 필드에 기존 제목 복사
             p._editTitle = p.title;
-            // 수정용 임시 내용 필드에 기존 내용 복사
             p._editContent = p.content;
         };
 
-        // ✅ 게시글 수정 취소
+        // 인라인 수정 취소
         $scope.cancelEditPost = function (p) {
-            // 수정 모드 해제
             p._editing = false;
-            // 임시 제목/내용 초기화(비움)
             p._editTitle = '';
             p._editContent = '';
         };
 
-        // ✅ 게시글 수정 저장 요청
+        // 인라인 수정 저장
         $scope.savePost = function (p) {
-            // 수정 권한 체크 (작성자 또는 관리자만)
             if (!canEditPost(p)) return alert('본인이 쓴 글만 수정할 수 있습니다.');
-
-            // 임시 입력값에서 제목과 내용을 가져와 공백 제거
             const title = (p._editTitle || '').trim();
             const content = (p._editContent || '').trim();
-
-            // 제목이 비어 있으면 경고 후 리턴
             if (!title) return alert('제목을 입력하세요.');
 
-            // 이 게시글을 식별하기 위해 준비해 둔 키 타입/값
-            const keyType = p._keyType; // 'str' 또는 'num'
-            const key = p._key; // 실제 key 값(uuid 또는 숫자 PK 등)
+            const keyType = p._keyType;
+            const key = p._key;
             let url = null;
-
-            // key 타입에 따라 사용할 API URL 분기
-            if (keyType === 'str')
-                // 문자열 키(uuid 등)를 사용할 때
-                url = '/api/posts/key/' + encodeURIComponent(key);
-            else if (keyType === 'num')
-                // 숫자형 PK를 사용할 때
-                url = '/api/posts/' + encodeURIComponent(key);
-            // 둘 다 아니면 어떤 키로 수정해야 하는지 알 수 없으므로 에러
+            if (keyType === 'str') url = '/api/posts/key/' + encodeURIComponent(key);
+            else if (keyType === 'num') url = '/api/posts/' + encodeURIComponent(key);
             else return alert('이 글의 수정용 키를 알 수 없습니다.');
 
-            // PUT 요청으로 서버에 제목/내용 수정 요청
             $http
-                .put(url, { title, content }) // 바디에 수정된 제목과 내용 전송
+                .put(url, { title, content })
                 .then(function () {
-                    // 성공 시: 수정 모드 종료 및 임시 필드 초기화
                     p._editing = false;
                     p._editTitle = '';
                     p._editContent = '';
-
-                    // reload 함수가 있으면 그걸 호출, 없으면 기본 loadPosts()로 목록 새로고침
                     $scope.reload ? $scope.reload() : $scope.loadPosts();
                 })
                 .catch(function () {
-                    // 실패 시 알림
                     alert('저장 실패');
                 });
         };
 
-        // ✅ 게시글 삭제
+        // 게시글 삭제
         $scope.deletePost = function (p) {
-            // 삭제 권한 체크 (작성자 또는 관리자만)
             if (!canEditPost(p)) return alert('본인이 쓴 글만 삭제할 수 있습니다.');
-
-            // 사용자에게 정말 삭제할 것인지 확인
             if (!confirm('정말 삭제할까요?')) return;
 
-            // 게시글의 식별 키 타입과 값
             const keyType = p._keyType;
             const key = p._key;
             let url = null;
-
-            // key 타입에 따라 삭제용 API URL 결정
-            if (keyType === 'str') url = '/api/posts/key/' + encodeURIComponent(key); // 문자열 키
-            else if (keyType === 'num') url = '/api/posts/' + encodeURIComponent(key); // 숫자 키
+            if (keyType === 'str') url = '/api/posts/key/' + encodeURIComponent(key);
+            else if (keyType === 'num') url = '/api/posts/' + encodeURIComponent(key);
             else return alert('이 글의 삭제용 키를 알 수 없습니다.');
 
-            // DELETE 요청으로 서버에 삭제 요청
             $http
                 .delete(url)
                 .then(function () {
-                    // 성공 시 목록 새로고침 (reload 우선, 없으면 loadPosts)
                     $scope.reload ? $scope.reload() : $scope.loadPosts();
                 })
                 .catch(function () {
-                    // 실패 시 알림
                     alert('삭제 실패');
                 });
         };
 
+        // 수정 화면으로 보내기
         $scope.goEdit = function (p) {
-            // 게시글 하나(p)를 "수정 전용 화면"으로 보내는 함수.
-            // 목록 화면에서 [수정] 버튼을 눌렀을 때 호출됨.
-
-            if (!p || !p._key || !p._keyType)
-                // 방어 코드:
-                //  - p가 없거나(null/undefined)
-                //  - p._key(글을 식별하는 실제 값) 가 없거나
-                //  - p._keyType(키의 종류: 숫자인지 문자열인지 구분) 이 없으면
-                //    → 수정에 필요한 식별 정보가 없다는 뜻이므로,
-                return alert('수정용 키가 없습니다.');
-            //    경고창을 띄우고 함수 종료.
-
+            if (!p || !p._key || !p._keyType) return alert('수정용 키가 없습니다.');
             var type = p._keyType === 'num' ? 'num' : 'str';
-            // type 변수에 'num' 또는 'str' 중 하나를 넣음.
-
-            var code = ($scope.boardCode || '').toLowerCase(); // 'BUS' → 'bus'
-
+            var code = ($scope.boardCode || '').toLowerCase();
             window.location.hash = '#/board/' + encodeURIComponent(code) + '/edit/' + type + '/' + encodeURIComponent(p._key);
         };
 
-        // ====== // 게시글 CRUD 끝 ======
+        // ★★ 게시글 상세보기로 이동 (제목 클릭 시 사용)
+        // ★★ 게시글 상세보기로 이동 (제목 클릭 시 사용)
+        $scope.goDetail = function (p) {
+            if (!p) return;
+
+            var info = resolvePostKey(p); // { type:'num'|'str', key: ... }
+            if (!info || !info.key) {
+                alert('상세 보기용 키가 없습니다.');
+                return;
+            }
+
+            var code = ($scope.boardCode || '').toLowerCase(); // 'bus' / 'norm'
+            if (!code) code = 'bus';
+
+            // 예) #/board/bus/view/550e8400-... ?type=str
+            var url = '#/board/' + encodeURIComponent(code) + '/view/' + encodeURIComponent(info.key) + '?type=' + encodeURIComponent(info.type || 'str');
+
+            window.location.hash = url;
+        };
     });
 
     // ───────────────── 게시글 편집 전용 컨트롤러 ─────────────────
@@ -1303,14 +1195,363 @@
         $scope.cancel = backToList;
 
         // 파일 선택 핸들러 (file-model 디렉티브를 쓰고 있으면 이 부분은 생략 가능)
+        // ★ 여러 개 파일을 지원하도록 수정
         $scope.onFileChange = function (element) {
             $scope.$apply(function () {
                 $scope.form = $scope.form || {};
-                $scope.form.file = element.files[0] || null;
+
+                const files = Array.from(element.files || []); // FileList → 배열
+                $scope.form.files = files; // 여러 개 파일
+                $scope.form.file = files[0] || null; // 기존 코드 호환용 (단일 파일)
             });
         };
 
+        // ★ 파일 메타 1개를 표준 형태로 정규화
+        function normalizeFileMeta(raw) {
+            if (!raw) return null;
+
+            const url = raw.url || raw.fileUrl || raw.downloadUrl || raw.path || raw.link || null;
+            const fileName = raw.originalFilename || raw.fileName || raw.filename || raw.name || raw.originName || null;
+            const fileType = raw.fileType || raw.type || raw.contentType || null;
+
+            return { url: url, fileName: fileName, fileType: fileType };
+        }
+
+        // ★ file_list_json 문자열을 배열로 안전하게 파싱 + 정규화
+        function safeParseFileList(json) {
+            if (!json) return [];
+            try {
+                const v = JSON.parse(json);
+                let arr = [];
+
+                if (Array.isArray(v)) arr = v;
+                else if (v && Array.isArray(v.files)) arr = v.files;
+                else if (v && Array.isArray(v.list)) arr = v.list;
+                else if (v && typeof v === 'object') arr = [v];
+                else arr = [];
+
+                const norm = [];
+                arr.forEach(function (one) {
+                    const m = normalizeFileMeta(one);
+                    if (m && m.url) norm.push(m);
+                });
+                return norm;
+            } catch (e) {
+                console.warn('file_list_json parse error:', e, json);
+                return [];
+            }
+        }
+
+        // ─────────────────────────────
+        //  첨부 이미지 미리보기 크기 상태 + 토큰과 연동
+        // ─────────────────────────────
+        $scope.previewWidths = []; // 첨부파일별 width(%) 저장
+
+        // form.content 안에서 [[file:n width=60]] 같은 토큰에서 width 읽기
+        function getWidthFromContent(index) {
+            if (!$scope.form) return null;
+            var content = $scope.form.content || '';
+            var n = index + 1; // file 번호는 1부터
+            var re = new RegExp('\\[\\[file\\s*:\\s*' + n + '(?:\\s+width\\s*=\\s*(\\d+))?\\s*\\]\\]');
+            var m = re.exec(content);
+            if (!m) return null;
+            if (m[1]) {
+                var w = parseInt(m[1], 10);
+                if (isFinite(w) && w > 0 && w <= 100) return w;
+            }
+            return null;
+        }
+
+        // form.content 안에 [[file:n ...]] 토큰을 width=X 로 교체 (없으면 새로 추가)
+        function applyWidthToContent(index, width) {
+            if (!$scope.form) return;
+            var n = index + 1;
+            var content = $scope.form.content || '';
+
+            var re = new RegExp('\\[\\[file\\s*:\\s*' + n + '(?:\\s+width\\s*=\\s*\\d+)?\\s*\\]\\]');
+            var token = '[[file:' + n + ' width=' + width + ']]';
+
+            if (re.test(content)) {
+                content = content.replace(re, token);
+            } else {
+                // 토큰이 없다면 본문 맨 뒤에 추가
+                content = (content ? content + '\n' : '') + token;
+            }
+            $scope.form.content = content;
+        }
+
+        // 버튼에서 호출: 토큰 수정 + 미리보기 width 반영
+        $scope.setFileWidth = function (index, width) {
+            applyWidthToContent(index, width);
+            $scope.previewWidths[index] = width || 100;
+        };
+
         function fetchOne() {
+            $scope.loading = true;
+            let url = null;
+            if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
+            else url = '/api/posts/key/' + encodeURIComponent(key);
+
+            $http
+                .get(url)
+                .then(function (res) {
+                    const p = res.data || {};
+
+                    // ★ 서버에서 온 file_list_json → 배열로 변환
+                    let fileList = safeParseFileList(p.fileListJson || p.file_list_json);
+
+                    // ★ 구(旧) 단일 파일 스키마 호환
+                    if ((!fileList || fileList.length === 0) && p.fileUrl) {
+                        fileList = [
+                            {
+                                url: p.fileUrl,
+                                fileName: p.fileName || '첨부파일',
+                                fileType: p.fileType || null,
+                            },
+                        ];
+                    }
+
+                    $scope.form = {
+                        title: p.title || '',
+                        content: p.content || '',
+                        file: null, // 새 파일은 사용자가 선택할 때만
+                        files: [],
+                    };
+                    $scope.meta = {
+                        writerId: p.writerId,
+                        writerName: p.writerName,
+                        postId: p.postId,
+                        uuid: p.uuid,
+                        createdAt: p.createdAt,
+                        updatedAt: p.updatedAt,
+                        fileUrl: p.fileUrl,
+                        fileType: p.fileType,
+                        fileName: p.fileName,
+                        fileList: fileList,
+                        fileCount: fileList.length,
+                    };
+
+                    // 첨부별 초기 width 값 세팅 (토큰에 [[file:n width=숫자]] 있으면 그대로, 없으면 100)
+                    $scope.previewWidths = [];
+                    (fileList || []).forEach(function (_, i) {
+                        var w = getWidthFromContent(i);
+                        $scope.previewWidths[i] = w || 100;
+                    });
+                })
+                .finally(function () {
+                    $scope.loading = false;
+                });
+        }
+
+        // 🔥 수정: 파일까지 같이 보내는 multipart/form-data 버전 (여러 개 파일 지원)
+        $scope.save = function () {
+            const title = ($scope.form.title || '').trim();
+            const content = ($scope.form.content || '').trim();
+            if (!title) return alert('제목을 입력하세요.');
+            if ($scope.saving) return;
+
+            $scope.saving = true;
+            const fd = new FormData();
+            fd.append('title', title);
+            fd.append('content', content);
+
+            const files = $scope.form.files || [];
+            if (files && files.length > 0) {
+                files.forEach(function (f) {
+                    fd.append('file', f);
+                });
+            }
+
+            let url = null;
+            if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
+            else url = '/api/posts/key/' + encodeURIComponent(key);
+
+            $http
+                .put(url, fd, {
+                    headers: { 'Content-Type': undefined },
+                    transformRequest: angular.identity,
+                })
+                .then(function () {
+                    alert('수정 완료');
+                    backToList();
+                })
+                .catch(function (err) {
+                    console.error('수정 실패', err);
+                    alert('수정 실패: ' + (err.status || '오류'));
+                })
+                .finally(function () {
+                    $scope.saving = false;
+                });
+        };
+
+        fetchOne();
+    });
+
+    // ───────────────── 게시글 상세 보기 컨트롤러 (★ 추가) ─────────────────
+    // ───────────────── 게시글 상세 보기 컨트롤러 ─────────────────
+    // src/main/resources/static/app.js 안의 BoardViewCtrl
+    // src/main/resources/static/app.js 안의 BoardViewCtrl 부분
+    app.controller('BoardViewCtrl', function ($scope, $http, $routeParams, $location, AuthService, $sce) {
+        $scope.loading = true;
+        $scope.post = null;
+        $scope.renderedContent = null; // ← 본문 HTML 버전
+
+        const code = String($routeParams.code || '').toUpperCase(); // 'BUS' / 'NORM'
+        const key = $routeParams.key;
+        const type = String($location.search().type || 'str').toLowerCase(); // 'num' | 'str'
+
+        function backToList() {
+            const path = '/board/' + code.toLowerCase();
+            $location.path(path).search({});
+        }
+        $scope.backToList = backToList;
+
+        // ───────────────── 파일 메타 정규화 ─────────────────
+        function normalizeFileMeta(raw) {
+            if (!raw) return null;
+            const url = raw.url || raw.fileUrl || raw.downloadUrl || raw.path || raw.link || null;
+            const fileName = raw.originalFilename || raw.fileName || raw.filename || raw.name || raw.originName || null;
+            const fileType = raw.fileType || raw.type || raw.contentType || null;
+            const size = raw.fileSize || raw.size || null;
+            return { url, fileName, fileType, size };
+        }
+
+        function safeParseFileList(json) {
+            if (!json) return [];
+            try {
+                const v = JSON.parse(json);
+                let arr = [];
+
+                if (Array.isArray(v)) arr = v;
+                else if (v && Array.isArray(v.files)) arr = v.files;
+                else if (v && Array.isArray(v.list)) arr = v.list;
+                else if (v && typeof v === 'object') arr = [v];
+                else arr = [];
+
+                const norm = [];
+                arr.forEach(function (one) {
+                    const m = normalizeFileMeta(one);
+                    if (m && m.url) norm.push(m);
+                });
+                return norm;
+            } catch (e) {
+                console.warn('file_list_json parse error:', e, json);
+                return [];
+            }
+        }
+
+        // ───────────────── 유틸 ─────────────────
+        $scope.getFileExt = function (fileOrName) {
+            if (!fileOrName) return '확장자 없음';
+            var name = fileOrName;
+            if (fileOrName.fileName) name = fileOrName.fileName;
+            if (fileOrName.name) name = fileOrName.name;
+            var idx = name.lastIndexOf('.');
+            if (idx < 0) return '확장자 없음';
+            return name.substring(idx + 1).toLowerCase();
+        };
+
+        $scope.formatFileSize = function (size) {
+            if (typeof size !== 'number' || !isFinite(size)) return '알 수 없음';
+            if (size < 1024) return size + ' B';
+            var kb = size / 1024;
+            if (kb < 1024) return kb.toFixed(1) + ' KB';
+            var mb = kb / 1024;
+            if (mb < 1024) return mb.toFixed(2) + ' MB';
+            var gb = mb / 1024;
+            return gb.toFixed(2) + ' GB';
+        };
+
+        // 이미지인지 판단
+        $scope.isImage = function (f) {
+            if (!f) return false;
+            var t = String(f.fileType || '').toLowerCase();
+            var name = String(f.fileName || '');
+            if (t.indexOf('image/') === 0) return true;
+            return /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif)$/i.test(name);
+        };
+
+        // HTML 이스케이프 (본문 텍스트 보호용)
+        function escapeHtml(str) {
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        // ───────────────── 본문 토큰 치환 ─────────────────
+        // [[file:1 width=60]] → <img ...> / <a ...>
+        // width / w 옵션을 읽어서 style에 반영
+        function buildRenderedContent(p) {
+            if (!p || !p.content) return null;
+
+            var text = String(p.content || '');
+
+            // "[ [[file:1]]" 같은 이상한 형태를 "[[file:1]]" 으로 정리
+            text = text.replace(/\[\s*\[\s*file/gi, '[[file');
+
+            var attachments = p.attachments || [];
+
+            var re = /\[\[\s*file\s*:(\d+)([^\]]*)\]\]/gi;
+            var result = '';
+            var lastIndex = 0;
+            var m;
+
+            while ((m = re.exec(text)) !== null) {
+                // 토큰 앞의 일반 텍스트
+                var before = text.slice(lastIndex, m.index);
+                result += escapeHtml(before).replace(/\n/g, '<br/>');
+
+                var n = parseInt(m[1], 10); // 파일 번호(1-base)
+                var idx = isNaN(n) ? -1 : n - 1;
+                var att = attachments[idx];
+
+                // width / w 파라미터 파싱 (width=30, width=60%, w=100 등)
+                var paramStr = m[2] || '';
+                var widthMatch = paramStr.match(/(?:width|w)\s*=\s*([0-9]{1,4}%?)/i);
+                var widthVal = widthMatch && widthMatch[1] ? widthMatch[1] : null;
+
+                // 인라인 스타일 문자열
+                var styleAttr = '';
+
+                // 🔹 width 지정이 없으면 기본 100% (내용 영역 기준으로 꽉 차게)
+                if (!widthVal) {
+                    widthVal = '100%';
+                }
+
+                if (/%$/.test(widthVal)) {
+                    // 퍼센트
+                    styleAttr = 'style="max-width:100%;width:' + widthVal + ';height:auto;border-radius:10px;display:block;margin:0 auto;"';
+                } else {
+                    // px
+                    styleAttr = 'style="max-width:100%;width:' + parseInt(widthVal, 10) + 'px;height:auto;border-radius:10px;display:block;margin:0 auto;"';
+                }
+
+                if (att && att.url) {
+                    var safeUrl = att.url;
+                    var safeName = escapeHtml(att.fileName || '첨부파일 ' + n);
+
+                    if ($scope.isImage(att)) {
+                        // 이미지
+                        result += '<div class="inline-img-wrap">' + '<img class="inline-img" src="' + safeUrl + '" alt="' + safeName + '" ' + styleAttr + '/>' + '</div>';
+                    } else {
+                        // 일반 파일 링크
+                        result += '<div class="inline-file-link-wrap">' + '<a class="inline-file-link" href="' + safeUrl + '" download="' + safeName + '">' + '📎 ' + safeName + '</a>' + '</div>';
+                    }
+                } else {
+                    // 대응되는 첨부가 없으면 토큰 그대로 텍스트로
+                    result += escapeHtml(m[0]);
+                }
+
+                lastIndex = re.lastIndex;
+            }
+
+            // 마지막 토큰 뒤 나머지 텍스트
+            var tail = text.slice(lastIndex);
+            result += escapeHtml(tail).replace(/\n/g, '<br/>');
+
+            return $sce.trustAsHtml(result);
+        }
+
+        // ───────────────── 게시글 로딩 ─────────────────
+        function loadOne() {
             $scope.loading = true;
 
             let url = null;
@@ -1321,109 +1562,36 @@
                 .get(url)
                 .then(function (res) {
                     const p = res.data || {};
-                    $scope.form = {
-                        title: p.title || '',
-                        content: p.content || '',
-                        file: null, // 새 파일은 사용자가 선택할 때만 채움
-                    };
-                    $scope.meta = {
-                        writerId: p.writerId,
-                        writerName: p.writerName,
-                        postId: p.postId,
-                        uuid: p.uuid,
-                        createdAt: p.createdAt,
-                        updatedAt: p.updatedAt,
 
-                        // 🔽 첨부파일 메타도 같이 넣어줌
-                        fileUrl: p.fileUrl,
-                        fileType: p.fileType,
-                        fileName: p.fileName,
-                    };
+                    let fileList = safeParseFileList(p.fileListJson || p.file_list_json);
+                    if ((!fileList || fileList.length === 0) && p.fileUrl) {
+                        fileList = [
+                            {
+                                url: p.fileUrl,
+                                fileName: p.fileName || '첨부파일',
+                                fileType: p.fileType || null,
+                                size: p.fileSize || null,
+                            },
+                        ];
+                    }
+
+                    p.attachments = fileList || [];
+                    p.fileCount = p.attachments.length;
+
+                    $scope.post = p;
+                    // 🔥 본문 HTML 생성 ( [[file:n width=...]] 치환 )
+                    $scope.renderedContent = buildRenderedContent(p);
                 })
                 .finally(function () {
                     $scope.loading = false;
                 });
         }
 
-        $scope.save = function () {
-            if ($scope.saving) return;
+        AuthService.loadMe().finally(function () {
+            $scope.me = AuthService.getMe();
+        });
 
-            $scope.saving = true;
-
-            // 🔹 FormData로 multipart/form-data 요청 구성
-            const fd = new FormData();
-            fd.append('title', $scope.form.title || '');
-            fd.append('content', $scope.form.content || '');
-
-            // 새 파일이 선택된 경우에만 전송
-            if ($scope.form.file) {
-                fd.append('file', $scope.form.file);
-            }
-
-            let url = null;
-            if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
-            else url = '/api/posts/key/' + encodeURIComponent(key);
-
-            $http
-                .put(url, fd, {
-                    headers: { 'Content-Type': undefined }, // ← 브라우저가 boundary 포함해서 자동 설정
-                    transformRequest: angular.identity, // ← FormData 그대로 보내기
-                })
-                .then(function () {
-                    alert('수정 완료');
-                    backToList();
-                })
-                .catch(function (err) {
-                    console.error(err);
-                    alert('수정 실패: ' + (err.status || '오류'));
-                })
-                .finally(function () {
-                    $scope.saving = false;
-                });
-        };
-
-        fetchOne();
-
-        // 🔥 수정: 파일까지 같이 보내는 multipart/form-data 버전
-        $scope.save = function () {
-            const title = ($scope.form.title || '').trim();
-            const content = ($scope.form.content || '').trim();
-            if (!title) return alert('제목을 입력하세요.');
-            if ($scope.saving) return; // 중복 클릭 방지
-
-            $scope.saving = true;
-
-            // 폼데이터 구성
-            const fd = new FormData();
-            fd.append('title', title);
-            fd.append('content', content);
-            // 파일을 새로 선택했을 때만 추가
-            if ($scope.form.file) {
-                // 'file' 이름은 @RequestParam("file") 이랑 반드시 같아야 함
-                fd.append('file', $scope.form.file);
-            }
-
-            let url = null;
-            if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
-            else url = '/api/posts/key/' + encodeURIComponent(key);
-
-            $http
-                .put(url, fd, {
-                    headers: { 'Content-Type': undefined }, // 브라우저가 boundary 포함해서 자동 설정
-                    transformRequest: angular.identity, // FormData 그대로 전송
-                })
-                .then(function () {
-                    alert('수정이 완료되었습니다.');
-                    backToList();
-                })
-                .catch(function (err) {
-                    console.error('수정 실패', err);
-                    alert('저장에 실패했습니다. (' + (err.status || '오류') + ')');
-                })
-                .finally(function () {
-                    $scope.saving = false;
-                });
-        };
+        loadOne();
     });
 
     // ───────────────── 게시판 라우트별 컨트롤러 ─────────────────
@@ -1432,6 +1600,7 @@
         $scope.boardCode = 'BUS';
         $scope.loadPosts();
     });
+
     app.controller('BoardNormalCtrl', function ($scope, $controller) {
         angular.extend(this, $controller('BoardBaseCtrl', { $scope }));
         $scope.boardCode = 'NORM';
@@ -1443,10 +1612,8 @@
         $scope.isAdmin = false;
         $scope.loading = true;
         $scope.saving = false;
-
         $scope.rows = [];
         $scope.sourceRows = [];
-
         $scope.msg = '';
         $scope.msgType = 'info';
 
@@ -1463,11 +1630,11 @@
             $scope.msg = text;
             if (ms) $timeout(() => ($scope.msg = ''), ms);
         }
-
         function num(v, def) {
             const n = parseInt(v, 10);
             return isFinite(n) ? n : def == null ? 0 : def;
         }
+
         $scope.pageSizeNum = function () {
             return Math.max(1, num($scope.pageSize, 10));
         };
@@ -1504,6 +1671,7 @@
             $scope.rows = $scope.paged;
             $scope.pages = pages;
         }
+
         function refilter() {
             $scope.filtered = ($scope.sourceRows || []).filter((r) => matchRow(r, $scope.q));
             $scope.page = 0;
@@ -1581,6 +1749,7 @@
                 .catch((err) => {
                     if (err && err.status === 403) notify('error', '관리자 전용 페이지입니다.', 2500);
                     else notify('error', '권한 목록을 불러오지 못했습니다.', 2500);
+
                     $scope.sourceRows = [];
                     $scope.rows = [];
                     $scope.filtered = [];
@@ -1599,7 +1768,9 @@
 
             $scope.saving = true;
             $http
-                .put('/api/roles/' + encodeURIComponent(row.username), { role: target })
+                .put('/api/roles/' + encodeURIComponent(row.username), {
+                    role: target,
+                })
                 .then(() => {
                     row.role = target;
                     notify('success', '저장되었습니다.', 1200);
@@ -1653,6 +1824,7 @@
             $scope.userStatusMessage = msg;
             if (ms) setTimeout(() => $scope.$applyAsync(() => ($scope.userStatusMessage = '')), ms);
         }
+
         function buildKeySet(obj) {
             if (!obj) return new Set();
             return new Set([obj.user_id, obj.userId, obj.id, obj.email, obj.username, obj.name].filter(Boolean).map((s) => String(s).trim().toLowerCase()));
@@ -1711,7 +1883,6 @@
             $scope.pages = Math.max(1, Math.ceil(total / size));
             if ($scope.page >= $scope.pages) $scope.page = $scope.pages - 1;
             if ($scope.page < 0) $scope.page = 0;
-
             const start = $scope.page * size;
             $scope.paged = ($scope.filtered || []).slice(start, start + size);
         }
@@ -1779,11 +1950,13 @@
         $scope.loadUsers = function () {
             if (!$scope.isAdmin) return;
             setUserStatus('info', '⏳ 사용자 목록을 불러오는 중...');
+
             const usersP = $http.get('/user').then((res) => normalizeList(res.data));
             const rolesP = $http
                 .get('/api/roles')
                 .then((res) => (Array.isArray(res.data) ? res.data : []))
                 .catch(() => []);
+
             $q.all([usersP, rolesP])
                 .then(function ([users, roles]) {
                     attachRolesToUsers(users, makeRoleIndex(roles));
@@ -1814,10 +1987,12 @@
             if (!$scope.isAdmin) return;
             const idKey = u && (u.user_id || u.userId || u.id);
             if (!idKey) return setUserStatus('error', 'ID를 찾을 수 없어 수정할 수 없습니다.', 2000);
+
             const payload = {};
             const name = (u._editName || '').trim();
             const phone = (u._editPhone || '').trim();
             const email = (u._editEmail || '').trim();
+
             if (name && name !== u.name) payload.name = name;
             if (phone && phone !== (u.phone || u.tel || u.phoneNumber)) payload.phone = phone;
             if (email && email !== u.email) {
@@ -1842,12 +2017,12 @@
                     setUserStatus('error', '❌ 수정에 실패했습니다.', 2500);
                 });
         };
-
         $scope.deleteUser = function (u) {
             if (!$scope.isAdmin) return;
             const idKey = u && (u.user_id || u.userId || u.id);
             if (!idKey) return setUserStatus('error', 'ID를 찾을 수 없어 삭제할 수 없습니다.', 2000);
             if (!confirm(`정말로 삭제할까요? (ID: ${idKey})`)) return;
+
             $http
                 .delete('/user/' + encodeURIComponent(idKey))
                 .then(function () {
@@ -1905,8 +2080,13 @@
         $scope.saveAll = function (frm) {
             if (frm.$invalid || !$scope.allValid() || $scope.saving) return;
             $scope.saving = true;
+
             const tasks = $scope.rows.map(function (r) {
-                const payload = { name: (r.name || '').trim(), phone: (r.phone || '').trim() || null, email: (r.email || '').trim() };
+                const payload = {
+                    name: (r.name || '').trim(),
+                    phone: (r.phone || '').trim() || null,
+                    email: (r.email || '').trim(),
+                };
                 const uid = (r.user_id || '').trim();
                 if (uid) {
                     payload.user_id = uid;
@@ -1914,6 +2094,7 @@
                 }
                 return $http.post('/user', payload);
             });
+
             $q.all(tasks)
                 .then(function () {
                     alert('저장 완료!');

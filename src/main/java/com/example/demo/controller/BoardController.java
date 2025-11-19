@@ -6,11 +6,11 @@ import java.io.IOException;                                           // 입출�
 import java.nio.file.Files;                                           // 파일/디렉터리 조작 유틸
 import java.nio.file.Path;                                            // 경로 표현
 import java.nio.file.Paths;                                           // 경로 생성 유틸
-import java.util.List;                                                // 목록 타입 사용을 위한 import
-import java.util.UUID;                                                // 랜덤 UUID 생성용
-import java.util.ArrayList;                                           // 여러 파일 메타데이터 리스트
-import java.util.HashMap;                                             // 파일 메타데이터 맵
-import java.util.Map;                                                 // 파일 메타데이터 맵 인터페이스
+import java.util.ArrayList;                                                // 목록 타입 사용을 위한 import
+import java.util.HashMap;                                                // 랜덤 UUID 생성용
+import java.util.List;                                           // 여러 파일 메타데이터 리스트
+import java.util.Map;                                             // 파일 메타데이터 맵
+import java.util.UUID;                                                 // 파일 메타데이터 맵 인터페이스
 
 import org.springframework.beans.factory.annotation.Value;            // application.properties 값 주입
 import org.springframework.http.HttpStatus;                           // HTTP 상태코드 상수(403/404 등) 사용
@@ -32,7 +32,6 @@ import org.springframework.web.multipart.MultipartFile;               // 업로�
 import com.example.demo.dao.PostDao;                                  // 게시글 관련 DB 접근 DAO
 import com.example.demo.dto.PageDTO;                                  // 페이지네이션 응답 DTO(목록/전체건수/페이지/사이즈)
 import com.example.demo.dto.PostDto;                                  // 게시글 데이터 전송 객체
-
 import com.fasterxml.jackson.databind.ObjectMapper;                   // file_list_json 직렬화용
 
 @RestController                                                       // REST API 컨트롤러 선언(JSON 반환)
@@ -137,6 +136,10 @@ public class BoardController {
         return ResponseEntity.ok(p);
     }
 
+    /* =========================
+     * 게시글 생성 (파일 업로드 + 폴더 타입 지원)
+     * ========================= */
+
     /** 게시글 생성 (파일 업로드 + 폴더 타입 지원) */
     @PostMapping(
             value = "/boards/{code}/posts",                            // 예: POST /api/boards/NORM/posts
@@ -146,9 +149,8 @@ public class BoardController {
             @PathVariable String code,                                 // 게시판 코드
             @RequestParam("title") String title,                       // 폼 필드: 제목
             @RequestParam("content") String content,                   // 폼 필드: 내용
-            // ✅ 여러 파일 수신: files[] 로 여러 개, file(단일)도 겸용 지원
-            @RequestParam(name = "files", required = false) List<MultipartFile> files,
-            @RequestParam(name = "file", required = false) MultipartFile legacyFile, // 예전 단일 파일 필드 호환
+            // ✅ 여러 파일 수신: name="file" 로 여러 개
+            @RequestParam(name = "file", required = false) List<MultipartFile> files,
             @RequestParam(name = "isFolder", required = false) Boolean isFolder, // 폴더 여부(체크박스)
             @RequestParam(name = "folderName", required = false) String folderName, // 폴더 이름
             Authentication auth) throws IOException {                  // 현재 사용자 인증(로그인 안 했을 수도 있음)
@@ -183,7 +185,7 @@ public class BoardController {
             // (file_list_json 도 null 그대로)
         } else {
             // 🔹 일반 게시글 + 여러 파일/이미지 업로드 모드
-            //   - files 리스트에 담긴 것 + legacyFile(단일)까지 합쳐서 처리
+            //   - files 리스트에 담긴 것만 사용 (name="file" 여러 개)
             List<MultipartFile> effective = new ArrayList<>();
 
             if (files != null) {
@@ -192,9 +194,6 @@ public class BoardController {
                         effective.add(f);
                     }
                 }
-            }
-            if (effective.isEmpty() && legacyFile != null && !legacyFile.isEmpty()) {
-                effective.add(legacyFile); // 옛날 단일 필드로 올라온 경우
             }
 
             if (!effective.isEmpty()) {
@@ -269,7 +268,7 @@ public class BoardController {
     }
 
     /* =========================
-     * 파일 교체용 유틸 (수정에서 재사용)
+     * 파일 교체용 유틸 (수정에서 재사용) – 지금은 단일 파일 교체용으로만 사용
      * ========================= */
     private void replaceFile(PostDto target, MultipartFile file) throws IOException {
         if (file == null || file.isEmpty()) return;
@@ -404,7 +403,8 @@ public class BoardController {
             @PathVariable String id,
             @RequestParam("title") String title,
             @RequestParam("content") String content,
-            @RequestParam(name = "file", required = false) MultipartFile file,
+            // 🔹 수정 시에도 name="file" 로 여러 개 선택 가능
+            @RequestParam(name = "file", required = false) List<MultipartFile> files,
             @RequestParam(name = "isFolder", required = false) Boolean isFolder,
             @RequestParam(name = "folderName", required = false) String folderName,
             Authentication auth) throws IOException {
@@ -427,7 +427,7 @@ public class BoardController {
         boolean folderFlag = Boolean.TRUE.equals(isFolder);
 
         if (folderFlag) {
-            // 📁 폴더로 변경하는 경우: 기존 물리 파일 삭제 후 폴더 메타만 남김
+            // 📁 폴더로 변경하는 경우: 기존 물리 파일 삭제 후 폴더 메타만 남김(간단하게 대표 파일만 삭제)
             String oldUrl = existing.getFileUrl();
             if (oldUrl != null && oldUrl.startsWith("/uploads/")) {
                 Path uploadPath = Paths.get(uploadDir).toAbsolutePath();
@@ -443,11 +443,76 @@ public class BoardController {
             existing.setFileName(name);
             existing.setFileContentType(null);
             existing.setFileListJson(null); // 폴더 글로 바뀌면 리스트도 초기화
-        } else if (file != null && !file.isEmpty()) {
-            // 새 파일이 있으면 교체
-            replaceFile(existing, file);
+        } else {
+            // ✅ 새 파일들을 선택했을 때만 첨부 전체 교체
+            List<MultipartFile> effective = new ArrayList<>();
+            if (files != null) {
+                for (MultipartFile f : files) {
+                    if (f != null && !f.isEmpty()) effective.add(f);
+                }
+            }
+
+            if (!effective.isEmpty()) {
+                // (단순화를 위해 기존 파일 실제 삭제는 대표 1개만 처리)
+                String oldUrl = existing.getFileUrl();
+                if (oldUrl != null && oldUrl.startsWith("/uploads/")) {
+                    Path uploadPath = Paths.get(uploadDir).toAbsolutePath();
+                    Path oldPath = uploadPath.resolve(oldUrl.substring("/uploads/".length()));
+                    Files.deleteIfExists(oldPath);
+                }
+
+                List<Map<String, Object>> metaList = new ArrayList<>();
+                Path uploadPath = Paths.get(uploadDir).toAbsolutePath();
+                Files.createDirectories(uploadPath);
+
+                for (int i = 0; i < effective.size(); i++) {
+                    MultipartFile file = effective.get(i);
+
+                    String originalName = file.getOriginalFilename();
+                    String contentType = file.getContentType();
+                    long size = file.getSize();
+
+                    String safeName = (originalName == null) ? "" : originalName.replaceAll("\\s+", "_");
+                    String savedName = UUID.randomUUID().toString() + "_" + safeName;
+
+                    Path target = uploadPath.resolve(savedName);
+                    file.transferTo(target.toFile());
+
+                    String fileType;
+                    boolean isImage = (contentType != null && contentType.toLowerCase().startsWith("image/"));
+                    if (isImage) fileType = "IMAGE";
+                    else if (originalName != null && !originalName.contains(".")) fileType = "FOLDER";
+                    else fileType = "FILE";
+
+                    String url = "/uploads/" + savedName;
+
+                    if (i == 0) {
+                        existing.setFileUrl(url);
+                        existing.setFileType(fileType);
+                        existing.setFileName(originalName);
+                        existing.setFileContentType(contentType);
+                    }
+
+                    Map<String, Object> meta = new HashMap<>();
+                    meta.put("name", originalName);
+                    meta.put("url", url);
+                    meta.put("contentType", contentType);
+                    meta.put("size", size);
+                    meta.put("fileType", fileType);
+
+                    metaList.add(meta);
+                }
+
+                if (!metaList.isEmpty()) {
+                    ObjectMapper om = new ObjectMapper();
+                    String json = om.writeValueAsString(metaList);
+                    existing.setFileListJson(json);
+                } else {
+                    existing.setFileListJson(null);
+                }
+            }
+            // effective 비었으면 첨부 유지
         }
-        // 둘 다 없으면 기존 첨부 유지
 
         int affected = postDao.update(existing);
 
@@ -465,7 +530,7 @@ public class BoardController {
             @PathVariable String key,
             @RequestParam("title") String title,
             @RequestParam("content") String content,
-            @RequestParam(name = "file", required = false) MultipartFile file,
+            @RequestParam(name = "file", required = false) List<MultipartFile> files,
             @RequestParam(name = "isFolder", required = false) Boolean isFolder,
             @RequestParam(name = "folderName", required = false) String folderName,
             Authentication auth) throws IOException {
@@ -484,7 +549,6 @@ public class BoardController {
         existing.setTitle(title);
         existing.setContent(content);
 
-        // 🔹 체크박스 기준으로 폴더 여부 판단, 이름이 비면 제목 사용
         boolean folderFlag = Boolean.TRUE.equals(isFolder);
 
         if (folderFlag) {
@@ -503,8 +567,72 @@ public class BoardController {
             existing.setFileName(name);
             existing.setFileContentType(null);
             existing.setFileListJson(null);
-        } else if (file != null && !file.isEmpty()) {
-            replaceFile(existing, file);
+        } else {
+            List<MultipartFile> effective = new ArrayList<>();
+            if (files != null) {
+                for (MultipartFile f : files) {
+                    if (f != null && !f.isEmpty()) effective.add(f);
+                }
+            }
+
+            if (!effective.isEmpty()) {
+                String oldUrl = existing.getFileUrl();
+                if (oldUrl != null && oldUrl.startsWith("/uploads/")) {
+                    Path uploadPath = Paths.get(uploadDir).toAbsolutePath();
+                    Path oldPath = uploadPath.resolve(oldUrl.substring("/uploads/".length()));
+                    Files.deleteIfExists(oldPath);
+                }
+
+                List<Map<String, Object>> metaList = new ArrayList<>();
+                Path uploadPath = Paths.get(uploadDir).toAbsolutePath();
+                Files.createDirectories(uploadPath);
+
+                for (int i = 0; i < effective.size(); i++) {
+                    MultipartFile file = effective.get(i);
+
+                    String originalName = file.getOriginalFilename();
+                    String contentType = file.getContentType();
+                    long size = file.getSize();
+
+                    String safeName = (originalName == null) ? "" : originalName.replaceAll("\\s+", "_");
+                    String savedName = UUID.randomUUID().toString() + "_" + safeName;
+
+                    Path target = uploadPath.resolve(savedName);
+                    file.transferTo(target.toFile());
+
+                    String fileType;
+                    boolean isImage = (contentType != null && contentType.toLowerCase().startsWith("image/"));
+                    if (isImage) fileType = "IMAGE";
+                    else if (originalName != null && !originalName.contains(".")) fileType = "FOLDER";
+                    else fileType = "FILE";
+
+                    String url = "/uploads/" + savedName;
+
+                    if (i == 0) {
+                        existing.setFileUrl(url);
+                        existing.setFileType(fileType);
+                        existing.setFileName(originalName);
+                        existing.setFileContentType(contentType);
+                    }
+
+                    Map<String, Object> meta = new HashMap<>();
+                    meta.put("name", originalName);
+                    meta.put("url", url);
+                    meta.put("contentType", contentType);
+                    meta.put("size", size);
+                    meta.put("fileType", fileType);
+
+                    metaList.add(meta);
+                }
+
+                if (!metaList.isEmpty()) {
+                    ObjectMapper om = new ObjectMapper();
+                    String json = om.writeValueAsString(metaList);
+                    existing.setFileListJson(json);
+                } else {
+                    existing.setFileListJson(null);
+                }
+            }
         }
 
         int affected = postDao.update(existing);
