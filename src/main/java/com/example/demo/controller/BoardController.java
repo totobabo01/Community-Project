@@ -6,11 +6,11 @@ import java.io.IOException;                                           // 입출�
 import java.nio.file.Files;                                           // 파일/디렉터리 조작 유틸
 import java.nio.file.Path;                                            // 경로 표현
 import java.nio.file.Paths;                                           // 경로 생성 유틸
-import java.util.ArrayList;                                                // 목록 타입 사용을 위한 import
-import java.util.HashMap;                                                // 랜덤 UUID 생성용
-import java.util.List;                                           // 여러 파일 메타데이터 리스트
-import java.util.Map;                                             // 파일 메타데이터 맵
-import java.util.UUID;                                                 // 파일 메타데이터 맵 인터페이스
+import java.util.ArrayList;                                           // 목록 타입 사용을 위한 import
+import java.util.HashMap;                                             // 파일 메타데이터 맵
+import java.util.List;                                                // 여러 파일 메타데이터 리스트
+import java.util.Map;                                                 // 파일 메타데이터 맵 인터페이스
+import java.util.UUID;                                                // 랜덤 UUID 생성용
 
 import org.springframework.beans.factory.annotation.Value;            // application.properties 값 주입
 import org.springframework.http.HttpStatus;                           // HTTP 상태코드 상수(403/404 등) 사용
@@ -40,7 +40,8 @@ public class BoardController {
 
     private final PostDao postDao;                                    // 의존 DAO(게시글 CRUD/카운트/조건부 업데이트 등)
 
-    @Value("${file.upload-dir:uploads}")                              // 첨부파일 저장 디렉터리(application.properties에서 주입)
+    // 🔥 기본 업로드 경로를 C:/upload 로 변경 (properties에 없으면 이 값 사용)
+    @Value("${file.upload-dir:C:/upload}")
     private String uploadDir;
 
     public BoardController(PostDao postDao) {                         // 생성자 주입(스프링이 PostDao 빈을 주입)
@@ -67,9 +68,7 @@ public class BoardController {
     /** 게시판 코드별 목록 조회 + 페이지네이션 (code 예: "BUS", "NORM") */
     @GetMapping("/boards/{code}/posts")                               // 예: GET /api/boards/BUS/posts?page=0&size=10
     public PageDTO<PostDto> list(                                     // 페이지 DTO(PostDto 목록/카운트/페이지/사이즈) 반환
-            // @PathVariable은 Spring MVC(스프링 프레임워크) 에서 URL 경로의 일부를 변수처럼 받아오는 기능
             @PathVariable String code,                                 // 경로 변수로 게시판 코드 수신("BUS"/"NORM" 등)
-            // defaultvalue: "값이 주어지지 않았을 때 대신 사용되는 “미리 정해둔 값” 
             @RequestParam(defaultValue = "0") int page,                // 쿼리 파라미터 page(기본 0)
             @RequestParam(defaultValue = "10") int size,               // 쿼리 파라미터 size(기본 10)
             // 🔎 검색/기간 조건용 쿼리 파라미터 (없으면 null로 들어옴 → DAO에서 무시)
@@ -230,7 +229,7 @@ public class BoardController {
                         fileType = "FILE";
                     }
 
-                    String url = "/uploads/" + savedName;                 // 웹에서 접근할 URL (WebMvcConfig에서 매핑)
+                    String url = "/uploads/" + savedName;                 // 웹에서 접근할 URL (WebConfig에서 매핑)
 
                     // 🔸 대표 파일(첫 번째) 정보는 기존 컬럼에 세팅
                     if (i == 0) {
@@ -308,7 +307,6 @@ public class BoardController {
         target.setFileContentType(contentType);
 
         // 단일 교체에서는 대표 1개만 있으니, 여러 개 리스트는 초기화하는 쪽이 안전
-        // (여기서 전부 지우고 새 파일 1개만 있다고 보는 설계)
         target.setFileListJson(null);
     }
 

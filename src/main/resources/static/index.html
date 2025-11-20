@@ -407,6 +407,12 @@
                                 ng-click="navTo('#/board/normal', $event)"
                                 >일반 게시판</a
                             >
+                            <!-- ✅ 추가: 대용량 게시판 테스트 -->
+                            <a
+                                href="#/board/big"
+                                ng-click="navTo('#/board/big', $event)"
+                                >대용량 게시판 테스트</a
+                            >
                         </div>
                     </div>
 
@@ -519,7 +525,10 @@
                         <div id="output">
                             <h3 ng-if="filteredItems.length">📋 조회 결과</h3>
                             <ul>
-                                <li ng-repeat="item in filteredItems"><strong>{{ item.bsNm || '이름 없음' }}</strong> ({{ item.xPos }}, {{ item.yPos }})</li>
+                                <li ng-repeat="item in filteredItems">
+                                    <strong>{{ item.bsNm || '이름 없음' }}</strong>
+                                    ({{ item.xPos }}, {{ item.yPos }})
+                                </li>
                             </ul>
                             <p ng-if="!filteredItems.length && items.length">🔍 검색 결과가 없습니다.</p>
                             <p ng-if="!items.length">📭 데이터를 먼저 불러오세요.</p>
@@ -598,7 +607,10 @@
                     if (e.target && e.target.id === 'btn-delete') {
                         e.preventDefault();
                         if (!confirm('정말로 내 계정을 삭제하시겠어요? 이 동작은 되돌릴 수 없습니다.')) return;
-                        fetch('/api/me', { method: 'DELETE', credentials: 'same-origin' })
+                        fetch('/api/me', {
+                            method: 'DELETE',
+                            credentials: 'same-origin',
+                        })
                             .then(function (res) {
                                 if (res.status === 204 || res.status === 200) {
                                     alert('계정이 삭제되었습니다.');

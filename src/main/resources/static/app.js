@@ -58,6 +58,7 @@
         function buildTree(rows) {
             const map = new Map();
             rows.forEach((r) => map.set(r.uuid, { ...r, children: [] }));
+
             const roots = [];
             rows.forEach((r) => {
                 if (r.parent_uuid) {
@@ -65,6 +66,7 @@
                     if (p) p.children.push(map.get(r.uuid));
                 } else roots.push(map.get(r.uuid));
             });
+
             function sortChildren(n) {
                 n.children.sort((a, b) => (a.priority || 0) - (b.priority || 0));
                 n.children.forEach(sortChildren);
@@ -106,6 +108,11 @@
             .when('/board/normal', {
                 templateUrl: '/tpl/board/normal.html', // ← 여기! '/tpl/%20board/normal.html' 아님
                 controller: 'BoardNormalCtrl',
+            })
+            // ✅ 대용량 게시판 (BIG)
+            .when('/board/big', {
+                templateUrl: '/tpl/board/big.html',
+                controller: 'BoardBigCtrl',
             })
             // ★★★ 게시글 '수정 전용' 화면 (분리 페이지)
             // 예) #/board/bus/edit/num/42 또는 #/board/bus/edit/str/550e8400-...
@@ -186,6 +193,7 @@
                 $location.search('tab', 'home');
             }
         }
+
         function syncTabs() {
             ensureDefaultUsersTab();
             const path = $location.path();
@@ -207,6 +215,7 @@
         };
 
         $scope.$on('$locationChangeSuccess', syncTabs);
+
         $scope.$on('$routeChangeSuccess', function () {
             ensureDefaultUsersTab();
             if ($location.path() !== '/users' && $location.search().tab) {
@@ -233,6 +242,7 @@
             n._closing = null;
             (n.children || []).forEach(decorateMenuNode);
         }
+
         function closeAllMenus() {
             function dfs(arr) {
                 (arr || []).forEach((m) => {
@@ -322,7 +332,9 @@
                     const params = {};
                     query.split('&').forEach((kv) => {
                         if (!kv) return;
-                        const [k, v] = kv.split('=');
+                        const parts = kv.split('=');
+                        const k = parts[0];
+                        const v = parts[1];
                         params[decodeURIComponent(k || '')] = decodeURIComponent(v || '');
                     });
                     $location.search(params);
@@ -338,6 +350,7 @@
             $scope.$applyAsync(() => closeAllMenus());
         };
         $document.on('click', docClickHandler);
+
         $scope.$on('$destroy', function () {
             $document.off('click', docClickHandler);
         });
@@ -358,6 +371,7 @@
         $scope[msgKey] = msg;
         if (ms) $timeout(() => ($scope[msgKey] = ''), ms);
     }
+
     function roleToLabel(role) {
         return String(role || '')
             .toUpperCase()
@@ -365,6 +379,7 @@
             ? '관리자'
             : '사용자';
     }
+
     function roleToClass(role) {
         return String(role || '')
             .toUpperCase()
@@ -406,15 +421,19 @@
         $scope.loadData = function () {
             setTimed($scope, 'statusType', 'statusMessage', 'info', '⏳ 데이터를 불러오는 중입니다...', null, $timeout);
 
-            const params = { pageNo: 1, numOfRows: 500 };
+            const params = {
+                pageNo: 1,
+                numOfRows: 500,
+            };
+
             if (($scope.keyword || '').trim()) params.stNm = $scope.keyword.trim();
 
             $http
                 .get('/api/bus/stops', { params })
                 .then(function (res) {
                     const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
-                    let list = [];
 
+                    let list = [];
                     if (Array.isArray(data)) list = data;
                     else if (data?.response?.body?.items) {
                         const it = data.response.body.items.item || data.response.body.items.bs || [];
@@ -437,7 +456,7 @@
                     }));
 
                     $scope.filterData();
-                    setTimed($scope, 'statusType', 'statusMessage', 'success', `✅ ${$scope.items.length}개의 데이터를 불러왔습니다.`, 1500, $timeout);
+                    setTimed($scope, 'statusType', 'statusMessage', 'success', '✅ ' + $scope.items.length + '개의 데이터를 불러왔습니다.', 1500, $timeout);
                 })
                 .catch(function () {
                     setTimed($scope, 'statusType', 'statusMessage', 'error', '❌ 데이터를 불러오지 못했습니다.', 2500, $timeout);
@@ -451,16 +470,14 @@
                 return setTimed($scope, 'statusType', 'statusMessage', 'info', '🔍 전체 데이터를 표시합니다.', 1000, $timeout);
             }
 
-            $scope.filteredItems = $scope.items.filter((item) => ((item.bsNm || '') + '').toLowerCase().indexOf(kw) >= 0);
-            setTimed(
-                $scope,
-                'statusType',
-                'statusMessage',
-                $scope.filteredItems.length ? 'success' : 'error',
-                $scope.filteredItems.length ? `✅ '${($scope.keyword || '').trim()}' 관련 ${$scope.filteredItems.length}건을 찾았습니다.` : `❗ '${($scope.keyword || '').trim()}'에 대한 결과가 없습니다.`,
-                1500,
-                $timeout
-            );
+            $scope.filteredItems = $scope.items.filter((item) => ((item.bsNm || '') + '').toLowerCase().includes(kw));
+
+            const kwDisp = ($scope.keyword || '').trim();
+            if ($scope.filteredItems.length) {
+                setTimed($scope, 'statusType', 'statusMessage', 'success', '✅ "' + kwDisp + '" 관련 ' + $scope.filteredItems.length + '건을 찾았습니다.', 1500, $timeout);
+            } else {
+                setTimed($scope, 'statusType', 'statusMessage', 'error', '❗ "' + kwDisp + '"에 대한 결과가 없습니다.', 1500, $timeout);
+            }
         };
 
         // (홈 탭의 사용자 미니 관리) — 생략(기존 그대로)
@@ -501,6 +518,7 @@
 
         $scope.loadUsers = function () {
             setUserStatus('info', '⏳ 사용자 목록을 불러오는 중...');
+
             const usersP = $http.get('/user').then((res) => normalizeList(res.data));
             const rolesP = $http
                 .get('/api/roles')
@@ -511,7 +529,7 @@
                 .then(function ([users, roles]) {
                     attachRolesToUsers(users, makeRoleIndex(roles));
                     $scope.users = users;
-                    setUserStatus('success', `👤 사용자 ${$scope.users.length}명 불러왔습니다.`, 1500);
+                    setUserStatus('success', '👤 사용자 ' + $scope.users.length + '명 불러왔습니다.', 1500);
                 })
                 .catch(function () {
                     setUserStatus('error', '❌ 사용자 목록을 불러오지 못했습니다.', 2500);
@@ -535,7 +553,8 @@
                     created._isAdmin = false;
                     $scope.users.unshift(created);
                     $scope.newUser = { name: '', email: '' };
-                    setUserStatus('success', `✅ 추가 완료 (ID: ${created.user_id || created.userId || created.id || '알 수 없음'})`, 1500);
+                    const id = created.user_id || created.userId || created.id || '알 수 없음';
+                    setUserStatus('success', '✅ 추가 완료 (ID: ' + id + ')', 1500);
                 })
                 .catch(function () {
                     setUserStatus('error', '❌ 사용자 추가에 실패했습니다.', 2500);
@@ -548,12 +567,14 @@
             u._editPhone = u.phone || u.tel || u.phoneNumber || '';
             u._editEmail = u.email;
         };
+
         $scope.cancelEdit = function (u) {
             u._editing = false;
             u._editName = '';
             u._editPhone = '';
             u._editEmail = '';
         };
+
         $scope.saveEdit = function (u) {
             const idKey = u && (u.user_id || u.userId || u.id);
             if (!idKey) return setUserStatus('error', 'ID를 찾을 수 없어 수정할 수 없습니다.', 2000);
@@ -572,7 +593,7 @@
 
             if (!Object.keys(payload).length) return $scope.cancelEdit(u);
 
-            setUserStatus('info', `⏳ 수정 중... (ID: ${idKey})`);
+            setUserStatus('info', '⏳ 수정 중... (ID: ' + idKey + ')', 0);
             $http
                 .put('/user/' + encodeURIComponent(idKey), payload)
                 .then(function (res) {
@@ -581,22 +602,23 @@
                     u.phone = updated.phone ?? phone ?? u.phone;
                     u.email = updated.email ?? email ?? u.email;
                     $scope.cancelEdit(u);
-                    setUserStatus('success', `✅ 수정 완료 (ID: ${idKey})`, 1500);
+                    setUserStatus('success', '✅ 수정 완료 (ID: ' + idKey + ')', 1500);
                 })
                 .catch(function () {
                     setUserStatus('error', '❌ 수정에 실패했습니다.', 2500);
                 });
         };
+
         $scope.deleteUser = function (u) {
             const idKey = u && (u.user_id || u.userId || u.id);
             if (!idKey) return setUserStatus('error', 'ID를 찾을 수 없어 삭제할 수 없습니다.', 2000);
-            if (!confirm(`정말로 삭제할까요? (ID: ${idKey})`)) return;
+            if (!confirm('정말로 삭제할까요? (ID: ' + idKey + ')')) return;
 
             $http
                 .delete('/user/' + encodeURIComponent(idKey))
                 .then(function () {
                     $scope.users = $scope.users.filter((row) => (row.user_id || row.userId || row.id) !== idKey);
-                    setUserStatus('success', `🗑️ 삭제 완료 (ID: ${idKey})`, 1500);
+                    setUserStatus('success', '🗑️ 삭제 완료 (ID: ' + idKey + ')', 1500);
                 })
                 .catch(function () {
                     setUserStatus('error', '❌ 삭제에 실패했습니다.', 2500);
@@ -613,7 +635,9 @@
         $scope.posts = [];
         $scope.loading = false;
         $scope.newPost = { title: '', content: '', files: null }; // ← 파일 필드 추가
+
         $scope.showComposer = false;
+
         $scope.pageSizes = [5, 10, 15, 20];
         $scope.pageSize = 10;
         $scope.page = 0;
@@ -692,7 +716,7 @@
             // 검색 패널을 토글(또는 지정한 상태로) 여닫는 함수.
             $scope.searchOpen =
                 typeof open === 'boolean'
-                    ? open // 인자로 불린이 왔으면 그 값 그대로 쓰고, ? open
+                    ? open // 인자로 불린이 왔으면 그 값 그대로 쓰고,
                     : !$scope.searchOpen; // 아니면 현재 상태를 반전시킴(토글).
 
             if ($scope.searchOpen) {
@@ -760,6 +784,7 @@
         // 🪪 게시글 고유 UID 생성 함수
         function makePostUid(p, idx) {
             const cand = [isNum(p.postId) ? String(p.postId) : null, isNum(p.id) ? String(p.id) : null, p.post_uuid, p.postUuid, p.uuid, p.idStr, p.postIdStr, p.key, p._key != null ? String(p._key) : null].filter(isNonEmptyStr);
+
             if (cand.length) return cand[0];
             return 'tmp-' + Date.now() + '-' + (idx == null ? Math.random().toString(36).slice(2) : idx);
         }
@@ -793,6 +818,7 @@
                     const list = Array.isArray(data.content) ? data.content : Array.isArray(data.rows) ? data.rows : Array.isArray(data.list) ? data.list : Array.isArray(data) ? data : [];
 
                     const src = Array.isArray(list) ? list : [];
+
                     $scope.posts = src.map((p, i) => {
                         const r = resolvePostKey(p);
                         p._keyType = r.type;
@@ -800,6 +826,7 @@
                         p._uid = makePostUid(p, i);
                         return p;
                     });
+
                     // ─── 서버 페이지/전체 수치 동기화 ───
                     $scope.page = typeof data.page === 'number' ? data.page : typeof data.number === 'number' ? data.number : $scope.page;
 
@@ -842,24 +869,28 @@
                 $scope.loadPosts();
             }
         };
+
         $scope.prev = function () {
             if ($scope.page > 0) {
                 $scope.page--;
                 $scope.loadPosts();
             }
         };
+
         $scope.next = function () {
             if ($scope.page < $scope.pages - 1) {
                 $scope.page++;
                 $scope.loadPosts();
             }
         };
+
         $scope.last = function () {
             if ($scope.page < $scope.pages - 1) {
                 $scope.page = $scope.pages - 1;
                 $scope.loadPosts();
             }
         };
+
         $scope.go = function (p) {
             var target = parseInt(p, 10);
             if (isFinite(target) && target >= 0 && target < $scope.pages && target !== $scope.page) {
@@ -867,11 +898,13 @@
                 $scope.loadPosts();
             }
         };
+
         $scope.changeSize = function () {
             $scope.pageSize = toInt($scope.pageSize, 10);
             $scope.page = 0;
             $scope.loadPosts();
         };
+
         $scope.onSize = function () {
             $scope.changeSize();
         };
@@ -879,9 +912,11 @@
         $scope.pageRange = function () {
             var totalPages = parseInt($scope.pages, 10);
             if (!isFinite(totalPages) || totalPages < 1) totalPages = 1;
+
             var cur = parseInt($scope.page, 10);
             if (!isFinite(cur) || cur < 0) cur = 0;
             if (cur > totalPages - 1) cur = totalPages - 1;
+
             var arr = [];
             var start = Math.max(0, cur - 2);
             var end = Math.min(totalPages - 1, cur + 2);
@@ -908,11 +943,13 @@
 
         $scope.loadComments = function (p) {
             const url = p._keyType === 'num' ? '/api/posts/' + encodeURIComponent(p._key) + '/comments' : p._keyType === 'str' ? '/api/posts/key/' + encodeURIComponent(p._key) + '/comments' : null;
+
             if (!url) {
                 p.comments = [];
                 p._commentsLoaded = true;
                 return;
             }
+
             $http.get(url).then((res) => {
                 p.comments = decorateComments(Array.isArray(res.data) ? res.data : []);
                 p._commentsLoaded = true;
@@ -923,8 +960,10 @@
         $scope.addComment = function (p) {
             const text = (p._newComment || '').trim();
             if (!text) return;
+
             const url = p._keyType === 'num' ? '/api/posts/' + encodeURIComponent(p._key) + '/comments' : p._keyType === 'str' ? '/api/posts/key/' + encodeURIComponent(p._key) + '/comments' : null;
             if (!url) return alert('이 글은 댓글 기능을 사용할 수 없습니다.');
+
             $http.post(url, { content: text }).then((res) => {
                 const created = res.data || {};
                 p.comments = p.comments || [];
@@ -937,15 +976,20 @@
             c._replying = true;
             c._replyText = '';
         };
+
         $scope.cancelReply = function (c) {
             c._replying = false;
             c._replyText = '';
         };
+
         $scope.submitReply = function (p, parent) {
             const text = (parent._replyText || '').trim();
             if (!text) return;
+
             if (!parent || !parent.uuid) return alert('이 댓글은 대댓글 키(uuid)를 알 수 없습니다.');
+
             const url = '/api/comments/key/' + encodeURIComponent(parent.uuid) + '/replies';
+
             $http
                 .post(url, { content: text })
                 .then((res) => {
@@ -965,14 +1009,17 @@
             c._editing = true;
             c._editContent = c.content;
         };
+
         $scope.cancelEditComment = function (c) {
             c._editing = false;
             c._editContent = '';
         };
+
         $scope.saveComment = function (p, c) {
             if (!canEditComment(c)) return alert('본인이 쓴 댓글만 수정할 수 있습니다.');
             const newText = (c._editContent || '').trim();
             if (!newText) return;
+
             if (!c.uuid) return alert('이 댓글은 수정용 키를 알 수 없어 수정할 수 없습니다.');
 
             $http
@@ -1024,11 +1071,11 @@
                     });
                 return;
             }
+
             alert('이 댓글은 삭제용 키를 알 수 없어 삭제할 수 없습니다.');
         };
 
         // ====== ★ 게시글 CRUD(추가) — 저장 후 항상 새로고침 ======
-
         // 새 게시글(폴더/파일/일반글) 생성
         $scope.createPost = function () {
             if (!$scope.newPost) $scope.newPost = {};
@@ -1158,22 +1205,16 @@
         };
 
         // ★★ 게시글 상세보기로 이동 (제목 클릭 시 사용)
-        // ★★ 게시글 상세보기로 이동 (제목 클릭 시 사용)
         $scope.goDetail = function (p) {
             if (!p) return;
-
             var info = resolvePostKey(p); // { type:'num'|'str', key: ... }
             if (!info || !info.key) {
                 alert('상세 보기용 키가 없습니다.');
                 return;
             }
-
             var code = ($scope.boardCode || '').toLowerCase(); // 'bus' / 'norm'
             if (!code) code = 'bus';
-
-            // 예) #/board/bus/view/550e8400-... ?type=str
             var url = '#/board/' + encodeURIComponent(code) + '/view/' + encodeURIComponent(info.key) + '?type=' + encodeURIComponent(info.type || 'str');
-
             window.location.hash = url;
         };
     });
@@ -1209,12 +1250,14 @@
         // ★ 파일 메타 1개를 표준 형태로 정규화
         function normalizeFileMeta(raw) {
             if (!raw) return null;
-
             const url = raw.url || raw.fileUrl || raw.downloadUrl || raw.path || raw.link || null;
             const fileName = raw.originalFilename || raw.fileName || raw.filename || raw.name || raw.originName || null;
             const fileType = raw.fileType || raw.type || raw.contentType || null;
-
-            return { url: url, fileName: fileName, fileType: fileType };
+            return {
+                url: url,
+                fileName: fileName,
+                fileType: fileType,
+            };
         }
 
         // ★ file_list_json 문자열을 배열로 안전하게 파싱 + 정규화
@@ -1223,7 +1266,6 @@
             try {
                 const v = JSON.parse(json);
                 let arr = [];
-
                 if (Array.isArray(v)) arr = v;
                 else if (v && Array.isArray(v.files)) arr = v.files;
                 else if (v && Array.isArray(v.list)) arr = v.list;
@@ -1243,7 +1285,7 @@
         }
 
         // ─────────────────────────────
-        //  첨부 이미지 미리보기 크기 상태 + 토큰과 연동
+        // 첨부 이미지 미리보기 크기 상태 + 토큰과 연동
         // ─────────────────────────────
         $scope.previewWidths = []; // 첨부파일별 width(%) 저장
 
@@ -1255,6 +1297,7 @@
             var re = new RegExp('\\[\\[file\\s*:\\s*' + n + '(?:\\s+width\\s*=\\s*(\\d+))?\\s*\\]\\]');
             var m = re.exec(content);
             if (!m) return null;
+
             if (m[1]) {
                 var w = parseInt(m[1], 10);
                 if (isFinite(w) && w > 0 && w <= 100) return w;
@@ -1267,7 +1310,6 @@
             if (!$scope.form) return;
             var n = index + 1;
             var content = $scope.form.content || '';
-
             var re = new RegExp('\\[\\[file\\s*:\\s*' + n + '(?:\\s+width\\s*=\\s*\\d+)?\\s*\\]\\]');
             var token = '[[file:' + n + ' width=' + width + ']]';
 
@@ -1348,9 +1390,10 @@
             const title = ($scope.form.title || '').trim();
             const content = ($scope.form.content || '').trim();
             if (!title) return alert('제목을 입력하세요.');
-            if ($scope.saving) return;
 
+            if ($scope.saving) return;
             $scope.saving = true;
+
             const fd = new FormData();
             fd.append('title', title);
             fd.append('content', content);
@@ -1387,9 +1430,7 @@
         fetchOne();
     });
 
-    // ───────────────── 게시글 상세 보기 컨트롤러 (★ 추가) ─────────────────
     // ───────────────── 게시글 상세 보기 컨트롤러 ─────────────────
-    // src/main/resources/static/app.js 안의 BoardViewCtrl
     // src/main/resources/static/app.js 안의 BoardViewCtrl 부분
     app.controller('BoardViewCtrl', function ($scope, $http, $routeParams, $location, AuthService, $sce) {
         $scope.loading = true;
@@ -1421,7 +1462,6 @@
             try {
                 const v = JSON.parse(json);
                 let arr = [];
-
                 if (Array.isArray(v)) arr = v;
                 else if (v && Array.isArray(v.files)) arr = v.files;
                 else if (v && Array.isArray(v.list)) arr = v.list;
@@ -1446,6 +1486,7 @@
             var name = fileOrName;
             if (fileOrName.fileName) name = fileOrName.fileName;
             if (fileOrName.name) name = fileOrName.name;
+
             var idx = name.lastIndexOf('.');
             if (idx < 0) return '확장자 없음';
             return name.substring(idx + 1).toLowerCase();
@@ -1553,7 +1594,6 @@
         // ───────────────── 게시글 로딩 ─────────────────
         function loadOne() {
             $scope.loading = true;
-
             let url = null;
             if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
             else url = '/api/posts/key/' + encodeURIComponent(key);
@@ -1579,6 +1619,7 @@
                     p.fileCount = p.attachments.length;
 
                     $scope.post = p;
+
                     // 🔥 본문 HTML 생성 ( [[file:n width=...]] 치환 )
                     $scope.renderedContent = buildRenderedContent(p);
                 })
@@ -1607,6 +1648,12 @@
         $scope.loadPosts();
     });
 
+    app.controller('BoardBigCtrl', function ($scope, $controller) {
+        angular.extend(this, $controller('BoardBaseCtrl', { $scope }));
+        $scope.boardCode = 'BIG'; // DB의 board.code 값이 'BIG'이라고 가정
+        $scope.loadPosts();
+    });
+
     // ───────────────── Roles ─────────────────
     app.controller('RolesCtrl', function ($scope, $http, $timeout, AuthService) {
         $scope.isAdmin = false;
@@ -1618,6 +1665,7 @@
         $scope.msgType = 'info';
 
         $scope.q = { type: 'username', keyword: '' };
+
         $scope.pageSizes = [5, 10, 15, 20];
         $scope.pageSize = 10;
         $scope.page = 0;
@@ -1630,6 +1678,7 @@
             $scope.msg = text;
             if (ms) $timeout(() => ($scope.msg = ''), ms);
         }
+
         function num(v, def) {
             const n = parseInt(v, 10);
             return isFinite(n) ? n : def == null ? 0 : def;
@@ -1638,6 +1687,7 @@
         $scope.pageSizeNum = function () {
             return Math.max(1, num($scope.pageSize, 10));
         };
+
         $scope.pagesCount = function () {
             const total = ($scope.filtered || []).length;
             const size = $scope.pageSizeNum();
@@ -1649,20 +1699,24 @@
                 .trim()
                 .toLowerCase();
             if (!kw) return true;
+
             if (q.type === 'username') {
                 const userStr = [row.username, row.userId, row.name, row.email].filter(Boolean).join(' ').toLowerCase();
                 return userStr.indexOf(kw) >= 0;
             }
+
             if (q.type === 'role') {
                 const roleStr = String(row.role || 'ROLE_USER').toLowerCase();
                 return roleStr.indexOf(kw) >= 0;
             }
+
             return true;
         }
 
         function repage() {
             const size = $scope.pageSizeNum();
             const pages = $scope.pagesCount();
+
             if ($scope.page >= pages) $scope.page = pages - 1;
             if ($scope.page < 0) $scope.page = 0;
 
@@ -1681,6 +1735,7 @@
         $scope.applySearch = function () {
             refilter();
         };
+
         $scope.resetSearch = function () {
             $scope.q = { type: 'username', keyword: '' };
             refilter();
@@ -1690,18 +1745,21 @@
             $scope.page = 0;
             repage();
         };
+
         $scope.first = function () {
             if ($scope.page > 0) {
                 $scope.page = 0;
                 repage();
             }
         };
+
         $scope.prev = function () {
             if ($scope.page > 0) {
                 $scope.page--;
                 repage();
             }
         };
+
         $scope.next = function () {
             const pages = $scope.pagesCount();
             if ($scope.page < pages - 1) {
@@ -1709,6 +1767,7 @@
                 repage();
             }
         };
+
         $scope.last = function () {
             const pages = $scope.pagesCount();
             if ($scope.page < pages - 1) {
@@ -1716,6 +1775,7 @@
                 repage();
             }
         };
+
         $scope.go = function (p) {
             const pages = $scope.pagesCount();
             p = num(p, 0);
@@ -1724,6 +1784,7 @@
                 repage();
             }
         };
+
         $scope.pageRange = function () {
             const pages = $scope.pagesCount();
             const cur = num($scope.page, 0);
@@ -1763,19 +1824,21 @@
 
         $scope.changeRole = function (row, newRole) {
             if (!row || !row.username || !$scope.isAdmin) return;
+
             const target = String(newRole || '').toUpperCase();
             if (target !== 'ROLE_ADMIN' && target !== 'ROLE_USER') return;
 
             $scope.saving = true;
+
             $http
-                .put('/api/roles/' + encodeURIComponent(row.username), {
-                    role: target,
-                })
+                .put('/api/roles/' + encodeURIComponent(row.username), { role: target })
                 .then(() => {
                     row.role = target;
                     notify('success', '저장되었습니다.', 1200);
+
                     const idx = ($scope.sourceRows || []).findIndex((r) => r.username === row.username);
                     if (idx >= 0) $scope.sourceRows[idx].role = target;
+
                     refilter();
                 })
                 .catch((err) => notify('error', err && err.data ? err.data : '저장 중 오류가 발생했습니다.', 2500))
@@ -1801,11 +1864,13 @@
     // ───────────────── DB Users ─────────────────
     app.controller('DbUsersCtrl', function ($scope, $http, $q, $location, AuthService) {
         $scope.isAdmin = false;
+
         $scope.users = [];
         $scope.userStatusMessage = '';
         $scope.userStatusType = '';
 
         $scope.q = { type: 'username', keyword: '' };
+
         $scope.pageSizes = [5, 10, 15, 20];
         $scope.pageSize = 10;
         $scope.page = 0;
@@ -1829,11 +1894,13 @@
             if (!obj) return new Set();
             return new Set([obj.user_id, obj.userId, obj.id, obj.email, obj.username, obj.name].filter(Boolean).map((s) => String(s).trim().toLowerCase()));
         }
+
         function makeRoleIndex(roleRows) {
             const idx = new Map();
             (roleRows || []).forEach((r) => buildKeySet(r).forEach((k) => idx.set(k, { role: r.role })));
             return idx;
         }
+
         function attachRolesToUsers(users, roleIndex) {
             (users || []).forEach((u) => {
                 let matched = null;
@@ -1859,11 +1926,9 @@
                 return userStr.indexOf(kw) >= 0;
             }
             if (q.type === 'email') {
-                return (
-                    String(u.email || '')
-                        .toLowerCase()
-                        .indexOf(kw) >= 0
-                );
+                return String(u.email || '')
+                    .toLowerCase()
+                    .includes(kw);
             }
             if (q.type === 'phone') {
                 const phoneStr = [u.phone, u.tel, u.phoneNumber].filter(Boolean).join(' ').toLowerCase();
@@ -1881,8 +1946,10 @@
             const size = Math.max(1, toIntLocal($scope.pageSize, 10));
             const total = ($scope.filtered || []).length;
             $scope.pages = Math.max(1, Math.ceil(total / size));
+
             if ($scope.page >= $scope.pages) $scope.page = $scope.pages - 1;
             if ($scope.page < 0) $scope.page = 0;
+
             const start = $scope.page * size;
             $scope.paged = ($scope.filtered || []).slice(start, start + size);
         }
@@ -1896,6 +1963,7 @@
         $scope.applySearch = function () {
             refilter();
         };
+
         $scope.resetSearch = function () {
             $scope.q = { type: 'username', keyword: '' };
             refilter();
@@ -1906,30 +1974,35 @@
             $scope.page = 0;
             repage();
         };
+
         $scope.first = function () {
             if ($scope.page > 0) {
                 $scope.page = 0;
                 repage();
             }
         };
+
         $scope.prev = function () {
             if ($scope.page > 0) {
                 $scope.page--;
                 repage();
             }
         };
+
         $scope.next = function () {
             if ($scope.page < $scope.pages - 1) {
                 $scope.page++;
                 repage();
             }
         };
+
         $scope.last = function () {
             if ($scope.page < $scope.pages - 1) {
                 $scope.page = $scope.pages - 1;
                 repage();
             }
         };
+
         $scope.go = function (p) {
             p = toIntLocal(p, 0);
             if (p >= 0 && p < $scope.pages && p !== $scope.page) {
@@ -1937,6 +2010,7 @@
                 repage();
             }
         };
+
         $scope.pageRange = function () {
             const arr = [];
             const start = Math.max(0, $scope.page - 2);
@@ -1949,6 +2023,7 @@
 
         $scope.loadUsers = function () {
             if (!$scope.isAdmin) return;
+
             setUserStatus('info', '⏳ 사용자 목록을 불러오는 중...');
 
             const usersP = $http.get('/user').then((res) => normalizeList(res.data));
@@ -1961,7 +2036,7 @@
                 .then(function ([users, roles]) {
                     attachRolesToUsers(users, makeRoleIndex(roles));
                     $scope.users = users;
-                    setUserStatus('success', `👤 사용자 ${$scope.users.length}명 불러왔습니다.`, 1500);
+                    setUserStatus('success', '👤 사용자 ' + $scope.users.length + '명 불러왔습니다.', 1500);
                     refilter();
                 })
                 .catch(function () {
@@ -1976,6 +2051,7 @@
             u._editPhone = u.phone || u.tel || u.phoneNumber || '';
             u._editEmail = u.email;
         };
+
         $scope.cancelEdit = function (u) {
             if (!$scope.isAdmin) return;
             u._editing = false;
@@ -1983,12 +2059,15 @@
             u._editPhone = '';
             u._editEmail = '';
         };
+
         $scope.saveEdit = function (u) {
             if (!$scope.isAdmin) return;
+
             const idKey = u && (u.user_id || u.userId || u.id);
             if (!idKey) return setUserStatus('error', 'ID를 찾을 수 없어 수정할 수 없습니다.', 2000);
 
             const payload = {};
+
             const name = (u._editName || '').trim();
             const phone = (u._editPhone || '').trim();
             const email = (u._editEmail || '').trim();
@@ -1999,9 +2078,10 @@
                 if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setUserStatus('error', '이메일 형식이 올바르지 않습니다.', 2000);
                 payload.email = email;
             }
+
             if (!Object.keys(payload).length) return $scope.cancelEdit(u);
 
-            setUserStatus('info', `⏳ 수정 중... (ID: ${idKey})`);
+            setUserStatus('info', '⏳ 수정 중... (ID: ' + idKey + ')', 0);
             $http
                 .put('/user/' + encodeURIComponent(idKey), payload)
                 .then(function (res) {
@@ -2009,25 +2089,29 @@
                     u.name = updated.name ?? name ?? u.name;
                     u.phone = updated.phone ?? phone ?? u.phone;
                     u.email = updated.email ?? email ?? u.email;
+
                     $scope.cancelEdit(u);
-                    setUserStatus('success', `✅ 수정 완료 (ID: ${idKey})`, 1500);
+                    setUserStatus('success', '✅ 수정 완료 (ID: ' + idKey + ')', 1500);
                     refilter();
                 })
                 .catch(function () {
                     setUserStatus('error', '❌ 수정에 실패했습니다.', 2500);
                 });
         };
+
         $scope.deleteUser = function (u) {
             if (!$scope.isAdmin) return;
+
             const idKey = u && (u.user_id || u.userId || u.id);
             if (!idKey) return setUserStatus('error', 'ID를 찾을 수 없어 삭제할 수 없습니다.', 2000);
-            if (!confirm(`정말로 삭제할까요? (ID: ${idKey})`)) return;
+
+            if (!confirm('정말로 삭제할까요? (ID: ' + idKey + ')')) return;
 
             $http
                 .delete('/user/' + encodeURIComponent(idKey))
                 .then(function () {
                     $scope.users = $scope.users.filter((row) => (row.user_id || row.userId || row.id) !== idKey);
-                    setUserStatus('success', `🗑️ 삭제 완료 (ID: ${idKey})`, 1500);
+                    setUserStatus('success', '🗑️ 삭제 완료 (ID: ' + idKey + ')', 1500);
                     refilter();
                 })
                 .catch(function () {
@@ -2056,6 +2140,7 @@
         $scope.addRow = function () {
             $scope.rows.push({ user_id: '', name: '', phone: '', email: '' });
         };
+
         $scope.removeRow = function (i) {
             $scope.rows.splice(i, 1);
             if ($scope.rows.length === 0) $scope.addRow();
@@ -2073,14 +2158,15 @@
             if (r.user_id && !uidRe.test(r.user_id.trim())) return false;
             return true;
         }
+
         $scope.allValid = function () {
             return $scope.rows.every(rowValid);
         };
 
         $scope.saveAll = function (frm) {
             if (frm.$invalid || !$scope.allValid() || $scope.saving) return;
-            $scope.saving = true;
 
+            $scope.saving = true;
             const tasks = $scope.rows.map(function (r) {
                 const payload = {
                     name: (r.name || '').trim(),
@@ -2118,6 +2204,7 @@
     app.controller('DemoController', function ($http) {
         var vm = this;
         vm.result = '(아직 요청 전)';
+
         vm.load = function () {
             $http
                 .get('/api/users')

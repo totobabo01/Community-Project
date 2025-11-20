@@ -10,8 +10,9 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // "uploads" 폴더를 정적 리소스로 노출
+        // /uploads/** 로 들어오는 요청을 C:/upload 폴더의 실제 파일로 매핑
+        // 예) /uploads/test.jpg  →  C:/upload/test.jpg
         registry.addResourceHandler("/uploads/**")
-                .addResourceLocations("file:uploads/"); // 프로젝트 실행 위치 기준 "uploads" 디렉터리
+                .addResourceLocations("file:C:/upload/");
     }
 }
