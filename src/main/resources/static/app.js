@@ -811,8 +811,17 @@
                 }
             }
 
+            // 🔥 여기만 수정
+            let url;
+            if ($scope.boardCode === 'BIG') {
+                // 기존: url = '/api/big-posts';
+                url = '/api/big-board/posts'; // ✅ 컨트롤러 주소와 동일하게
+            } else {
+                url = '/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts';
+            }
+
             $http
-                .get('/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts', { params })
+                .get(url, { params })
                 .then((res) => {
                     const data = res.data || {};
                     const list = Array.isArray(data.content) ? data.content : Array.isArray(data.rows) ? data.rows : Array.isArray(data.list) ? data.list : Array.isArray(data) ? data : [];
@@ -827,7 +836,7 @@
                         return p;
                     });
 
-                    // ─── 서버 페이지/전체 수치 동기화 ───
+                    // 이하 페이지/total 계산 부분은 기존 코드 그대로 두면 됨
                     $scope.page = typeof data.page === 'number' ? data.page : typeof data.number === 'number' ? data.number : $scope.page;
 
                     $scope.pageSize = toInt(typeof data.size === 'number' ? data.size : $scope.pageSize, 10);
@@ -1205,17 +1214,64 @@
         };
 
         // ★★ 게시글 상세보기로 이동 (제목 클릭 시 사용)
+        // 게시글 목록에서 개별 게시글을 클릭했을 때 "상세보기" 화면으로 이동시키는 함수
         $scope.goDetail = function (p) {
+            // p: 목록에서 선택된 게시글 객체(한 줄 데이터)
+            // 예: { postId: 1, uuid: '...', title: '제목', ... }
+
             if (!p) return;
+            // p가 null / undefined / 잘못된 값이면 더 진행하지 않고 함수 종료
+            // (방어 코드: 클릭 이벤트가 잘못 들어온 경우 대비)
+
             var info = resolvePostKey(p); // { type:'num'|'str', key: ... }
+            // resolvePostKey(p):
+            //   - 게시글 객체 p 안에서 "상세 조회에 쓸 수 있는 키"를 찾아서
+            //     { type: 'num' 또는 'str', key: 실제값 } 형태로 돌려주는 헬퍼 함수.
+            //   - 예) 숫자 PK 사용: { type: 'num', key: 123 }
+            //       UUID/문자열 PK 사용: { type: 'str', key: '7f2d-aaaa-...' }
+
             if (!info || !info.key) {
+                // info 자체가 없거나, info.key 값이 비어 있으면
+                // → 이 글을 상세보기로 가져갈 수 있는 식별자가 없다는 뜻
                 alert('상세 보기용 키가 없습니다.');
+                // 사용자에게 경고창을 띄우고
                 return;
+                // 상세 화면으로 이동하지 않고 함수 종료
             }
+
             var code = ($scope.boardCode || '').toLowerCase(); // 'bus' / 'norm'
+            // 현재 컨트롤러(게시판 목록)가 어떤 게시판인지 나타내는 코드
+            //  - $scope.boardCode: 'BUS', 'NORM' 등일 수 있음
+            //  - 없을 경우를 대비해 기본값 ''(빈 문자열) 사용
+            //  - .toLowerCase() 로 'BUS' → 'bus', 'NORM' → 'norm' 으로 통일
+
             if (!code) code = 'bus';
+            // 만약 boardCode가 전혀 설정되어 있지 않아서 code가 빈 문자열이면
+            // 기본 게시판을 'bus' 로 가정 (대구버스 게시판을 기본값으로)
+
             var url = '#/board/' + encodeURIComponent(code) + '/view/' + encodeURIComponent(info.key) + '?type=' + encodeURIComponent(info.type || 'str');
+            // AngularJS hash 기반 라우팅을 위한 URL 문자열 구성
+            //
+            // 최종 형태 예시:
+            //   "#/board/bus/view/123?type=num"
+            //   "#/board/norm/view/550e8400-e29b-41d4-a716-446655440000?type=str"
+            //
+            // encodeURIComponent(..):
+            //   - code나 key, type 안에 공백/한글/특수문자가 있어도
+            //     URL에 안전하게 들어갈 수 있게 인코딩해 줌.
+            //
+            // info.type || 'str':
+            //   - info.type이 없으면 기본값으로 'str'(문자열 키) 사용.
+
             window.location.hash = url;
+            // 브라우저 주소창의 hash 부분을 위에서 만든 URL로 변경
+            //   예: http://localhost:8080/index.html#/board/bus
+            //   →   http://localhost:8080/index.html#/board/bus/view/123?type=num
+            //
+            // AngularJS 의 ngRoute가 이 hash 변경을 감지하고
+            //   1) 해당 라우트에 등록된 템플릿(상세보기 HTML)을 로딩하고
+            //   2) 해당 라우트에 연결된 컨트롤러(BoardViewCtrl 등)를 실행해서
+            //      실제로 게시글 상세 내용을 화면에 그려 줌.
         };
     });
 
@@ -1324,8 +1380,25 @@
 
         // 버튼에서 호출: 토큰 수정 + 미리보기 width 반영
         $scope.setFileWidth = function (index, width) {
-            applyWidthToContent(index, width);
-            $scope.previewWidths[index] = width || 100;
+            // width 인자가 숫자(30, 60, 100 등)로 들어오면
+            // 100 이하는 % 단위로, 100 초과는 px 단위로 쓰도록 문자열로 변환
+            var w = width;
+            if (typeof w === 'number') {
+                if (w > 0 && w <= 100) {
+                    // 0~100 => 퍼센트
+                    w = w + '%'; // 예: 30 -> "30%"
+                } else {
+                    // 100 초과 => px
+                    w = parseInt(w, 10) + 'px';
+                }
+            }
+
+            // 토큰에 width 값 반영
+            applyWidthToContent(index, w);
+
+            // 미리보기용 숫자 값 저장 (퍼센트/px 상관 없이 숫자만 뽑기)
+            var num = parseInt(w, 10);
+            $scope.previewWidths[index] = isFinite(num) && num > 0 ? num : 100;
         };
 
         function fetchOne() {
@@ -1432,178 +1505,278 @@
 
     // ───────────────── 게시글 상세 보기 컨트롤러 ─────────────────
     // src/main/resources/static/app.js 안의 BoardViewCtrl 부분
+    // ───────────────── 게시글 상세 보기 컨트롤러 ─────────────────
+    // src/main/resources/static/app.js 안의 BoardViewCtrl 부분
     app.controller('BoardViewCtrl', function ($scope, $http, $routeParams, $location, AuthService, $sce) {
+        // 처음에 로딩 중 상태를 true로 설정 (스피너 등 표시용)
         $scope.loading = true;
+        // 현재 보고 있는 게시글 데이터 객체 (서버에서 받아서 채움)
         $scope.post = null;
+        // 토큰([[file:n ...]])이 치환된 HTML 버전 본문을 저장할 변수
         $scope.renderedContent = null; // ← 본문 HTML 버전
 
-        const code = String($routeParams.code || '').toUpperCase(); // 'BUS' / 'NORM'
+        // URL 파라미터에서 게시판 코드 추출 (bus / norm / big 등, 소문자로 통일)
+        const rawCode = String($routeParams.code || '').toLowerCase();
+        // URL 파라미터에서 게시글 식별자(숫자 ID든, 문자열 key든) 가져오기
         const key = $routeParams.key;
+        // 쿼리스트링 ?type=num | ?type=str 에서 타입을 읽고 소문자로 통일
         const type = String($location.search().type || 'str').toLowerCase(); // 'num' | 'str'
 
+        // 📌 게시판 코드 → 목록 화면 경로 매핑
+        function getListPath(code) {
+            switch (code) {
+                case 'bus':
+                    return '/board/bus'; // 대구버스 게시판
+                case 'norm':
+                case 'normal':
+                    return '/board/normal'; // 일반 게시판
+                case 'big':
+                    return '/board/big'; // 대용량 게시판 테스트
+                default:
+                    // 혹시 이상한 값이면 기본 대구버스 게시판으로
+                    return '/board/bus';
+            }
+        }
+
+        // 목록 화면으로 돌아가는 함수 (버튼에서 호출)
         function backToList() {
-            const path = '/board/' + code.toLowerCase();
+            const path = getListPath(rawCode);
             $location.path(path).search({});
         }
+        // HTML에서 ng-click="backToList()" 로 쓸 수 있도록 scope에 연결
         $scope.backToList = backToList;
 
         // ───────────────── 파일 메타 정규화 ─────────────────
+        // 백엔드/DB에서 내려오는 파일 정보의 키 이름이 제각각일 수 있으므로
+        // 프론트에서 쓰기 편하게 {url, fileName, fileType, size} 형식으로 통일
+        // normalizeFileMeta = “파일 정보(raw)를 받아서, 프론트에서 쓰기 편한 통일된 형태로 바꿔주는 함수”
         function normalizeFileMeta(raw) {
+            // null/undefined면 바로 null 리턴
             if (!raw) return null;
+            // url 후보들 중 먼저 존재하는 것을 선택 (url, fileUrl, downloadUrl, path, link 등)
             const url = raw.url || raw.fileUrl || raw.downloadUrl || raw.path || raw.link || null;
+            // 파일명 후보들 중 먼저 존재하는 것을 선택
             const fileName = raw.originalFilename || raw.fileName || raw.filename || raw.name || raw.originName || null;
+            // 타입(MIME) 후보들 중 먼저 존재하는 것을 선택
             const fileType = raw.fileType || raw.type || raw.contentType || null;
+            // 파일 크기 후보들 중 먼저 존재하는 것을 선택
             const size = raw.fileSize || raw.size || null;
+            // 통일된 형태의 객체로 반환
             return { url, fileName, fileType, size };
         }
 
+        // file_list_json 문자열을 안전하게 파싱해서 첨부파일 배열로 변환하는 함수
+        // safeParseFileList = “DB에 문자열(JSON)로 저장된 파일 목록을 → ‘안전하게’ JS 배열 + 표준 구조로 바꿔주는 함수”
         function safeParseFileList(json) {
+            // 값이 없으면 첨부 없음 → 빈 배열
             if (!json) return [];
             try {
+                // JSON 문자열을 객체/배열로 파싱
                 const v = JSON.parse(json);
                 let arr = [];
+
+                // 1) 이미 배열이면 그대로 사용
                 if (Array.isArray(v)) arr = v;
+                // 2) { files: [...] } 구조면 그 안의 배열 사용
                 else if (v && Array.isArray(v.files)) arr = v.files;
+                // 3) { list: [...] } 구조면 list 배열 사용
                 else if (v && Array.isArray(v.list)) arr = v.list;
+                // 4) 단일 객체면 [객체]로 감싸서 1개짜리 배열로 취급
                 else if (v && typeof v === 'object') arr = [v];
+                // 5) 그 외에는 비정상 → 빈 배열
                 else arr = [];
 
+                // 정규화된 첨부파일 배열 생성
                 const norm = [];
                 arr.forEach(function (one) {
+                    // raw 메타를 표준 형태로 바꾸기
                     const m = normalizeFileMeta(one);
+                    // url이 있는 경우만 유효한 첨부로 인정
                     if (m && m.url) norm.push(m);
                 });
+                // 정리된 첨부파일 배열 반환
                 return norm;
             } catch (e) {
+                // JSON 파싱 실패 시 콘솔에 경고 찍고 빈 배열 반환
                 console.warn('file_list_json parse error:', e, json);
                 return [];
             }
         }
 
         // ───────────────── 유틸 ─────────────────
+        // 파일 확장자를 뽑아내는 함수 (표시용)
         $scope.getFileExt = function (fileOrName) {
+            // 값이 없으면 "확장자 없음" 반환
             if (!fileOrName) return '확장자 없음';
+            // 우선 문자열이라고 가정
             var name = fileOrName;
+            // 객체로 들어온 경우 fileName 또는 name 필드에서 실제 파일명 추출
             if (fileOrName.fileName) name = fileOrName.fileName;
             if (fileOrName.name) name = fileOrName.name;
 
+            // 마지막 점(.) 위치 찾기
             var idx = name.lastIndexOf('.');
+            // 점이 없으면 확장자 없음
             if (idx < 0) return '확장자 없음';
+            // 점 뒤의 문자열을 잘라 소문자로 리턴 (예: "PNG" → "png")
             return name.substring(idx + 1).toLowerCase();
         };
 
+        // 파일 크기를 사람이 보기 좋은 형태로 포맷팅
         $scope.formatFileSize = function (size) {
+            // 숫자가 아니거나 무한대면 "알 수 없음"
             if (typeof size !== 'number' || !isFinite(size)) return '알 수 없음';
+            // 1KB 미만이면 그대로 B(Byte) 단위
             if (size < 1024) return size + ' B';
+            // KB 단위 변환
             var kb = size / 1024;
             if (kb < 1024) return kb.toFixed(1) + ' KB';
+            // MB 단위 변환
             var mb = kb / 1024;
             if (mb < 1024) return mb.toFixed(2) + ' MB';
+            // GB 단위 변환
             var gb = mb / 1024;
             return gb.toFixed(2) + ' GB';
         };
 
-        // 이미지인지 판단
+        // 이미지인지 판단하는 함수 (첨부파일이 이미지 파일이면 true)
         $scope.isImage = function (f) {
+            // 값이 없으면 이미지 아님
             if (!f) return false;
+            // fileType(MIME) 소문자 버전
             var t = String(f.fileType || '').toLowerCase();
+            // 파일 이름
             var name = String(f.fileName || '');
+            // MIME 타입이 image/ 로 시작하면 이미지로 판단
             if (t.indexOf('image/') === 0) return true;
+            // 아니면 확장자가 이미지 확장자인지 정규식으로 검사
             return /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif)$/i.test(name);
         };
 
-        // HTML 이스케이프 (본문 텍스트 보호용)
+        // HTML 이스케이프 (본문 텍스트를 태그로 오동작하지 않게 보호)
         function escapeHtml(str) {
+            // &, <, >, ", ' 을 HTML 엔티티로 치환
             return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
 
         // ───────────────── 본문 토큰 치환 ─────────────────
-        // [[file:1 width=60]] → <img ...> / <a ...>
-        // width / w 옵션을 읽어서 style에 반영
+        // [[file:1 width=60]] 같은 토큰을 <img> 또는 <a> 태그로 바꾸는 함수
+        // width / w 옵션을 파싱해서 스타일(width: xx%)에 반영
         function buildRenderedContent(p) {
+            // 게시글이나 본문이 없으면 null 반환
             if (!p || !p.content) return null;
 
+            // content 를 문자열로 캐스팅
             var text = String(p.content || '');
 
-            // "[ [[file:1]]" 같은 이상한 형태를 "[[file:1]]" 으로 정리
+            // "[ [[file:1]]" 같은 잘못된 형태를 "[[file:1]]" 로 정리 (공백+대괄호 제거)
             text = text.replace(/\[\s*\[\s*file/gi, '[[file');
 
+            // 첨부파일 목록 (게시글 객체에 미리 세팅해둔 attachments 사용)
             var attachments = p.attachments || [];
 
+            // [[file:숫자 ...]] 를 찾는 전역 정규식
             var re = /\[\[\s*file\s*:(\d+)([^\]]*)\]\]/gi;
+            // 결과 HTML을 누적해서 만들 문자열
             var result = '';
+            // 마지막으로 처리한 인덱스 (앞부분 일반 텍스트 잘라내는 용도)
             var lastIndex = 0;
+            // 정규식 매치 결과를 담을 변수
             var m;
 
+            // 정규식으로 본문 전체를 돌면서 토큰 하나씩 처리
             while ((m = re.exec(text)) !== null) {
-                // 토큰 앞의 일반 텍스트
+                // 현재 토큰 앞에 있는 일반 텍스트 부분
                 var before = text.slice(lastIndex, m.index);
+                // 그 부분을 HTML escape + 줄바꿈을 <br/>로 치환해서 결과에 추가
                 result += escapeHtml(before).replace(/\n/g, '<br/>');
 
+                // m[1] = file 번호 (1부터 시작), 정수로 변환
                 var n = parseInt(m[1], 10); // 파일 번호(1-base)
+                // 배열 인덱스는 0부터이므로 n-1
                 var idx = isNaN(n) ? -1 : n - 1;
+                // 해당 첨부파일 객체 (없으면 undefined)
                 var att = attachments[idx];
 
-                // width / w 파라미터 파싱 (width=30, width=60%, w=100 등)
+                // m[2]는 토큰 안의 옵션 문자열 (예: " width=60" 같은 부분)
                 var paramStr = m[2] || '';
+                // width=30, width=60%, w=100 등 형태를 찾는 정규식
                 var widthMatch = paramStr.match(/(?:width|w)\s*=\s*([0-9]{1,4}%?)/i);
+                // 캡쳐된 값이 있으면 widthVal, 없으면 null
                 var widthVal = widthMatch && widthMatch[1] ? widthMatch[1] : null;
 
-                // 인라인 스타일 문자열
+                // 인라인 스타일 문자열을 담을 변수
                 var styleAttr = '';
 
-                // 🔹 width 지정이 없으면 기본 100% (내용 영역 기준으로 꽉 차게)
+                // 🔹 width 지정이 없는 경우 기본 100%로 설정 (본문 폭 꽉 채우기)
                 if (!widthVal) {
                     widthVal = '100%';
                 }
 
+                // 값이 "%" 로 끝나면 퍼센트 단위
                 if (/%$/.test(widthVal)) {
-                    // 퍼센트
+                    // 예: widthVal = "60%" → width:60% + max-width:100% + 가운데 정렬 스타일
                     styleAttr = 'style="max-width:100%;width:' + widthVal + ';height:auto;border-radius:10px;display:block;margin:0 auto;"';
                 } else {
-                    // px
+                    // 그 외에는 px 단위로 가정 (예: width=600 → 600px)
                     styleAttr = 'style="max-width:100%;width:' + parseInt(widthVal, 10) + 'px;height:auto;border-radius:10px;display:block;margin:0 auto;"';
                 }
 
+                // 해당 번호에 해당하는 첨부가 실제로 존재하고, url도 있으면
                 if (att && att.url) {
+                    // img src 로 쓸 안전한 URL (여기서는 그대로 사용)
                     var safeUrl = att.url;
+                    // alt, 링크 텍스트로 쓸 파일명 (escape 해서 사용)
                     var safeName = escapeHtml(att.fileName || '첨부파일 ' + n);
 
+                    // 이미지 파일이면 <img> 태그로 치환
                     if ($scope.isImage(att)) {
-                        // 이미지
+                        // 이미지 태그를 감싸는 div + img 태그 HTML을 result에 추가
                         result += '<div class="inline-img-wrap">' + '<img class="inline-img" src="' + safeUrl + '" alt="' + safeName + '" ' + styleAttr + '/>' + '</div>';
                     } else {
-                        // 일반 파일 링크
+                        // 이미지가 아니면 일반 파일 다운로드 링크로 치환
                         result += '<div class="inline-file-link-wrap">' + '<a class="inline-file-link" href="' + safeUrl + '" download="' + safeName + '">' + '📎 ' + safeName + '</a>' + '</div>';
                     }
                 } else {
-                    // 대응되는 첨부가 없으면 토큰 그대로 텍스트로
+                    // 첨부 배열에서 해당 번호를 못 찾으면, 토큰 그대로 글자로 출력
                     result += escapeHtml(m[0]);
                 }
 
+                // 마지막 처리 위치를 현재 토큰 끝으로 업데이트
                 lastIndex = re.lastIndex;
             }
 
-            // 마지막 토큰 뒤 나머지 텍스트
+            // while 루프가 끝난 뒤, 마지막 토큰 이후의 나머지 일반 텍스트
             var tail = text.slice(lastIndex);
+            // 역시 escape + 줄바꿈 → <br/> 처리 후 결과에 추가
             result += escapeHtml(tail).replace(/\n/g, '<br/>');
 
+            // 완성된 HTML을 AngularJS가 신뢰할 수 있는 HTML로 표시하도록 표시(신뢰) 객체로 래핑
             return $sce.trustAsHtml(result);
         }
 
         // ───────────────── 게시글 로딩 ─────────────────
+        // 서버에서 게시글 한 건을 가져오는 함수
         function loadOne() {
+            // 로딩 시작
             $scope.loading = true;
             let url = null;
+            // type이 'num'이면 /api/posts/{숫자id} 사용
             if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
+            // 그 외에는 문자열 key (uuid 등)를 사용하는 /api/posts/key/{key}
             else url = '/api/posts/key/' + encodeURIComponent(key);
 
+            // 정해진 url로 GET 요청
             $http
                 .get(url)
                 .then(function (res) {
+                    // 서버 응답에서 게시글 객체 추출 (없으면 빈 객체)
                     const p = res.data || {};
 
+                    // file_list_json 또는 file_list_json 형태로 넘어온 JSON 문자열을 파싱
                     let fileList = safeParseFileList(p.fileListJson || p.file_list_json);
+                    // 만약 새 스키마(file_list_json)가 비어 있고, 예전 단일 파일 스키마(fileUrl)가 있다면
+                    // 그걸 기반으로 1개의 첨부파일 배열을 만들어줌 (구버전 호환)
                     if ((!fileList || fileList.length === 0) && p.fileUrl) {
                         fileList = [
                             {
@@ -1615,23 +1788,30 @@
                         ];
                     }
 
+                    // 정리된 첨부파일 배열을 p.attachments에 담기
                     p.attachments = fileList || [];
+                    // 첨부파일 개수를 fileCount에 저장 (UI에 "첨부 3개" 이런 식으로 표시용)
                     p.fileCount = p.attachments.length;
 
+                    // scope에 게시글 전체 객체를 저장 → HTML에서 post.title 등으로 사용
                     $scope.post = p;
 
-                    // 🔥 본문 HTML 생성 ( [[file:n width=...]] 치환 )
+                    // 🔥 본문 content 안의 [[file:n width=...]] 토큰을 실제 HTML(<img>, <a>)로 바꿔서 저장
                     $scope.renderedContent = buildRenderedContent(p);
                 })
                 .finally(function () {
+                    // 요청 성공/실패와 상관없이 로딩 종료
                     $scope.loading = false;
                 });
         }
 
+        // 현재 로그인 사용자 정보를 서버(/api/me)에서 불러오기
         AuthService.loadMe().finally(function () {
+            // loadMe() 완료 후(성공/실패 관계 없이) me 정보를 scope에 세팅
             $scope.me = AuthService.getMe();
         });
 
+        // 컨트롤러 생성 시점에 바로 게시글 1건을 로딩해서 화면에 보여주기
         loadOne();
     });
 
@@ -1648,9 +1828,26 @@
         $scope.loadPosts();
     });
 
-    app.controller('BoardBigCtrl', function ($scope, $controller) {
+    // ───────────────── 게시판 라우트별 컨트롤러 ─────────────────
+    app.controller('BoardBusCtrl', function ($scope, $controller) {
+        angular.extend(this, $controller('BoardBaseCtrl', { $scope })); // extend:상속
+        $scope.boardCode = 'BUS';
+        $scope.loadPosts();
+    });
+
+    app.controller('BoardNormalCtrl', function ($scope, $controller) {
         angular.extend(this, $controller('BoardBaseCtrl', { $scope }));
-        $scope.boardCode = 'BIG'; // DB의 board.code 값이 'BIG'이라고 가정
+        $scope.boardCode = 'NORM';
+        $scope.loadPosts();
+    });
+
+    // ★ 여기만 이렇게! — 대용량 게시판
+    app.controller('BoardBigCtrl', function ($scope, $controller) {
+        // 공통 게시판 기능 상속
+        angular.extend(this, $controller('BoardBaseCtrl', { $scope: $scope }));
+        // DB 의 board.code 가 'BIG' 이라고 가정
+        $scope.boardCode = 'BIG';
+        // 바로 한 번 로딩
         $scope.loadPosts();
     });
 

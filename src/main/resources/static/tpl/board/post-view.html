@@ -1,434 +1,108 @@
 <!-- src/main/resources/static/tpl/board/post-view.html -->
 <div
-    class="view-shell"
+    class="board-shell"
     ng-cloak
 >
-    <div class="view-card">
-        <!-- 헤더: 왼쪽 타이틀, 오른쪽 버튼 -->
-        <div class="view-header">
-            <div class="title-wrap">
-                <span class="title-dot"></span>
-                <h2 class="view-header-title">게시글 보기</h2>
-            </div>
-
-            <div class="header-actions">
-                <button
-                    type="button"
-                    class="btn"
-                    ng-click="backToList()"
-                >
-                    목록으로
-                </button>
-            </div>
+    <!-- 상단 헤더 영역 (예전 디자인) -->
+    <div class="section-header card-header-like">
+        <div class="title-wrap">
+            <span class="title-dot"></span>
+            <h2 style="margin: 0">게시글 보기</h2>
         </div>
+        <div class="header-actions">
+            <button
+                type="button"
+                class="btn btn-outline"
+                ng-click="backToList()"
+            >
+                목록으로
+            </button>
+        </div>
+    </div>
 
-        <!-- 실제 게시글 내용 카드 -->
-        <div
-            class="view-body"
-            ng-if="post"
-        >
-            <!-- 제목 (한 번만) -->
-            <h1 class="post-title-main">{{ post.title || '(제목 없음)' }}</h1>
+    <!-- 로딩 중 -->
+    <div
+        class="card"
+        ng-if="loading"
+    >
+        <div class="card-body">
+            <p>⏳ 게시글을 불러오는 중입니다...</p>
+        </div>
+    </div>
 
-            <!-- 작성자 / 날짜 정보 -->
-            <div class="post-meta">
-                <span class="meta-writer">
-                    작성자:
-                    <strong>{{ post.writerName || post.writerId || '익명' }}</strong>
-                </span>
-                <span class="meta-date"> {{ (post.updatedAt || post.createdAt) | date:'yyyy-MM-dd HH:mm' }} </span>
+    <!-- 게시글 없음 -->
+    <div
+        class="card"
+        ng-if="!loading && !post"
+    >
+        <div class="card-body">
+            <p>게시글을 찾을 수 없습니다.</p>
+            <button
+                type="button"
+                class="btn btn-primary"
+                ng-click="backToList()"
+            >
+                목록으로 돌아가기
+            </button>
+        </div>
+    </div>
+
+    <!-- 게시글 내용 -->
+    <div
+        class="card post-view-card"
+        ng-if="!loading && post"
+    >
+        <div class="card-body">
+            <!-- 제목 -->
+            <h1
+                class="post-title"
+                style="margin-top: 0; margin-bottom: 8px"
+            >
+                {{ post.title }}
+            </h1>
+
+            <!-- 메타 정보 -->
+            <div
+                class="post-meta"
+                style="font-size: 14px; color: #666; margin-bottom: 16px"
+            >
+                <span>작성자: {{ post.writerName || post.writerId || '알 수 없음' }}</span>
+                <span ng-if="post.createdAt"> &nbsp;·&nbsp; {{ post.createdAt }} </span>
             </div>
 
-            <!-- 본문 내용 -->
-            <!-- 🔹 inline 이미지/파일 HTML(렌더링된 것)이 있으면 그걸 우선 사용 -->
+            <!-- 본문 (이미지 토큰 치환된 renderedContent 사용) -->
             <div
-                class="post-content rendered-content"
-                ng-if="renderedContent"
+                class="post-content"
                 ng-bind-html="renderedContent"
             ></div>
 
-            <!-- 🔹 controller에서 renderedContent 를 아직 안 만들었으면 예전처럼 텍스트 출력 -->
-            <div
-                class="post-content plain-content"
-                ng-if="!renderedContent && post.content"
-            >
-                {{ post.content }}
-            </div>
-
-            <!-- 구분선 -->
-            <div class="view-divider"></div>
-
             <!-- 첨부 파일 영역 -->
-            <div class="attach-section">
-                <div class="attach-header">
-                    <span class="attach-title">
-                        첨부 파일
-                        <span
-                            class="attach-count"
-                            ng-if="post.fileCount || (post.attachments && post.attachments.length)"
-                        >
-                            ({{ post.fileCount || (post.attachments && post.attachments.length) || 0 }}개)
-                        </span>
-                    </span>
-                </div>
-
-                <!-- 첨부 파일이 있을 때 -->
-                <div
-                    class="attach-list"
-                    ng-if="post.attachments && post.attachments.length"
-                >
-                    <div
-                        class="attach-item"
-                        ng-repeat="att in post.attachments track by $index"
+            <div
+                class="post-attachments"
+                ng-if="post.attachments && post.attachments.length"
+                style="margin-top: 24px; border-top: 1px solid #eee; padding-top: 12px"
+            >
+                <div style="font-weight: 600; margin-bottom: 8px">첨부 파일</div>
+                <ul style="list-style: none; padding: 0; margin: 0">
+                    <li
+                        ng-repeat="f in post.attachments"
+                        style="margin-bottom: 4px"
                     >
-                        <!-- 🔹 이미지 썸네일: 확장자 기준으로 이미지 판단 -->
-                        <div
-                            class="attach-thumb-wrap"
-                            ng-if="['jpg','jpeg','png','gif','bmp','webp','heic','heif']
-                                      .indexOf(getFileExt(att)) >= 0"
+                        <a
+                            ng-href="{{f.url}}"
+                            download="{{f.fileName || '파일'}}"
                         >
-                            <img
-                                class="attach-thumb"
-                                ng-src="{{ att.url }}"
-                                alt="{{ att.fileName || '이미지 파일' }}"
-                            />
-                        </div>
-
-                        <!-- 🔹 이미지가 아닌 경우: 기본 아이콘 -->
-                        <div
-                            class="attach-thumb-wrap file-icon-only"
-                            ng-if="['jpg','jpeg','png','gif','bmp','webp','heic','heif']
-                                      .indexOf(getFileExt(att)) < 0"
+                            📎 {{ f.fileName || ('파일 ' + ($index + 1)) }}
+                        </a>
+                        <span
+                            style="font-size: 12px; color: #888"
+                            ng-if="f.size"
                         >
-                            <div class="file-icon">📄</div>
-                        </div>
-
-                        <!-- 파일 정보 텍스트 -->
-                        <div class="attach-info">
-                            <div class="attach-name">{{ att.fileName || '첨부파일' }}</div>
-                            <div class="attach-meta">
-                                {{ getFileExt(att) || '파일' }}
-                                <span class="sep"> · {{ att.size ? formatFileSize(att.size) : '크기 알 수 없음' }} </span>
-                                <span
-                                    class="sep"
-                                    ng-if="att.fileType"
-                                >
-                                    · {{ att.fileType }}
-                                </span>
-                            </div>
-                        </div>
-
-                        <!-- 🔽 다운로드만 되는 버튼 -->
-                        <div class="attach-actions">
-                            <a
-                                class="btn primary sm"
-                                ng-href="{{ att.url }}"
-                                download="{{ att.fileName || '' }}"
-                            >
-                                다운로드
-                            </a>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 첨부 파일이 없을 때 -->
-                <div
-                    class="attach-empty"
-                    ng-if="!post.attachments || !post.attachments.length"
-                >
-                    첨부된 파일이 없습니다.
-                </div>
+                            ({{ formatFileSize(f.size) }})</span
+                        >
+                    </li>
+                </ul>
             </div>
-        </div>
-
-        <!-- 로딩 / 없는 글 -->
-        <div
-            class="view-empty"
-            ng-if="!post && !loading"
-        >
-            게시글을 찾을 수 없습니다.
-        </div>
-        <div
-            class="view-loading"
-            ng-if="loading"
-        >
-            ⏳ 불러오는 중...
         </div>
     </div>
 </div>
-
-<!-- 상세 보기 전용 스타일 -->
-<style>
-    [ng-cloak] {
-        display: none;
-    }
-
-    .view-shell {
-        padding: 24px 12px;
-    }
-
-    .view-card {
-        max-width: 840px;
-        margin: 0 auto;
-        background: #ffffff;
-        border-radius: 16px;
-        border: 1px solid #edf0f5;
-        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
-        padding: 18px 22px 22px;
-    }
-
-    .view-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 14px;
-    }
-
-    .title-wrap {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-
-    .title-dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 999px;
-        background: #2563eb;
-    }
-
-    .view-header-title {
-        margin: 0;
-        font-size: 18px;
-        font-weight: 600;
-        color: #111827;
-    }
-
-    .header-actions .btn {
-        margin-left: 6px;
-    }
-
-    .view-body {
-        border-top: 1px solid #edf0f5;
-        padding-top: 16px;
-    }
-
-    .post-title-main {
-        margin: 0 0 10px;
-        font-size: 22px;
-        font-weight: 600;
-        color: #111827;
-    }
-
-    .post-meta {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        font-size: 13px;
-        color: #6b7280;
-        margin-bottom: 16px;
-    }
-
-    .post-meta .meta-writer strong {
-        color: #374151;
-    }
-
-    /* 기본 본문 공통 스타일 */
-    .post-content {
-        font-size: 14px;
-        line-height: 1.7;
-        color: #111827;
-        word-break: break-word;
-        margin-bottom: 18px;
-    }
-
-    /* 텍스트만 출력할 때: 줄바꿈 유지 */
-    .post-content.plain-content {
-        white-space: pre-wrap;
-    }
-
-    /* 렌더링된 HTML(이미지/링크 포함)일 때: 일반 흐름 */
-    .post-content.rendered-content {
-        white-space: normal;
-    }
-
-    /* 🔹 본문 안에 들어가는 인라인 이미지/파일 ( [[file:n]] 치환 결과 ) */
-    .post-content .inline-img-wrap {
-        margin: 10px 0;
-        text-align: center;
-    }
-
-    .post-content .inline-img {
-        /* width 고정/!important 제거 → 토큰 width 스타일이 적용되도록 */
-        max-width: 100%;
-        height: auto;
-        display: block;
-        margin: 0 auto;
-        border-radius: 10px;
-        object-fit: cover;
-    }
-
-    .post-content .inline-file-link {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        color: #2563eb;
-        text-decoration: underline;
-        margin: 4px 0;
-        word-break: break-all;
-    }
-
-    .view-divider {
-        height: 1px;
-        background: #edf0f5;
-        margin: 12px 0 10px;
-    }
-
-    .attach-section {
-        margin-top: 6px;
-    }
-
-    .attach-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 8px;
-    }
-
-    .attach-title {
-        font-size: 14px;
-        font-weight: 600;
-        color: #111827;
-    }
-
-    .attach-count {
-        font-weight: 400;
-        color: #6b7280;
-        font-size: 13px;
-        margin-left: 4px;
-    }
-
-    .attach-list {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-    }
-
-    .attach-item {
-        display: grid;
-        grid-template-columns: auto 1fr auto;
-        gap: 12px;
-        padding: 10px 10px;
-        border-radius: 10px;
-        border: 1px solid #edf0f5;
-        background: #f9fafb;
-        align-items: center;
-    }
-
-    .attach-thumb-wrap {
-        width: 120px;
-        height: 120px;
-        border-radius: 10px;
-        overflow: hidden;
-        border: 1px solid #e5e7eb;
-        background: #fff;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .attach-thumb {
-        max-width: 100%;
-        max-height: 100%;
-        object-fit: cover;
-        display: block;
-    }
-
-    .file-icon-only .file-icon {
-        font-size: 32px;
-    }
-
-    .attach-info {
-        min-width: 0;
-    }
-
-    .attach-name {
-        font-size: 14px;
-        font-weight: 500;
-        color: #111827;
-        margin-bottom: 2px;
-        word-break: break-all;
-    }
-
-    .attach-meta {
-        font-size: 12px;
-        color: #6b7280;
-    }
-
-    .attach-meta .sep {
-        margin-left: 4px;
-    }
-
-    .attach-actions {
-        text-align: right;
-    }
-
-    .attach-empty {
-        font-size: 13px;
-        color: #9ca3af;
-        padding: 6px 2px 4px;
-    }
-
-    .view-empty,
-    .view-loading {
-        text-align: center;
-        padding: 32px 0 16px;
-        color: #6b7280;
-    }
-
-    /* 버튼 기본 스타일 (다른 페이지와 느낌 맞추기) */
-    .btn {
-        border: 1px solid #d7ddea;
-        background: #ffffff;
-        padding: 7px 12px;
-        border-radius: 10px;
-        font-size: 13px;
-        cursor: pointer;
-    }
-
-    .btn:hover {
-        background: #f3f4f6;
-    }
-
-    .btn.primary {
-        background: #2563eb;
-        border-color: #2563eb;
-        color: #ffffff;
-    }
-
-    .btn.primary:hover {
-        background: #1d4ed8;
-    }
-
-    .btn.sm {
-        padding: 4px 10px;
-        font-size: 12px;
-    }
-
-    @media (max-width: 768px) {
-        .view-card {
-            padding: 14px 14px 18px;
-        }
-        .attach-item {
-            grid-template-columns: 1fr;
-        }
-        .attach-thumb-wrap {
-            width: 100%;
-            max-width: 260px;
-            height: 160px;
-        }
-        .attach-actions {
-            text-align: left;
-        }
-    }
-</style>
