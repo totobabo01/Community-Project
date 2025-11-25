@@ -189,23 +189,23 @@
         </form>
     </div>
 
-    <!-- ▽ 상단 페이지네이션 ▽ -->
+    <!-- ▽ 상단 정보 + 페이지네이션 ▽ -->
+    <div
+        class="card-header-like"
+        style="margin-bottom: 8px"
+    >
+        <div class="left">
+            <span class="muted"> 총 {{ total || 0 }}건 중 {{ pageSize || (posts && posts.length) || 0 }}건 표시 중 </span>
+        </div>
+        <div class="right">
+            <span class="muted">페이지 {{ (page || 0) + 1 }} / {{ pages || 1 }}</span>
+        </div>
+    </div>
+
     <div class="pager">
         <div class="left">
-            <label class="label">페이지 크기</label>
-            <select
-                class="select"
-                ng-model="pageSize"
-                ng-options="s for s in pageSizes"
-                ng-change="changeSize()"
-                aria-label="페이지 크기 선택"
-            ></select>
-            <span
-                class="muted"
-                style="margin-left: 8px"
-            >
-                총 {{ total || 0 }}건
-            </span>
+            <!-- 왼쪽에는 그냥 페이지 정보만 -->
+            <span class="muted"> 페이지 {{ (page || 0) + 1 }} / {{ pages || 1 }} </span>
         </div>
 
         <div class="right">
@@ -214,18 +214,16 @@
                 type="button"
                 ng-click="first()"
                 ng-disabled="page <= 0 || loading"
-                aria-label="첫 페이지"
             >
-                « 처음
+                처음
             </button>
             <button
                 class="btn-page"
                 type="button"
                 ng-click="prev()"
                 ng-disabled="page <= 0 || loading"
-                aria-label="이전 페이지"
             >
-                ‹ 이전
+                이전
             </button>
 
             <span
@@ -239,7 +237,6 @@
                     ng-class="{ active: p === page }"
                     ng-click="go(p)"
                     ng-disabled="loading"
-                    aria-label="{{ p + 1 }} 페이지"
                 >
                     {{ p + 1 }}
                 </button>
@@ -250,18 +247,16 @@
                 type="button"
                 ng-click="next()"
                 ng-disabled="page >= pages - 1 || loading"
-                aria-label="다음 페이지"
             >
-                다음 ›
+                다음
             </button>
             <button
                 class="btn-page"
                 type="button"
                 ng-click="last()"
                 ng-disabled="page >= pages - 1 || loading"
-                aria-label="끝 페이지"
             >
-                끝 »
+                끝
             </button>
         </div>
     </div>
@@ -316,7 +311,7 @@
             <!-- 작성일 -->
             <div class="c-date">{{ (p.updatedAt || p.createdAt || p.created_at) | date:'yyyy-MM-dd HH:mm' }}</div>
 
-            <!-- 작업 버튼 (수정/삭제는 나중에 구현해도 됨) -->
+            <!-- 작업 버튼 -->
             <div class="c-actions">
                 <button
                     class="btn btn-warning"
@@ -346,7 +341,7 @@
         </div>
     </div>
 
-    <!-- ▽ 하단 페이지네이션 ▽ -->
+    <!-- ▽ 하단 페이지네이션 (상단과 동일 디자인) ▽ -->
     <div
         class="pager"
         style="margin-top: 10px"
@@ -362,7 +357,7 @@
                 ng-click="first()"
                 ng-disabled="page <= 0 || loading"
             >
-                « 처음
+                처음
             </button>
             <button
                 class="btn-page"
@@ -370,7 +365,7 @@
                 ng-click="prev()"
                 ng-disabled="page <= 0 || loading"
             >
-                ‹ 이전
+                이전
             </button>
 
             <span
@@ -395,7 +390,7 @@
                 ng-click="next()"
                 ng-disabled="page >= pages - 1 || loading"
             >
-                다음 ›
+                다음
             </button>
             <button
                 class="btn-page"
@@ -403,7 +398,7 @@
                 ng-click="last()"
                 ng-disabled="page >= pages - 1 || loading"
             >
-                끝 »
+                끝
             </button>
         </div>
     </div>

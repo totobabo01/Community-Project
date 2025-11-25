@@ -789,7 +789,9 @@ public class PostDao {                         // 게시글 관련 DB 작업을 
     /** 숫자 PK로 단건 조회 */
     public PostDto findById(Long id) {
         if (id == null) return null;                             // id가 null이면 조회 불필요 → null 반환
+        // ensurePostResolved() = “post 테이블 구조를 한 번 분석해서, 그 결과를 리턴해 주는 함수”
         var s = ensurePostResolved();                            // 스키마 정보 확보
+        // “스키마 객체 s 에서 테이블 이름과 PK 컬럼명을 가져와서, SELECT * FROM 테이블 WHERE PK = ? 형태의 SQL 문자열을 만드는 코드”
         String sql = "SELECT * FROM " + s.table + " WHERE " + s.id + " = ?"; // PK 기준 단건 조회 쿼리
         List<PostDto> list = jdbc.query(sql, (rs, i) -> mapRow(rs, s), id);  // 쿼리 실행 후 PostDto 리스트 반환
         return list.isEmpty() ? null : list.get(0);              // 결과가 없으면 null, 있으면 첫 번째 요소 반환

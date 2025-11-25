@@ -1,7 +1,9 @@
 // src/main/java/com/example/demo/controller/BigBoardController.java
 package com.example.demo.controller;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -13,45 +15,70 @@ import com.example.demo.dto.BigPostDto;
 import com.example.demo.dto.PageDTO;
 
 @RestController
-@RequestMapping("/api/big-board")   // 이 컨트롤러의 기본 URL prefix
+@RequestMapping("/api/big-board")
 public class BigBoardController {
 
     private final BigPostDao bigPostDao;
 
-    // 스프링이 BigPostDao를 주입하기 위한 생성자
     public BigBoardController(BigPostDao bigPostDao) {
         this.bigPostDao = bigPostDao;
     }
 
+    // =========================================================================
+    // ① 1000개 단위 페이지 API — 페이지 버튼 클릭 시 사용되는 API
+    // =========================================================================
     /**
-     * 대용량 게시판 목록 조회
-     * 예: GET /api/big-board/posts?page=0&size=20
+     * 페이지네이션(1000개 단위) 목록 조회
+     *
+     * 예:
+     *   GET /api/big-board/posts?page=0 → 최신 1000개
+     *   GET /api/big-board/posts?page=1 → 그 다음 1000개
+     *
+     * 프론트에서는 BoardBaseCtrl가 이 API를 사용해서
+     * 기본 1000개 페이지 단위 정보를 불러온 뒤,
+     * 내부에서는 Lazy-loading으로 100개씩 추가 로드한다.
      */
     @GetMapping("/posts")
     public PageDTO<BigPostDto> list(
-            @RequestParam(name = "page", defaultValue = "0") int page,
-            @RequestParam(name = "size", defaultValue = "20") int size
+            @RequestParam(name = "page", defaultValue = "0") int page
     ) {
-        // 파라미터 방어 코드 (음수/0 처리)
-        if (page < 0) page = 0;
-        if (size <= 0 || size > 100) size = 20;
+        if (page < 0) {
+            page = 0;
+        }
 
-        long total = bigPostDao.countAll();                 // 전체 행 개수
-        List<BigPostDto> items = bigPostDao.findPage(page, size); // 현재 페이지 데이터
+        final int pageSize = 1000; // 서버 페이지 하나 = 1000개
 
-        // ✅ PageDTO 생성 방식은 네 프로젝트에서 쓰는 생성자 형태에 맞춰야 함
-        // 보통 이런 형태라면 아래 코드가 맞음:
-        return new PageDTO<>(items, total, page, size);
+        long total = bigPostDao.countAll();
+        List<BigPostDto> items = bigPostDao.findPage(page, pageSize);
 
-        /*
-        만약 PageDTO에 기본 생성자 + setter만 있고 위 생성자가 없다면 이렇게 써도 됨:
+        return new PageDTO<>(items, total, page, pageSize);
+    }
 
-        PageDTO<BigPostDto> dto = new PageDTO<>();
-        dto.setItems(items);         // 또는 setContent(...) 등, 실제 필드 이름에 맞게
-        dto.setTotalElements(total);
-        dto.setPage(page);
-        dto.setSize(size);
-        return dto;
-        */
+    // =========================================================================
+    // ② Lazy-loading API — offset 없음, Keyset 방식(id < lastId)
+    // =========================================================================
+    /**
+     * Lazy-loading 전용 API (스크롤 내릴 때 100개씩 가져가는 방식)
+     *
+     * 예:
+     *   GET /api/big-board/chunk?size=100
+     *   GET /api/big-board/chunk?size=100&lastId=98000000
+     *
+     * 특징:
+     *   - offset 사용하지 않음
+     *   - WHERE id < lastId 조건으로 인덱스 타고 내려가기 때문에 매우 빠름
+     *   - 대용량(1억 rows)에서도 즉시 반응하는 방식
+     */
+    @GetMapping("/chunk")
+    public Map<String, Object> chunk(
+            @RequestParam(required = false) Long lastId,
+            @RequestParam(defaultValue = "100") int size
+    ) {
+        List<BigPostDto> list = bigPostDao.findChunk(lastId, size);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("list", list);
+
+        return result;
     }
 }

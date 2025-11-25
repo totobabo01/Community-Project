@@ -250,8 +250,9 @@
             <span
                 class="muted"
                 style="margin-left: 8px"
-                >총 {{ total || 0 }}건</span
             >
+                총 {{ total || 0 }}건
+            </span>
         </div>
 
         <div class="right">
@@ -333,7 +334,7 @@
             <div class="c-title">
                 <!-- 🔽 제목 + 첨부파일 표시라인 -->
                 <div class="post-title-line">
-                    <!-- ✅ 항상 파일(이미지/아이콘)이 글(title)보다 먼저 나오도록 -->
+                    <!-- ✅ 썸네일(이미지/아이콘)은 그대로 유지 -->
                     <div
                         class="post-file-indicator"
                         ng-if="p.fileUrl || p.fileType === 'FILE'"
@@ -377,25 +378,17 @@
                 </div>
                 <!-- 🔼 제목 + 첨부파일 표시라인 끝 -->
 
-                <!-- 첨부 파일 메타 정보 (이름 / 확장자 / 크기 / MIME) -->
-                <div
-                    class="post-file-meta"
-                    ng-if="p.fileName"
-                >
-                    <span class="file-name">{{ p.fileName }}</span>
-                    <span class="file-extra">
-                        ({{ getFileExt(p.fileName) }}
-                        <span ng-if="p.fileSize"> · {{ formatFileSize(p.fileSize) }}</span>
-                        <span ng-if="p.fileContentType"> · {{ p.fileContentType }}</span>)
-                    </span>
-                </div>
+                <!-- 🔥 목록에서는 파일 메타(이름/크기/타입) 숨김: 두개임 같은 내용만 보이게 -->
+                <!-- (post-file-meta 블록 전체 삭제) -->
 
+                <!-- 본문 요약: [[file1 width=...]] 같은 토큰은 잘라내고 앞부분만 표시 -->
                 <div
                     class="post-snippet"
                     ng-if="p.content"
                 >
-                    {{ p.content }}
+                    {{ (p.content || '').split('[[')[0] }}
                 </div>
+
                 <button
                     class="btn light sm"
                     type="button"
@@ -510,8 +503,9 @@
                 <span
                     class="muted"
                     ng-if="p.writerName && p.writerId"
-                    >({{ p.writerId }})</span
                 >
+                    ({{ p.writerId }})
+                </span>
             </div>
 
             <!-- 작성일 -->
@@ -829,7 +823,6 @@
         font-weight: 600;
         margin-bottom: 2px;
     }
-    /* 제목 링크 스타일 */
     .post-title-link {
         text-decoration: none;
         color: inherit;
@@ -858,7 +851,6 @@
         font-size: 18px;
         line-height: 1;
     }
-    /* 썸네일/아이콘 링크 공통 스타일 */
     .thumb-link,
     .post-file-icon-link {
         display: inline-flex;
@@ -866,7 +858,6 @@
         text-decoration: none;
         color: inherit;
     }
-    /* 선택된 파일 정보(글쓰기 쪽) */
     .file-meta {
         font-size: 12px;
         color: #6b7280;
@@ -875,7 +866,6 @@
     .file-meta.muted {
         color: #9ca3af;
     }
-    /* ✨ 본문에 넣기 리스트 */
     .file-insert-list {
         margin-top: 6px;
     }
@@ -915,25 +905,11 @@
     .pager .muted {
         color: #6b7280;
     }
-    /* 🔢 가운데 페이지 숫자 버튼 묶음 */
     .pager-pages {
         display: inline-flex;
         gap: 4px;
         margin: 0 8px;
         vertical-align: middle;
-    }
-    /* 게시글 목록에서 파일 메타 정보 라인 */
-    .post-file-meta {
-        font-size: 12px;
-        color: #6b7280;
-        margin-bottom: 4px;
-    }
-    .post-file-meta .file-name {
-        font-weight: 500;
-    }
-    .post-file-meta .file-extra {
-        margin-left: 4px;
-        color: #9ca3af;
     }
     @media (max-width: 1024px) {
         .table-head,
