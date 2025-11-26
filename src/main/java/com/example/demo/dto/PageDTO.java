@@ -1,37 +1,90 @@
-package com.example.demo.dto;           // DTO 클래스가 위치한 패키지 선언
-import java.util.List;                  // 목록 타입(List) 사용을 위한 import
+// src/main/java/com/example/demo/dto/PageDTO.java
+package com.example.demo.dto;
 
-public class PageDTO<T> {               // 제네릭 타입 T에 대한 페이지 DTO(아무 타입의 리스트도 담을 수 있음)
-  private List<T> content;              // 현재 페이지의 데이터 목록
-  private long totalElements;           // 전체 데이터 개수(모든 페이지 합계)
-  private int totalPages;               // 총 페이지 수(= ceil(totalElements / size))
-  private int page;                     // 현재 페이지 번호(0-base 또는 1-base는 사용하는 쪽 규칙에 따름)
-  private int size;                     // 페이지 크기(한 페이지에 몇 개 보여줄지)
+import java.util.Collections;
+import java.util.List;
 
-  public PageDTO() {}                   // 기본 생성자(직렬화/프레임워크 바인딩용)
+/**
+ * 공통 페이지 응답 DTO
+ *
+ * - content       : 현재 페이지의 데이터 목록
+ * - totalElements : 전체 행 개수 (SELECT COUNT(*) 결과)
+ * - page          : 현재 페이지 번호 (0-base)
+ * - size          : 페이지 크기 (한 페이지 당 행 개수)
+ * - totalPages    : 전체 페이지 수
+ *
+ * ※ 예전 버전처럼 totalPages 를 20,000 으로 자르지 않음.
+ *    => DB에 2천만 개 넣었으면 20,000 페이지 이상/이하도 그대로 반영됨.
+ */
+public class PageDTO<T> {
 
-  public PageDTO(List<T> content, long total, int page, int size) { // 값 채워주는 생성자
-    this.content = content;                                        // 현재 페이지의 목록 세팅
-    this.totalElements = total;                                     // 전체 개수 세팅
-    this.page = page;                                               // 현재 페이지 인덱스 세팅
-    this.size = size;                                               // 페이지 크기 세팅
-    this.totalPages = (int)Math.ceil(                               // 총 페이지 수 계산:
-        (double)total / Math.max(1, size)                           //  - size가 0이면 오류이므로 최소 1로 방어
-    );                                                              //  - 올림(ceil)으로 마지막 불완전 페이지 포함
-  }
+    private List<T> content;      // 현재 페이지 데이터
+    private long totalElements;   // 전체 행 개수
+    private int page;             // 현재 페이지(0-base)
+    private int size;             // 페이지 크기
+    private int totalPages;       // 전체 페이지 수
 
-  public List<T> getContent() { return content; }                   // 목록 getter
-  public void setContent(List<T> content) { this.content = content; } // 목록 setter
+    public PageDTO(List<T> content, long totalElements, int page, int size) {
+        this.content = (content != null) ? content : Collections.emptyList();
+        this.totalElements = totalElements;
 
-  public long getTotalElements() { return totalElements; }          // 전체 개수 getter
-  public void setTotalElements(long totalElements) { this.totalElements = totalElements; } // 전체 개수 setter
+        // page / size 기본값 보정
+        this.page = Math.max(page, 0);
+        this.size = (size <= 0) ? this.content.size() : size;
 
-  public int getTotalPages() { return totalPages; }                 // 총 페이지 수 getter
-  public void setTotalPages(int totalPages) { this.totalPages = totalPages; } // 총 페이지 수 setter(외부에서 재계산 반영 가능)
+        // totalPages 계산
+        if (this.size <= 0) {
+            // size 가 0 이거나 알 수 없는 경우, 최소 1페이지로 처리
+            this.totalPages = 1;
+        } else {
+            long pages = (totalElements + this.size - 1) / this.size; // 올림
+            if (pages < 1L) {
+                pages = 1L;
+            }
+            // ★ 더 이상 pages 를 20,000 으로 자르지 않음
+            this.totalPages = (int) pages;
+        }
+    }
 
-  public int getPage() { return page; }                             // 현재 페이지 getter
-  public void setPage(int page) { this.page = page; }               // 현재 페이지 setter
+    // ───────── getter / setter ─────────
 
-  public int getSize() { return size; }                             // 페이지 크기 getter
-  public void setSize(int size) { this.size = size; }               // 페이지 크기 setter
+    public List<T> getContent() {
+        return content;
+    }
+
+    public void setContent(List<T> content) {
+        this.content = content;
+    }
+
+    public long getTotalElements() {
+        return totalElements;
+    }
+
+    public void setTotalElements(long totalElements) {
+        this.totalElements = totalElements;
+    }
+
+    public int getPage() {
+        return page;
+    }
+
+    public void setPage(int page) {
+        this.page = page;
+    }
+
+    public int getSize() {
+        return size;
+    }
+
+    public void setSize(int size) {
+        this.size = size;
+    }
+
+    public int getTotalPages() {
+        return totalPages;
+    }
+
+    public void setTotalPages(int totalPages) {
+        this.totalPages = totalPages;
+    }
 }

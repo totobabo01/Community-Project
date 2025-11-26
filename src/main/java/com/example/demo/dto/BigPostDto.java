@@ -1,3 +1,4 @@
+// src/main/java/com/example/demo/dto/BigPostDto.java
 package com.example.demo.dto;   // 이 클래스가 속한 패키지 이름을 지정. 다른 파일에서 import 할 때 이 경로를 사용하게 됨.
 
 import java.time.LocalDateTime; // Java 8 날짜/시간 타입 중 하나인 LocalDateTime을 사용하기 위해 import.
@@ -10,11 +11,12 @@ public class BigPostDto {
     private String content;          // 게시글 내용. big_posts.content 컬럼과 매핑.
     private String writerId;         // 작성자의 아이디(또는 이름). big_posts.writer_id 컬럼과 매핑.
     private LocalDateTime createdAt; // 글이 작성된 날짜/시간. big_posts.created_at 컬럼과 매핑.
+    private LocalDateTime updatedAt; // 글이 수정된 날짜/시간. big_posts.updated_at 컬럼과 매핑.
 
     // ───── 기본 생성자 ─────
     public BigPostDto() {
         // 아무 값도 세팅하지 않는 기본 생성자.
-        // 스프링이나 Jackson, MyBatis, JdbcTemplate 등이
+        // 스프링이나 Jackson, JdbcTemplate 등이
         // "일단 객체부터 하나 만들고, 나중에 setter로 값 채우기" 패턴을 쓸 때 필요함.
     }
 
@@ -61,5 +63,13 @@ public class BigPostDto {
 
     public void setCreatedAt(LocalDateTime createdAt) { // createdAt 값을 설정하는 메서드
         this.createdAt = createdAt;                     // 전달받은 createdAt을 필드에 저장
+    }
+
+    public LocalDateTime getUpdatedAt() { // updatedAt 값을 읽는 메서드
+        return updatedAt;                 // 현재 객체의 updatedAt 필드를 반환
+    }
+
+    public void setUpdatedAt(LocalDateTime updatedAt) { // updatedAt 값을 설정하는 메서드
+        this.updatedAt = updatedAt;                     // 전달받은 updatedAt을 필드에 저장
     }
 }

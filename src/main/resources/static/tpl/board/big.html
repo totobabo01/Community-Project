@@ -36,7 +36,7 @@
             <button
                 class="btn"
                 type="button"
-                ng-click="reload ? reload() : (loadPosts && loadPosts())"
+                ng-click="loadPosts()"
                 ng-disabled="loading"
                 aria-label="목록 새로 고침"
             >
@@ -151,7 +151,7 @@
         ⏳ 불러오는 중...
     </div>
 
-    <!-- 글쓰기 영역 (현재는 UI만, 실제 등록 API는 나중에) -->
+    <!-- 글쓰기 영역 -->
     <div
         class="composer-wrap"
         ng-show="showComposer"
@@ -195,7 +195,8 @@
         style="margin-bottom: 8px"
     >
         <div class="left">
-            <span class="muted"> 총 {{ total || 0 }}건 중 {{ pageSize || (posts && posts.length) || 0 }}건 표시 중 </span>
+            <!-- ★ 실제 화면에 표시된 건수는 posts.length 기준으로 표시 -->
+            <span class="muted"> 총 {{ total || 0 }}건 중 {{ (posts && posts.length) || 0 }}건 표시 중 </span>
         </div>
         <div class="right">
             <span class="muted">페이지 {{ (page || 0) + 1 }} / {{ pages || 1 }}</span>
@@ -204,7 +205,6 @@
 
     <div class="pager">
         <div class="left">
-            <!-- 왼쪽에는 그냥 페이지 정보만 -->
             <span class="muted"> 페이지 {{ (page || 0) + 1 }} / {{ pages || 1 }} </span>
         </div>
 
@@ -341,7 +341,7 @@
         </div>
     </div>
 
-    <!-- ▽ 하단 페이지네이션 (상단과 동일 디자인) ▽ -->
+    <!-- ▽ 하단 페이지네이션 ▽ -->
     <div
         class="pager"
         style="margin-top: 10px"
