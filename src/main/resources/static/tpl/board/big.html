@@ -36,7 +36,7 @@
             <button
                 class="btn"
                 type="button"
-                ng-click="loadPosts()"
+                ng-click="reload()"
                 ng-disabled="loading"
                 aria-label="목록 새로 고침"
             >
@@ -45,7 +45,7 @@
             <button
                 class="btn primary"
                 type="button"
-                ng-click="showComposer = !showComposer"
+                ng-click="toggleComposer()"
                 aria-expanded="{{!!showComposer}}"
             >
                 {{ showComposer ? '작성 닫기' : '글 쓰기' }}
@@ -157,13 +157,13 @@
         ng-show="showComposer"
     >
         <form
-            ng-submit="createPost && createPost()"
+            ng-submit="submit()"
             style="margin: 12px 0"
         >
             <input
                 class="inline-input input-like"
                 type="text"
-                ng-model="newPost.title"
+                ng-model="form.title"
                 placeholder="제목"
                 aria-label="제목"
             />
@@ -172,7 +172,7 @@
                 id="newPostContent"
                 class="inline-input input-like"
                 style="height: 120px; margin-top: 8px"
-                ng-model="newPost.content"
+                ng-model="form.content"
                 placeholder="내용"
                 aria-label="내용"
             ></textarea>
@@ -181,7 +181,7 @@
                 <button
                     class="btn primary"
                     type="submit"
-                    ng-disabled="loading"
+                    ng-disabled="saving || !form.title"
                 >
                     등록
                 </button>
@@ -189,78 +189,55 @@
         </form>
     </div>
 
-    <!-- ▽ 상단 정보 + 페이지네이션 ▽ -->
+    <!-- ▽ 상단 정보 + 페이지 버튼 ▽ -->
     <div
         class="card-header-like"
         style="margin-bottom: 8px"
     >
         <div class="left">
-            <!-- ★ 실제 화면에 표시된 건수는 posts.length 기준으로 표시 -->
-            <span class="muted"> 총 {{ total || 0 }}건 중 {{ (posts && posts.length) || 0 }}건 표시 중 </span>
+            <span class="muted"> 총 {{ (totalCount || 0) | number }}건 중 {{ (posts && posts.length) || 0 | number }}건 표시 중 </span>
         </div>
         <div class="right">
-            <span class="muted">페이지 {{ (page || 0) + 1 }} / {{ pages || 1 }}</span>
+            <span class="muted"> 페이지 {{ (page || 0) + 1 }} / {{ (totalPages || 1) }} </span>
         </div>
     </div>
 
     <div class="pager">
         <div class="left">
-            <span class="muted"> 페이지 {{ (page || 0) + 1 }} / {{ pages || 1 }} </span>
+            <span class="muted"> 페이지 {{ (page || 0) + 1 }} / {{ (totalPages || 1) }} </span>
         </div>
 
         <div class="right">
             <button
                 class="btn-page"
                 type="button"
-                ng-click="first()"
-                ng-disabled="page <= 0 || loading"
+                ng-click="goFirst()"
+                ng-disabled="!hasPrevPage() || loading"
             >
                 처음
             </button>
             <button
                 class="btn-page"
                 type="button"
-                ng-click="prev()"
-                ng-disabled="page <= 0 || loading"
+                ng-click="goPrev()"
+                ng-disabled="!hasPrevPage() || loading"
             >
                 이전
             </button>
 
-            <span
-                class="pager-pages"
-                ng-if="pages > 1"
-            >
-                <button
-                    class="btn-page"
-                    type="button"
-                    ng-repeat="p in pageRange() track by p"
-                    ng-class="{ active: p === page }"
-                    ng-click="go(p)"
-                    ng-disabled="loading"
-                >
-                    {{ p + 1 }}
-                </button>
-            </span>
-
+            <!-- 숫자 페이지 버튼 제거, 다음만 표시 -->
             <button
                 class="btn-page"
                 type="button"
-                ng-click="next()"
-                ng-disabled="page >= pages - 1 || loading"
+                ng-if="hasNextPage()"
+                ng-click="goNext()"
+                ng-disabled="loading"
             >
                 다음
             </button>
-            <button
-                class="btn-page"
-                type="button"
-                ng-click="last()"
-                ng-disabled="page >= pages - 1 || loading"
-            >
-                끝
-            </button>
         </div>
     </div>
-    <!-- △ 상단 페이지네이션 △ -->
+    <!-- △ 상단 페이지 버튼 △ -->
 
     <!-- 게시글 목록 카드 -->
     <div class="board-card">
@@ -274,19 +251,17 @@
 
         <!-- 게시글 행 -->
         <div
-            class="table-row"
+            class="table-row clickable-row"
             ng-repeat="p in posts track by (p.id || p._uid || p.uuid || p.postId || $index)"
+            ng-click="goView(p)"
         >
+            <!-- 제목 -->
             <div class="c-title">
                 <div class="post-title-line">
                     <div class="post-title">
-                        <a
-                            href=""
-                            ng-click="goDetail && goDetail(p)"
-                            class="post-title-link"
-                        >
+                        <span class="post-title-link">
                             <strong>{{ p.title }}</strong>
-                        </a>
+                        </span>
                     </div>
                 </div>
                 <div
@@ -316,16 +291,16 @@
                 <button
                     class="btn btn-warning"
                     type="button"
-                    ng-if="me && (me.isAdmin || me.username === p.writerId)"
-                    ng-click="goEdit && goEdit(p)"
+                    ng-if="canEdit(p)"
+                    ng-click="$event.stopPropagation(); goEdit(p)"
                 >
                     수정
                 </button>
                 <button
                     class="btn btn-danger"
                     type="button"
-                    ng-if="me && (me.isAdmin || me.username === p.writerId)"
-                    ng-click="deletePost && deletePost(p)"
+                    ng-if="canEdit(p)"
+                    ng-click="$event.stopPropagation(); remove(p)"
                 >
                     삭제
                 </button>
@@ -341,68 +316,45 @@
         </div>
     </div>
 
-    <!-- ▽ 하단 페이지네이션 ▽ -->
+    <!-- ▽ 하단 페이지 버튼 ▽ -->
     <div
         class="pager"
         style="margin-top: 10px"
     >
         <div class="left">
-            <span class="muted"> 페이지 {{ (page || 0) + 1 }} / {{ pages || 1 }} </span>
+            <span class="muted"> 페이지 {{ (page || 0) + 1 }} / {{ (totalPages || 1) }} </span>
         </div>
 
         <div class="right">
             <button
                 class="btn-page"
                 type="button"
-                ng-click="first()"
-                ng-disabled="page <= 0 || loading"
+                ng-click="goFirst()"
+                ng-disabled="!hasPrevPage() || loading"
             >
                 처음
             </button>
             <button
                 class="btn-page"
                 type="button"
-                ng-click="prev()"
-                ng-disabled="page <= 0 || loading"
+                ng-click="goPrev()"
+                ng-disabled="!hasPrevPage() || loading"
             >
                 이전
             </button>
 
-            <span
-                class="pager-pages"
-                ng-if="pages > 1"
-            >
-                <button
-                    class="btn-page"
-                    type="button"
-                    ng-repeat="p in pageRange() track by p"
-                    ng-class="{ active: p === page }"
-                    ng-click="go(p)"
-                    ng-disabled="loading"
-                >
-                    {{ p + 1 }}
-                </button>
-            </span>
-
             <button
                 class="btn-page"
                 type="button"
-                ng-click="next()"
-                ng-disabled="page >= pages - 1 || loading"
+                ng-if="hasNextPage()"
+                ng-click="goNext()"
+                ng-disabled="loading"
             >
                 다음
             </button>
-            <button
-                class="btn-page"
-                type="button"
-                ng-click="last()"
-                ng-disabled="page >= pages - 1 || loading"
-            >
-                끝
-            </button>
         </div>
     </div>
-    <!-- △ 하단 페이지네이션 △ -->
+    <!-- △ 하단 페이지 버튼 △ -->
 </div>
 
 <!-- ===== 스타일(페이지 내부 전용) ===== -->
@@ -608,6 +560,9 @@
     .table-row:hover {
         background: #fbfdff;
     }
+    .clickable-row {
+        cursor: pointer;
+    }
     .table-empty {
         padding: 24px 16px;
         color: #8a94a6;
@@ -625,7 +580,6 @@
     .post-title-link {
         text-decoration: none;
         color: inherit;
-        cursor: pointer;
     }
     .post-title-link:hover {
         text-decoration: underline;

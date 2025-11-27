@@ -1,11 +1,18 @@
 // src/main/java/com/example/demo/controller/BigBoardController.java
 package com.example.demo.controller;
 
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,128 +27,147 @@ public class BigBoardController {
 
     private final BigPostDao bigPostDao;
 
-    // 한 “페이지 번호”가 담당하는 DB 범위
-    //   PAGE_SIZE = 1000 이면
-    //   page 0  → 최신 0 ~ 999
-    //   page 1  → 1000 ~ 1999
-    //   ...
+    // 한 페이지당 1000개
     private static final int PAGE_SIZE = 1000;
 
-    // 무한 스크롤 chunk 기본 크기
-    private static final int DEFAULT_CHUNK_SIZE = 100;
+    // 대략적인 전체 개수 (검색 안 할 때만 사용)
+    private static final long APPROX_TOTAL = 100_000_000L; // 1억
 
     public BigBoardController(BigPostDao bigPostDao) {
         this.bigPostDao = bigPostDao;
     }
 
     // ─────────────────────────────────────────
-    // ① 기본 페이지 API (/api/big-board/posts)
-    //    - BoardBaseCtrl.loadPosts() 가 사용하는 엔드포인트
-    //    - page 는 0-base (0, 1, 2, ...)
-    //    - BigPostDao.findPage() 안에서는 OFFSET 없이
-    //      id 범위를 계산해서 BETWEEN 으로만 조회
+    // ① 목록 + 검색 API
+    //    GET /api/big-board/posts
     // ─────────────────────────────────────────
     @GetMapping("/posts")
     public PageDTO<BigPostDto> list(
-            @RequestParam(name = "page", defaultValue = "0") int page
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "type", required = false) String type,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "from", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(name = "to", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
     ) {
-        // 음수 방지
-        if (page < 0) {
-            page = 0;
+        boolean hasKeyword = (keyword != null && !keyword.isBlank());
+        boolean hasDate = (from != null || to != null);
+        boolean searchMode = (hasKeyword || hasDate);
+
+        // ── 검색이 아닐 때: 1억개 기준 id 범위 조회 ──
+        if (!searchMode) {
+            if (page < 0) page = 0;
+
+            long total = APPROX_TOTAL;
+            long totalPagesLong = (total + PAGE_SIZE - 1L) / PAGE_SIZE;
+            int totalPages = (int) Math.max(totalPagesLong, 1L);
+            if (page >= totalPages) page = totalPages - 1;
+
+            List<BigPostDto> items = bigPostDao.findPage(page, PAGE_SIZE);
+            // PageDTO 안에서 totalPages 는 total / size 로 다시 계산됨
+            return new PageDTO<>(items, total, page, PAGE_SIZE);
         }
 
-        // 실제 DB 전체 건수
-        long total = bigPostDao.countAll(); // SELECT COUNT(*) FROM big_posts
+        // ── 검색 모드: 조건에 맞는 글만 COUNT + 페이지 조회 ──
+        if (page < 0) page = 0;
 
-        // 데이터가 하나도 없으면 바로 빈 페이지 리턴
-        if (total == 0L) {
-            return new PageDTO<>(List.of(), 0L, 0, PAGE_SIZE);
-        }
+        // COUNT(*) (writer_id / created_at / title 인덱스 잘 잡혀 있어야 빠름)
+        long total = bigPostDao.searchCount(type, keyword, from, to);
+        int size = PAGE_SIZE;
 
-        // 총 페이지 수 (올림 계산)
-        long totalPagesLong = (total + PAGE_SIZE - 1L) / PAGE_SIZE;
-        int totalPages = (int) Math.max(totalPagesLong, 1L); // 최소 1페이지는 유지
+        long totalPagesLong = (total + size - 1L) / size;
+        int totalPages = (int) Math.max(totalPagesLong, 1L);
+        if (page >= totalPages) page = totalPages - 1;
 
-        // 존재하지 않는 페이지로 들어오면 마지막 페이지로 보정
-        if (page >= totalPages) {
-            page = totalPages - 1;
-        }
+        // ★ OFFSET 없이 id 구간 + 검색조건으로만 조회하는 메서드
+        List<BigPostDto> items =
+                bigPostDao.searchPageByIdRange(type, keyword, from, to, page, size);
 
-        // OFFSET 없이 id 범위로만 조회하는 Dao 메서드
-        List<BigPostDto> items = bigPostDao.findPage(page, PAGE_SIZE);
-
-        // PageDTO 안에서 totalPages 는 다시 계산됨
-        return new PageDTO<>(items, total, page, PAGE_SIZE);
+        return new PageDTO<>(items, total, page, size);
     }
 
     // ─────────────────────────────────────────
-    // ② 메타 정보: 총 건수 / 페이지 수 / 페이지 크기
-    //    - 프론트에서 필요하면 이걸로 pages, total, pageSize 세팅
+    // ② 메타 정보 (정확한 전체 COUNT, 필요할 때만 사용)
     // ─────────────────────────────────────────
     @GetMapping("/meta")
     public Map<String, Object> meta() {
-        long total = bigPostDao.countAll();                    // SELECT COUNT(*) FROM big_posts
-        long pagesLong = (total + PAGE_SIZE - 1L) / PAGE_SIZE; // 올림
-        int pages = (int) Math.max(pagesLong, 1L);             // 최소 1페이지는 유지
+        long total = bigPostDao.countAll();
+        long pagesLong = (total + PAGE_SIZE - 1L) / PAGE_SIZE;
+        int pages = (int) Math.max(pagesLong, 1L);
 
         Map<String, Object> map = new HashMap<>();
-        map.put("total", total);        // 전체 건수
-        map.put("pageSize", PAGE_SIZE); // 서버 기준 페이지 크기
-        map.put("pages", pages);        // 총 페이지 수(화면용, 1-base 갯수)
+        map.put("total", total);
+        map.put("pageSize", PAGE_SIZE);
+        map.put("pages", pages);
         return map;
     }
 
     // ─────────────────────────────────────────
-    // ③ 무한 스크롤용 Keyset 기반 chunk API
-    //
-    //   * lastId : 직전에 받은 마지막 글 id
-    //             (처음 호출 시 null → 최신 글부터)
-    //   * size   : 이번에 더 가져올 개수 (기본 100, 최대 1000)
-    //
-    //   Dao:
-    //     - lastId == null  → findFirstChunk(size)
-    //     - lastId != null  → findChunkAfter(lastId, size)
-    //
-    //   OFFSET 을 전혀 사용하지 않으므로
-    //   2천만 개 이상이어도 속도 저하를 최소화할 수 있음.
+    // ③ chunk API (필요하면 사용)
     // ─────────────────────────────────────────
     @GetMapping("/chunk")
     public Map<String, Object> chunk(
-            @RequestParam(name = "lastId", required = false) Long lastId,
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "last", required = false) Long lastId,
             @RequestParam(name = "size", defaultValue = "100") int size
     ) {
-        // size 안전 보정
-        if (size <= 0) {
-            size = DEFAULT_CHUNK_SIZE;
-        }
-        if (size > PAGE_SIZE) {
-            size = PAGE_SIZE; // 한 번에 1000개 이상은 가져오지 않도록 제한
-        }
+        if (page < 0) page = 0;
+        if (size <= 0) size = 100;
+        if (size > PAGE_SIZE) size = PAGE_SIZE;
 
-        // 실제 데이터 가져오기 (OFFSET 사용 X)
-        List<BigPostDto> list;
-        if (lastId == null) {
-            // 최초 호출: 최신 글들부터 size 개
-            list = bigPostDao.findFirstChunk(size);
-        } else {
-            // 이후 호출: lastId 보다 작은 글들 중 size 개
-            list = bigPostDao.findChunkAfter(lastId, size);
-        }
-
-        // 이번 요청으로 새로 계산된 lastId (가장 아래 글 id)
-        Long newLastId = lastId;
-        if (!list.isEmpty()) {
-            newLastId = list.get(list.size() - 1).getId();
-        }
-
-        // 더 가져올 수 있는지에 대한 대략적인 플래그
-        boolean hasMore = !list.isEmpty();
+        List<BigPostDto> list = bigPostDao.findChunkInPage(page, PAGE_SIZE, lastId, size);
 
         Map<String, Object> result = new HashMap<>();
-        result.put("size", size);      // 이번에 가져온 chunk 크기
-        result.put("list", list);      // 글 목록
-        result.put("lastId", newLastId); // 다음 호출 시 사용할 anchor id
-        result.put("hasMore", hasMore);  // 더 가져올 수 있는지 여부(단순 기준)
+        result.put("page", page);
+        result.put("size", size);
+        result.put("list", list);
         return result;
+    }
+
+    // ─────────────────────────────────────────
+    // ④ 단건 조회
+    // ─────────────────────────────────────────
+    @GetMapping("/{id}")
+    public BigPostDto getOne(@PathVariable Long id) {
+        return bigPostDao.findById(id);
+    }
+
+    // ─────────────────────────────────────────
+    // ⑤ 글쓰기
+    // ─────────────────────────────────────────
+    @PostMapping
+    public BigPostDto create(@RequestBody BigPostDto d) {
+        if (d.getTitle() == null || d.getTitle().isBlank()) {
+            throw new IllegalArgumentException("제목은 필수입니다.");
+        }
+        if (d.getContent() == null) {
+            d.setContent("");
+        }
+        if (d.getWriterId() == null || d.getWriterId().isBlank()) {
+            d.setWriterId("anonymous");
+        }
+
+        Long id = bigPostDao.insert(d);
+        d.setId(id);
+        return d;
+    }
+
+    // ─────────────────────────────────────────
+    // ⑥ 수정
+    // ─────────────────────────────────────────
+    @PutMapping("/{id}")
+    public BigPostDto update(@PathVariable Long id, @RequestBody BigPostDto d) {
+        d.setId(id);
+        bigPostDao.update(d);
+        return bigPostDao.findById(id);
+    }
+
+    // ─────────────────────────────────────────
+    // ⑦ 삭제
+    // ─────────────────────────────────────────
+    @DeleteMapping("/{id}")
+    public void delete(@PathVariable Long id) {
+        bigPostDao.delete(id);
     }
 }

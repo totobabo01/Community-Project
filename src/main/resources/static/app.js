@@ -1401,283 +1401,150 @@
 
     // ───────────────── 게시글 편집 전용 컨트롤러 ─────────────────
     // AngularJS 모듈(app)에 "BoardEditCtrl" 이라는 이름의 컨트롤러를 등록한다.
-    // 게시글 수정 화면(에디터 화면)
-    app.controller('BoardEditCtrl', function ($scope, $http, $routeParams, $location, $sce) {
-        // ★ $sce 추가
+    // src/main/resources/static/app.js 안의 BoardEditCtrl 전체 교체
+
+    app.controller('BoardEditCtrl', function ($scope, $http, $routeParams, $location) {
         $scope.loading = true;
         $scope.saving = false;
         $scope.deleting = false;
 
-        const code = String($routeParams.code || '').toUpperCase(); // 'BUS' / 'NORM'
+        const code = String($routeParams.code || '').toUpperCase(); // 'BUS' / 'NORM' / 'BIG'
         const type = String($routeParams.type || 'str'); // 'num' | 'str'
-        const key = $routeParams.key;
+        const key = $routeParams.key; // 글의 id 또는 uuid
 
+        // 편집 폼 기본값
+        $scope.form = {
+            title: '',
+            content: '',
+        };
+
+        // 목록으로 돌아가기
         function backToList() {
             const path = '/board/' + code.toLowerCase();
             $location.path(path).search({});
         }
         $scope.cancel = backToList;
 
-        // ───────────────── 파일 선택 ─────────────────
-        $scope.onFileChange = function (element) {
-            $scope.$apply(function () {
-                $scope.form = $scope.form || {};
-                const files = Array.from(element.files || []);
-                $scope.form.files = files;
-                $scope.form.file = files[0] || null;
-
-                // ★★★ 새로 선택한 파일을 "현재 첨부 파일" + 미리보기에도 반영 ★★★
-                // 기존에 DB에서 내려온 첨부가 없던 글(= fileList 비어있음)일 때만
-                if (!$scope.meta || !$scope.meta.fileList || $scope.meta.fileList.length === 0) {
-                    // meta 객체가 없으면 만들어 두기
-                    $scope.meta = $scope.meta || {};
-
-                    // 새 파일들을 Object URL 기반 미리보기용으로 변환
-                    const list = files.map(function (f) {
-                        const isImage = (f.type || '').toLowerCase().indexOf('image') === 0;
-                        return {
-                            url: URL.createObjectURL(f), // 브라우저 로컬 미리보기용 URL
-                            fileName: f.name, // 파일 이름
-                            fileType: isImage ? 'IMAGE' : 'FILE',
-                        };
-                    });
-
-                    // "현재 첨부 파일" 섹션에서 사용할 메타 데이터
-                    $scope.meta.fileList = list;
-                    $scope.meta.fileCount = list.length;
-
-                    // 본문 미리보기에서도 이 파일들을 사용
-                    $scope.files = list;
-                    $scope.previewWidths = [];
-                    list.forEach(function (_, i) {
-                        $scope.previewWidths[i] = 100; // 기본 100%
-                    });
-
-                    // 토큰 기준으로 미리보기 즉시 갱신
-                    updatePreview();
-                }
-            });
-        };
-
-        // ───────────────── 파일 메타 정규화 ─────────────────
-        function normalizeFileMeta(raw) {
-            if (!raw) return null;
-
-            const url = raw.url || raw.fileUrl || raw.downloadUrl || raw.path || raw.link || null;
-
-            const fileName = raw.originalFilename || raw.fileName || raw.filename || raw.name || raw.originName || null;
-
-            const fileType = raw.fileType || raw.type || raw.contentType || null;
-
-            return { url, fileName, fileType };
-        }
-
-        function safeParseFileList(json) {
-            if (!json) return [];
-            try {
-                const v = JSON.parse(json);
-                let arr = [];
-                if (Array.isArray(v)) arr = v;
-                else if (v && Array.isArray(v.files)) arr = v.files;
-                else if (v && Array.isArray(v.list)) arr = v.list;
-                else if (v && typeof v === 'object') arr = [v];
-                else arr = [];
-
-                const norm = [];
-                arr.forEach(function (one) {
-                    const m = normalizeFileMeta(one);
-                    if (m && m.url) norm.push(m);
-                });
-                return norm;
-            } catch (e) {
-                console.warn('file_list_json parse error:', e, json);
-                return [];
-            }
-        }
-
-        // ───────────────── 본문 미리보기(토큰 → 이미지) ─────────────────
-        $scope.files = [];
-        $scope.previewHtml = '';
-
-        function updatePreview() {
-            const files = $scope.files || [];
-            if (!$scope.form) {
-                $scope.previewHtml = $sce.trustAsHtml('');
-                return;
-            }
-
-            let raw = $scope.form.content || '';
-            // 줄바꿈 → <br/>
-            let html = raw.replace(/\n/g, '<br/>');
-
-            files.forEach(function (f, idx) {
-                const num = idx + 1;
-                const re = new RegExp('\\[\\[file\\s*:?\\s*' + num + '(?:\\s+width\\s*=\\s*(\\d+)%?)?\\s*\\]\\]', 'gi');
-
-                const url = f.url || f.fileUrl || f.downloadUrl || f.path || f.link || null;
-
-                if (!url) return;
-
-                html = html.replace(re, function (match, w1) {
-                    const w = w1 || '100';
-                    return '<div style="margin:8px 0;">' + '<img src="' + url + '" ' + 'style="max-width:' + w + '%; height:auto; display:block;" />' + '</div>';
-                });
-            });
-
-            $scope.previewHtml = $sce.trustAsHtml(html);
-        }
-
-        // form.content가 바뀔 때마다 미리보기 갱신
-        $scope.$watch(
-            function () {
-                return $scope.form && $scope.form.content;
-            },
-            function () {
-                updatePreview();
-            }
-        );
-
-        // ───────────────── 토큰 width 1개만 유지 ─────────────────
-        $scope.previewWidths = [];
-
-        // index(0 기반) / width(30,60,100 같은 숫자)
-        $scope.setFileWidth = function (index, width) {
-            if (!$scope.form) return;
-            const n = index + 1;
-            let content = $scope.form.content || '';
-
-            // [[file:n ...]] 토큰 전체(여러 개 있으면 전부) 찾는 정규식
-            const reAll = new RegExp('\\[\\[file\\s*:?\\s*' + n + '(?:\\s+width\\s*=\\s*[^\\]]+)?\\s*\\]\\]', 'gi');
-
-            // 첫 번째 토큰 위치
-            const firstMatch = reAll.exec(content);
-            const firstIndex = firstMatch ? firstMatch.index : -1;
-
-            // 모든 토큰 삭제
-            content = content.replace(reAll, '');
-
-            const token = '[[file:' + n + ' width=' + width + '%]]';
-
-            if (firstIndex === -1) {
-                // 원래 토큰이 하나도 없었으면 맨 뒤에 추가
-                content = (content ? content + '\n' : '') + token;
-            } else {
-                // 첫 번째 토큰 위치에만 1개 삽입
-                content = content.slice(0, firstIndex) + token + content.slice(firstIndex);
-            }
-
-            $scope.form.content = content;
-
-            const num = parseInt(width, 10);
-            $scope.previewWidths[index] = isFinite(num) && num > 0 ? num : 100;
-
-            updatePreview(); // 미리보기도 즉시 갱신
-        };
-
-        // ───────────────── 게시글 로딩 ─────────────────
+        // ─────────────────────────────────────
+        // 단건 조회 (수정 화면 들어올 때 1번 호출)
+        // ─────────────────────────────────────
         function fetchOne() {
             $scope.loading = true;
 
             let url = null;
-            if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
-            else url = '/api/posts/key/' + encodeURIComponent(key);
+
+            // ★ BIG 게시판 숫자 id → /api/big-board/{id}
+            if (code === 'BIG' && type === 'num') {
+                url = '/api/big-board/' + encodeURIComponent(key);
+            } else if (type === 'num') {
+                url = '/api/posts/' + encodeURIComponent(key);
+            } else {
+                url = '/api/posts/key/' + encodeURIComponent(key);
+            }
 
             $http
                 .get(url)
                 .then(function (res) {
                     const p = res.data || {};
-
-                    let fileList = safeParseFileList(p.fileListJson || p.file_list_json);
-
-                    if ((!fileList || fileList.length === 0) && p.fileUrl) {
-                        fileList = [
-                            {
-                                url: p.fileUrl,
-                                fileName: p.fileName || '첨부파일',
-                                fileType: p.fileType || null,
-                            },
-                        ];
-                    }
-
                     $scope.form = {
                         title: p.title || '',
                         content: p.content || '',
-                        file: null,
-                        files: [],
                     };
-
-                    $scope.meta = {
-                        writerId: p.writerId,
-                        writerName: p.writerName,
-                        postId: p.postId,
-                        uuid: p.uuid,
-                        createdAt: p.createdAt,
-                        updatedAt: p.updatedAt,
-                        fileUrl: p.fileUrl,
-                        fileType: p.fileType,
-                        fileName: p.fileName,
-                        fileList: fileList,
-                        fileCount: fileList.length,
-                    };
-
-                    // 미리보기/버튼용 파일 목록
-                    $scope.files = fileList || [];
-
-                    // 초기 width 값
-                    $scope.previewWidths = [];
-                    ($scope.files || []).forEach(function (_, i) {
-                        $scope.previewWidths[i] = 100;
-                    });
-
-                    updatePreview();
+                })
+                .catch(function (err) {
+                    console.error('글 불러오기 실패', err);
+                    alert('게시글을 불러오는 중 오류가 발생했습니다.');
+                    backToList();
                 })
                 .finally(function () {
                     $scope.loading = false;
                 });
         }
 
-        // ───────────────── 저장 ─────────────────
+        // ─────────────────────────────────────
+        // 저장 (수정 완료)
+        // ─────────────────────────────────────
         $scope.save = function () {
-            const title = ($scope.form.title || '').trim();
-            const content = ($scope.form.content || '').trim();
-            if (!title) return alert('제목을 입력하세요.');
-
             if ($scope.saving) return;
-            $scope.saving = true;
 
-            const fd = new FormData();
-            fd.append('title', title);
-            fd.append('content', content);
-
-            const files = $scope.form.files || [];
-            if (files && files.length > 0) {
-                files.forEach(function (f) {
-                    fd.append('file', f);
-                });
+            if (!$scope.form || !$scope.form.title) {
+                alert('제목을 입력해 주세요.');
+                return;
             }
 
-            let url = null;
-            if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
-            else url = '/api/posts/key/' + encodeURIComponent(key);
+            const payload = {
+                title: $scope.form.title,
+                content: $scope.form.content,
+            };
 
-            $http
-                .put(url, fd, {
-                    headers: { 'Content-Type': undefined },
-                    transformRequest: angular.identity,
-                })
+            let url = null;
+            let method = 'PUT';
+
+            // ★ BIG 게시판 수정 → /api/big-board/{id}
+            if (code === 'BIG' && type === 'num') {
+                url = '/api/big-board/' + encodeURIComponent(key);
+            } else if (type === 'num') {
+                url = '/api/posts/' + encodeURIComponent(key);
+            } else {
+                url = '/api/posts/key/' + encodeURIComponent(key);
+            }
+
+            $scope.saving = true;
+
+            $http({
+                method: method,
+                url: url,
+                data: payload,
+            })
                 .then(function () {
-                    alert('수정 완료');
+                    alert('저장되었습니다.');
                     backToList();
                 })
                 .catch(function (err) {
-                    console.error('수정 실패', err);
-                    alert('수정 실패: ' + (err.status || '오류'));
+                    console.error('저장 실패', err);
+                    alert('저장 중 오류가 발생했습니다.');
                 })
                 .finally(function () {
                     $scope.saving = false;
                 });
         };
 
+        // ─────────────────────────────────────
+        // 삭제
+        // ─────────────────────────────────────
+        $scope.remove = function () {
+            if ($scope.deleting) return;
+            if (!confirm('정말 삭제하시겠습니까?')) return;
+
+            let url = null;
+
+            // ★ BIG 게시판 삭제 → /api/big-board/{id}
+            if (code === 'BIG' && type === 'num') {
+                url = '/api/big-board/' + encodeURIComponent(key);
+            } else if (type === 'num') {
+                url = '/api/posts/' + encodeURIComponent(key);
+            } else {
+                url = '/api/posts/key/' + encodeURIComponent(key);
+            }
+
+            $scope.deleting = true;
+
+            $http
+                .delete(url)
+                .then(function () {
+                    alert('삭제되었습니다.');
+                    backToList();
+                })
+                .catch(function (err) {
+                    console.error('삭제 실패', err);
+                    alert('삭제 중 오류가 발생했습니다.');
+                })
+                .finally(function () {
+                    $scope.deleting = false;
+                });
+        };
+
+        // 초기 1회 로딩
         fetchOne();
     });
 
@@ -1938,14 +1805,25 @@
 
         // ───────────────── 게시글 로딩 ─────────────────
         // 서버에서 게시글 한 건을 가져오는 함수
+        // ───────────────── 게시글 로딩 ─────────────────
+        // 서버에서 게시글 한 건을 가져오는 함수
         function loadOne() {
             // 로딩 시작
             $scope.loading = true;
             let url = null;
-            // type이 'num'이면 /api/posts/{숫자id} 사용
-            if (type === 'num') url = '/api/posts/' + encodeURIComponent(key);
-            // 그 외에는 문자열 key (uuid 등)를 사용하는 /api/posts/key/{key}
-            else url = '/api/posts/key/' + encodeURIComponent(key);
+
+            // 🔥 BIG 대용량 게시판 + 숫자 id인 경우 → /api/big-board/{id}
+            if (rawCode === 'big' && type === 'num') {
+                url = '/api/big-board/' + encodeURIComponent(key);
+            }
+            // 그 외 숫자 id 게시판 → /api/posts/{id}
+            else if (type === 'num') {
+                url = '/api/posts/' + encodeURIComponent(key);
+            }
+            // 문자열 key(uuid 등) → /api/posts/key/{key}
+            else {
+                url = '/api/posts/key/' + encodeURIComponent(key);
+            }
 
             // 정해진 url로 GET 요청
             $http
@@ -2011,34 +1889,141 @@
 
     // src/main/resources/static/app.js (일부)
     // 대용량 게시판 컨트롤러
-    app.controller('BoardBigCtrl', function ($scope, $controller, $http) {
+    app.controller('BoardBigCtrl', function ($scope, $controller, $http, $location, AuthService, $window) {
         'use strict';
 
-        // 공통 Base 기능 상속 (검색, 공통 메서드 등)
+        console.log('[BIG] BoardBigCtrl 초기화');
+
+        // 공통 Base 기능 상속 (검색 토글, 검색 폼 등)
         angular.extend(this, $controller('BoardBaseCtrl', { $scope: $scope }));
 
         // 이 컨트롤러가 담당하는 게시판 코드
         $scope.boardCode = 'BIG';
 
-        // 한 페이지에 보여줄 개수 (서버 PAGE_SIZE 와 맞춰서 1000)
-        const PAGE_SIZE = 1000;
-
-        // 페이지 관련 기본값들
-        $scope.pageSize = PAGE_SIZE; // 한 페이지 크기
-        $scope.pageSizes = [PAGE_SIZE]; // 선택 가능한 페이지 크기 목록 (1000 고정)
-
-        $scope.page = 0; // 현재 페이지(0-base)
-        $scope.pages = 1; // 전체 페이지 수
-        $scope.total = 0; // 전체 글 개수
-        $scope.posts = []; // 현재 페이지에 보여줄 글 목록
-        $scope.loading = false;
+        // ─────────────────────────────────────
+        // 상수 설정
+        // ─────────────────────────────────────
+        var PAGE_SIZE = 1000; // 서버에서 한 번에 가져올 개수
+        var CHUNK_SIZE = 100; // 스크롤 한 번에 화면에 추가할 개수
+        var MAX_PER_PAGE = 1000; // 한 페이지에서 화면에 최대 표시 개수
+        var APPROX_TOTAL = 100000000; // totalElements 못 받았을 때 대략치(1억)
+        var CHUNKS_PER_DB_PAGE = MAX_PER_PAGE / CHUNK_SIZE; // 1000 / 100 = 10
 
         // ─────────────────────────────────────
-        // BIG 게시판 전용 로딩 함수
-        //   - /api/big-board/posts?page=... 호출
-        //   - 서버에서는 BigPostDao.findPage() 를 사용 (OFFSET 없이 id 범위 조회)
-        //   - pages 는 여기서 total / size 로 직접 계산해서
-        //     예전에 어디에 남아 있을지 모르는 20,000 제한을 완전히 무시.
+        // 페이지 / 카운트 상태
+        // ─────────────────────────────────────
+        $scope.pageSize = PAGE_SIZE; // DB 기준 pageSize(1000)
+        $scope.pageSizes = [PAGE_SIZE];
+        $scope.page = 0; // DB 기준 페이지 index (0부터)
+        $scope.pages = Math.ceil(APPROX_TOTAL / PAGE_SIZE);
+        $scope.total = APPROX_TOTAL;
+        $scope.totalCount = APPROX_TOTAL; // 전체 건수
+        $scope.totalPages = Math.ceil(APPROX_TOTAL / CHUNK_SIZE); // 100개 단위 페이지 수
+        $scope.logicalPage = 1; // UI용 페이지 번호 (100개 단위)
+
+        $scope.posts = []; // 실제 화면에 보이는 목록
+        $scope._pagePosts = []; // 서버에서 받아온 "해당 DB 페이지 전체 목록"(최대 1000개)
+        $scope.displayCount = 0; // 화면에 몇 개까지 보여주는지 (100, 200, …)
+        $scope.loading = false;
+        $scope.loadingMore = false; // 스크롤 추가 로딩 중 여부
+
+        // 글쓰기 폼 & composer 표시 상태
+        $scope.showComposer = false;
+        $scope.form = {
+            title: '',
+            content: '',
+        };
+        $scope.saving = false;
+
+        // ─────────────────────────────────────
+        // 로그인 정보
+        // ─────────────────────────────────────
+        $scope.me = null;
+        AuthService.loadMe().then(function (me) {
+            $scope.me = me;
+            console.log('[BIG] me =', me);
+        });
+
+        // ─────────────────────────────────────
+        // BIG 전용 canEdit : 무조건 '내 글만' 수정/삭제
+        // ─────────────────────────────────────
+        $scope.canEdit = function (p) {
+            var me = $scope.me;
+            if (!me || !p) return false;
+
+            var myId = (me.username || me.userId || me.id || '').toString();
+            var writer = (p.writerId || p.writer || p.writerName || '').toString();
+            if (!myId || !writer) return false;
+
+            return myId === writer; // 관리자라도 내 글만 가능
+        };
+
+        // ─────────────────────────────────────
+        // 글쓰기 토글
+        // ─────────────────────────────────────
+        $scope.toggleComposer = function () {
+            $scope.showComposer = !$scope.showComposer;
+            if ($scope.showComposer && !$scope.form) {
+                $scope.form = { title: '', content: '' };
+            }
+        };
+
+        // ─────────────────────────────────────
+        // 글 등록
+        // ─────────────────────────────────────
+        $scope.submit = function () {
+            if ($scope.saving) return;
+
+            if (!$scope.form || !$scope.form.title) {
+                alert('제목을 입력해 주세요.');
+                return;
+            }
+
+            var me = $scope.me || {};
+            var writerId = (me.username || me.userId || me.id || 'anonymous').toString();
+
+            var payload = {
+                title: $scope.form.title,
+                content: $scope.form.content || '',
+                writerId: writerId,
+            };
+
+            $scope.saving = true;
+
+            $http
+                .post('/api/big-board', payload)
+                .then(function () {
+                    alert('등록되었습니다.');
+                    $scope.form = { title: '', content: '' };
+                    $scope.showComposer = false;
+
+                    $scope.page = 0;
+                    $scope.loadPosts();
+                    $window.scrollTo(0, 0);
+                })
+                .catch(function (err) {
+                    console.error('BIG 글쓰기 실패', err);
+                    alert('글 등록 중 오류가 발생했습니다.');
+                })
+                .finally(function () {
+                    $scope.saving = false;
+                });
+        };
+
+        // ─────────────────────────────────────
+        // UI용 페이지 번호 계산 (100개 단위)
+        // ─────────────────────────────────────
+        function updateLogicalPage() {
+            var base = ($scope.page || 0) * CHUNKS_PER_DB_PAGE;
+            var chunkIndex = 0;
+            if ($scope.displayCount && CHUNK_SIZE > 0) {
+                chunkIndex = Math.max(0, Math.ceil($scope.displayCount / CHUNK_SIZE) - 1);
+            }
+            $scope.logicalPage = base + chunkIndex + 1;
+        }
+
+        // ─────────────────────────────────────
+        // 목록 로딩 (서버에서 최대 1000개 가져오기)
         // ─────────────────────────────────────
         $scope.loadPosts = function () {
             if ($scope.loading) return;
@@ -2047,7 +2032,12 @@
             var pageParam = $scope.page || 0;
             if (pageParam < 0) pageParam = 0;
 
-            var params = { page: pageParam };
+            var q = $scope.q || {};
+            var params = { page: pageParam }; // size는 서버 기본값 1000 사용
+            if (q.type) params.type = q.type;
+            if (q.keyword) params.keyword = q.keyword;
+            if (q.from) params.from = q.from;
+            if (q.to) params.to = q.to;
 
             var url = '/api/big-board/posts';
             console.log('[BIG] 요청 URL =', url, 'params=', params);
@@ -2056,95 +2046,214 @@
                 .get(url, { params: params })
                 .then(function (res) {
                     var page = res.data || {};
+                    console.log('[BIG] 응답 데이터 =', page);
 
-                    // 서버 PageDTO 구조에 맞춰서 값 매핑
-                    $scope.posts = page.content || [];
-                    $scope.total = page.totalElements || 0;
-                    $scope.pageSize = page.size || PAGE_SIZE;
-
-                    // ★★★ 전체 페이지 수는 여기서 직접 계산 (20,000 제한 완전 제거) ★★★
-                    var total = $scope.total || 0;
-                    var size = $scope.pageSize || PAGE_SIZE;
-
-                    if (size <= 0) {
-                        $scope.pages = 1;
+                    var list;
+                    if (Array.isArray(page)) {
+                        list = page;
+                    } else if (page.content && angular.isArray(page.content)) {
+                        list = page.content;
+                    } else if (page.items && angular.isArray(page.items)) {
+                        list = page.items;
                     } else {
-                        var calcPages = Math.ceil(total / size);
-                        if (calcPages < 1) calcPages = 1;
-                        $scope.pages = calcPages;
+                        list = [];
                     }
 
-                    // 서버에서 넘어온 현재 page (0-base)
-                    $scope.page = page.page || 0;
+                    $scope._pagePosts = list || [];
 
-                    console.log('[BIG] 로딩 완료: page =', $scope.page, ', pages =', $scope.pages, ', total =', $scope.total);
+                    // 처음 화면에서는 100개만 보여줌
+                    $scope.displayCount = Math.min(CHUNK_SIZE, $scope._pagePosts.length, MAX_PER_PAGE);
+                    $scope.posts = $scope._pagePosts.slice(0, $scope.displayCount);
+
+                    // 페이지 크기(서버 기준 1000)
+                    var size = page.size;
+                    if (!size || size <= 0) size = PAGE_SIZE;
+                    $scope.pageSize = size;
+
+                    // 전체 개수
+                    var total = page.totalElements;
+                    if (typeof total !== 'number') total = APPROX_TOTAL;
+                    $scope.total = total;
+
+                    // DB 기준 페이지 수
+                    $scope.pages = Math.ceil(total / size) || 1;
+
+                    // 100개 단위 UI 페이지 수
+                    $scope.totalPages = Math.ceil(total / CHUNK_SIZE) || 1;
+
+                    // 현재 DB 페이지
+                    var curPage;
+                    if (typeof page.page === 'number') curPage = page.page;
+                    else if (typeof page.pageNumber === 'number') curPage = page.pageNumber;
+                    else curPage = pageParam;
+
+                    if (curPage < 0) curPage = 0;
+                    if (curPage >= $scope.pages) curPage = $scope.pages - 1;
+                    $scope.page = curPage;
+
+                    $scope.totalCount = total;
+
+                    updateLogicalPage();
+                    console.log('[BIG] 로딩 완료 → dbPage =', $scope.page, ', logicalPage =', $scope.logicalPage, ', 표시 =', $scope.displayCount);
                 })
                 .catch(function (err) {
                     console.error('BIG 게시판 로딩 실패', err);
                     alert('대용량 게시판 데이터를 불러오는 중 오류가 발생했습니다.');
+                    $scope._pagePosts = [];
+                    $scope.posts = [];
+                    $scope.displayCount = 0;
+                    $scope.logicalPage = 1;
                 })
                 .finally(function () {
                     $scope.loading = false;
                 });
         };
 
+        // 새로고침 버튼
+        $scope.reload = function () {
+            $scope.loadPosts();
+            $window.scrollTo(0, 0);
+        };
+
         // ─────────────────────────────────────
-        // 페이지 이동 함수들
+        // 스크롤로 100개씩 더 보기 (최대 1000까지)
         // ─────────────────────────────────────
-        $scope.first = function () {
-            if ($scope.page <= 0) return;
+        $scope.loadMoreInPage = function () {
+            if ($scope.loadingMore) return;
+            if (!$scope._pagePosts || !$scope._pagePosts.length) return;
+
+            var limit = Math.min(MAX_PER_PAGE, $scope._pagePosts.length);
+            if ($scope.displayCount >= limit) return; // 이미 최대
+
+            $scope.loadingMore = true;
+
+            var next = $scope.displayCount + CHUNK_SIZE;
+            if (next > limit) next = limit;
+
+            $scope.displayCount = next;
+            $scope.posts = $scope._pagePosts.slice(0, $scope.displayCount);
+
+            updateLogicalPage();
+            $scope.loadingMore = false;
+        };
+
+        // ─────────────────────────────────────
+        // 스크롤 이벤트: "이전보다 조금 더 내려갔을 때"만 100개 추가
+        // ─────────────────────────────────────
+        var lastLoadScrollY = 0; // 마지막으로 100개를 추가했을 때의 scrollY
+
+        function onScroll() {
+            if ($scope.loading || $scope.loadingMore) return;
+
+            var scrollBottom = window.innerHeight + window.scrollY;
+            var docHeight = document.body.offsetHeight;
+
+            // 바닥 80px 이내에 왔을 때만
+            var nearBottom = docHeight - scrollBottom <= 80;
+            if (!nearBottom) return;
+
+            // 🔴 직전에 100개를 추가했던 위치랑 거의 같으면 다시 추가하지 않음
+            //    → 사용자가 실제로 더 내려가야만 다음 100개 로딩
+            if ($scope.displayCount > 0 && window.scrollY <= lastLoadScrollY + 40) {
+                return;
+            }
+
+            $scope.$applyAsync(function () {
+                var before = $scope.displayCount;
+                $scope.loadMoreInPage();
+
+                // 실제로 100개가 추가되었으면 그 시점의 scrollY를 기억
+                if ($scope.displayCount !== before) {
+                    lastLoadScrollY = window.scrollY;
+                }
+            });
+        }
+
+        $window.addEventListener('scroll', onScroll);
+
+        $scope.$on('$destroy', function () {
+            $window.removeEventListener('scroll', onScroll);
+        });
+
+        // ─────────────────────────────────────
+        // 페이지 이동 (DB 기준: 1000 단위)
+        // ─────────────────────────────────────
+        $scope.hasPrevPage = function () {
+            return $scope.page > 0;
+        };
+
+        // pageSize * (page+1) < total 이고, 이 페이지에서 1000개까지 다 본 경우에만 다음 페이지
+        $scope.hasNextPage = function () {
+            var morePage = ($scope.page + 1) * $scope.pageSize < $scope.total;
+            if (!morePage) return false;
+
+            var pageLimit = Math.min(MAX_PER_PAGE, ($scope._pagePosts || []).length);
+            return $scope.displayCount >= pageLimit && pageLimit >= MAX_PER_PAGE;
+        };
+
+        $scope.goFirst = function () {
+            if (!$scope.hasPrevPage()) return;
             $scope.page = 0;
             $scope.loadPosts();
+            $window.scrollTo(0, 0);
         };
 
-        $scope.prev = function () {
-            if ($scope.page <= 0) return;
+        $scope.goPrev = function () {
+            if (!$scope.hasPrevPage()) return;
             $scope.page = $scope.page - 1;
+            if ($scope.page < 0) $scope.page = 0;
             $scope.loadPosts();
+            $window.scrollTo(0, 0);
         };
 
-        $scope.next = function () {
-            if ($scope.page >= $scope.pages - 1) return;
+        $scope.goNext = function () {
+            if (!$scope.hasNextPage()) return;
             $scope.page = $scope.page + 1;
             $scope.loadPosts();
+            $window.scrollTo(0, 0);
         };
 
-        $scope.last = function () {
-            if ($scope.page >= $scope.pages - 1) return;
+        $scope.goLast = function () {
+            if (!$scope.hasNextPage()) return;
             $scope.page = $scope.pages - 1;
+            if ($scope.page < 0) $scope.page = 0;
             $scope.loadPosts();
-        };
-
-        // 하단 페이지 숫자 버튼 클릭용
-        $scope.go = function (p) {
-            if (p === undefined || p === null) return;
-            if (p < 0) p = 0;
-            if (p >= $scope.pages) p = $scope.pages - 1;
-            if (p === $scope.page) return;
-
-            $scope.page = p;
-            $scope.loadPosts();
-        };
-
-        // 하단에 뿌릴 페이지 범위 (현재 기준 좌우 2개씩)
-        $scope.pageRange = function () {
-            var pages = $scope.pages || 1; // 총 페이지 수
-            var cur = $scope.page || 0; // 현재 페이지(0-base)
-
-            var span = 2; // 현재 기준 좌우 2개 → 최대 5 버튼
-            var start = Math.max(0, cur - span);
-            var end = Math.min(pages - 1, cur + span);
-
-            var arr = [];
-            for (var i = start; i <= end; i++) {
-                arr.push(i);
-            }
-            return arr;
+            $window.scrollTo(0, 0);
         };
 
         // ─────────────────────────────────────
-        // 초기 로딩: 0페이지(가장 최신 구간)부터
+        // 상세 보기 / 수정 / 삭제
         // ─────────────────────────────────────
+        $scope.goView = function (p) {
+            if (!p || !p.id) return;
+
+            var path = '/board/big/view/' + encodeURIComponent(p.id);
+            $location.path(path).search({ type: 'num' }); // 숫자 PK
+        };
+
+        $scope.goEdit = function (p) {
+            if (!p || !p.id) return;
+            var path = '/board/big/edit/num/' + encodeURIComponent(p.id);
+            $location.path(path).search({});
+        };
+
+        $scope.remove = function (p) {
+            if (!p || !p.id) return;
+            if (!confirm('정말 삭제하시겠습니까?')) return;
+
+            $http
+                .delete('/api/big-board/' + encodeURIComponent(p.id))
+                .then(function () {
+                    alert('삭제되었습니다.');
+                    $scope.loadPosts();
+                })
+                .catch(function (err) {
+                    console.error('BIG 삭제 실패', err);
+                    alert('삭제 중 오류가 발생했습니다.');
+                });
+        };
+
+        // 초기 로딩
         $scope.loadPosts();
     });
 

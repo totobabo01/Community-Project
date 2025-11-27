@@ -1,75 +1,92 @@
 // src/main/java/com/example/demo/dto/BigPostDto.java
-package com.example.demo.dto;   // 이 클래스가 속한 패키지 이름을 지정. 다른 파일에서 import 할 때 이 경로를 사용하게 됨.
+package com.example.demo.dto;
 
-import java.time.LocalDateTime; // Java 8 날짜/시간 타입 중 하나인 LocalDateTime을 사용하기 위해 import.
+import java.time.LocalDateTime;
 
-// big_posts 테이블의 한 줄(한 개 게시글)을 담는 그릇 역할을 하는 DTO 클래스
+/**
+ * big_posts 테이블의 한 행(게시글 1개)을 담는 DTO.
+ *  - id          ↔ big_posts.id
+ *  - title       ↔ big_posts.title
+ *  - content     ↔ big_posts.content
+ *  - writerId    ↔ big_posts.writer_id
+ *  - createdAt   ↔ big_posts.created_at
+ *  - updatedAt   ↔ big_posts.updated_at
+ */
 public class BigPostDto {
 
-    private Long id;                 // 글 번호(PK). DB의 big_posts.id 컬럼과 매핑.
-    private String title;            // 게시글 제목. big_posts.title 컬럼과 매핑.
-    private String content;          // 게시글 내용. big_posts.content 컬럼과 매핑.
-    private String writerId;         // 작성자의 아이디(또는 이름). big_posts.writer_id 컬럼과 매핑.
-    private LocalDateTime createdAt; // 글이 작성된 날짜/시간. big_posts.created_at 컬럼과 매핑.
-    private LocalDateTime updatedAt; // 글이 수정된 날짜/시간. big_posts.updated_at 컬럼과 매핑.
+    private Long id;                 // 글 번호(PK)
+    private String title;            // 제목
+    private String content;          // 내용
+    private String writerId;         // 작성자 아이디
+    private LocalDateTime createdAt; // 작성일시
+    private LocalDateTime updatedAt; // 수정일시
 
-    // ───── 기본 생성자 ─────
+    // 기본 생성자 (프레임워크/Jackson 등이 사용)
     public BigPostDto() {
-        // 아무 값도 세팅하지 않는 기본 생성자.
-        // 스프링이나 Jackson, JdbcTemplate 등이
-        // "일단 객체부터 하나 만들고, 나중에 setter로 값 채우기" 패턴을 쓸 때 필요함.
+    }
+
+    // 모든 필드를 한 번에 넣는 생성자 (편의용, 안 써도 상관 없음)
+    public BigPostDto(Long id,
+                      String title,
+                      String content,
+                      String writerId,
+                      LocalDateTime createdAt,
+                      LocalDateTime updatedAt) {
+        this.id = id;
+        this.title = title;
+        this.content = content;
+        this.writerId = writerId;
+        this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
     }
 
     // ───── getter / setter ─────
-    // 아래부터는 각 필드를 읽고/쓰는 메서드들.
-    // ▶ getXxx() : 값 읽기
-    // ▶ setXxx() : 값 넣기
 
-    public Long getId() {   // id 값을 읽어오는 메서드
-        return id;          // 현재 객체(this)의 id 필드를 리턴
+    public Long getId() {
+        return id;
     }
 
-    public void setId(Long id) { // id 값을 외부에서 넣어줄 때 사용하는 메서드
-        this.id = id;            // 매개변수로 받은 id를 이 객체의 필드 id에 저장
+    public void setId(Long id) {
+        this.id = id;
     }
 
-    public String getTitle() {   // title 값을 읽는 메서드
-        return title;            // 현재 객체의 title 필드를 반환
+    public String getTitle() {
+        return title;
     }
 
-    public void setTitle(String title) { // title 값을 설정하는 메서드
-        this.title = title;              // 전달받은 title 값을 필드에 대입
+    public void setTitle(String title) {
+        this.title = title;
     }
 
-    public String getContent() { // content 값을 읽는 메서드
-        return content;          // 현재 객체의 content 내용을 반환
+    public String getContent() {
+        return content;
     }
 
-    public void setContent(String content) { // content 값을 설정하는 메서드
-        this.content = content;              // 전달받은 content를 필드에 저장
+    public void setContent(String content) {
+        this.content = content;
     }
 
-    public String getWriterId() { // writerId 값을 읽는 메서드
-        return writerId;          // 현재 객체의 writerId 필드를 반환
+    public String getWriterId() {
+        return writerId;
     }
 
-    public void setWriterId(String writerId) { // writerId 값을 설정하는 메서드
-        this.writerId = writerId;              // 전달받은 writerId를 필드에 저장
+    public void setWriterId(String writerId) {
+        this.writerId = writerId;
     }
 
-    public LocalDateTime getCreatedAt() { // createdAt 값을 읽는 메서드
-        return createdAt;                 // 현재 객체의 createdAt 필드를 반환
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
     }
 
-    public void setCreatedAt(LocalDateTime createdAt) { // createdAt 값을 설정하는 메서드
-        this.createdAt = createdAt;                     // 전달받은 createdAt을 필드에 저장
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 
-    public LocalDateTime getUpdatedAt() { // updatedAt 값을 읽는 메서드
-        return updatedAt;                 // 현재 객체의 updatedAt 필드를 반환
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
     }
 
-    public void setUpdatedAt(LocalDateTime updatedAt) { // updatedAt 값을 설정하는 메서드
-        this.updatedAt = updatedAt;                     // 전달받은 updatedAt을 필드에 저장
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
     }
 }
