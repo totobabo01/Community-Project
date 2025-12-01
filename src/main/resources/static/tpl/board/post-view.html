@@ -3,106 +3,230 @@
     class="board-shell"
     ng-cloak
 >
-    <!-- 상단 헤더 영역 (예전 디자인) -->
+    <!-- 헤더: edit.html 과 같은 card-header-like 사용 -->
     <div class="section-header card-header-like">
         <div class="title-wrap">
             <span class="title-dot"></span>
-            <h2 style="margin: 0">게시글 보기</h2>
+            <div>
+                <h2 style="margin: 0">게시글 보기</h2>
+                <h3
+                    class="post-title-text"
+                    ng-if="post"
+                >
+                    {{ post.title }}
+                </h3>
+                <div
+                    class="post-meta"
+                    ng-if="post"
+                >
+                    <span>작성자: {{ post.writerName || post.writerId || post.writer_id }}</span>
+                    <span>·</span>
+                    <span>{{ (post.updatedAt || post.createdAt || post.created_at) | date:'yyyy-MM-dd HH:mm:ss' }}</span>
+                </div>
+            </div>
         </div>
         <div class="header-actions">
             <button
+                class="btn"
                 type="button"
-                class="btn btn-outline"
                 ng-click="backToList()"
+                ng-disabled="loading"
             >
-                목록으로
+                목록
             </button>
         </div>
     </div>
 
-    <!-- 로딩 중 -->
+    <!-- 로딩 -->
     <div
-        class="card"
+        class="status-box"
         ng-if="loading"
     >
-        <div class="card-body">
-            <p>⏳ 게시글을 불러오는 중입니다...</p>
-        </div>
+        ⏳ 게시글을 불러오는 중입니다...
     </div>
 
-    <!-- 게시글 없음 -->
+    <!-- 본문 + 첨부파일 카드 (edit.html 의 composer-wrap 스타일 재사용) -->
     <div
-        class="card"
-        ng-if="!loading && !post"
-    >
-        <div class="card-body">
-            <p>게시글을 찾을 수 없습니다.</p>
-            <button
-                type="button"
-                class="btn btn-primary"
-                ng-click="backToList()"
-            >
-                목록으로 돌아가기
-            </button>
-        </div>
-    </div>
-
-    <!-- 게시글 내용 -->
-    <div
-        class="card post-view-card"
+        class="composer-wrap"
         ng-if="!loading && post"
     >
-        <div class="card-body">
-            <!-- 제목 -->
-            <h1
-                class="post-title"
-                style="margin-top: 0; margin-bottom: 8px"
-            >
-                {{ post.title }}
-            </h1>
-
-            <!-- 메타 정보 -->
+        <!-- ★ 본문: [[file:1]] 토큰이 치환된 HTML 출력 -->
+        <div class="post-body">
+            <!-- 컨트롤러에서 만든 renderedContent가 있으면 그걸 사용 -->
             <div
-                class="post-meta"
-                style="font-size: 14px; color: #666; margin-bottom: 16px"
-            >
-                <span>작성자: {{ post.writerName || post.writerId || '알 수 없음' }}</span>
-                <span ng-if="post.createdAt"> &nbsp;·&nbsp; {{ post.createdAt }} </span>
-            </div>
-
-            <!-- 본문 (이미지 토큰 치환된 renderedContent 사용) -->
-            <div
-                class="post-content"
+                class="post-body-content"
+                ng-if="renderedContent"
                 ng-bind-html="renderedContent"
             ></div>
 
-            <!-- 첨부 파일 영역 -->
+            <!-- renderedContent가 없으면 안전하게 원본 content만 출력 -->
             <div
-                class="post-attachments"
-                ng-if="post.attachments && post.attachments.length"
-                style="margin-top: 24px; border-top: 1px solid #eee; padding-top: 12px"
+                class="post-body-content"
+                ng-if="!renderedContent"
             >
-                <div style="font-weight: 600; margin-bottom: 8px">첨부 파일</div>
-                <ul style="list-style: none; padding: 0; margin: 0">
-                    <li
-                        ng-repeat="f in post.attachments"
-                        style="margin-bottom: 4px"
-                    >
-                        <a
-                            ng-href="{{f.url}}"
-                            download="{{f.fileName || '파일'}}"
-                        >
-                            📎 {{ f.fileName || ('파일 ' + ($index + 1)) }}
-                        </a>
-                        <span
-                            style="font-size: 12px; color: #888"
-                            ng-if="f.size"
-                        >
-                            ({{ formatFileSize(f.size) }})</span
-                        >
-                    </li>
-                </ul>
+                {{ post.content }}
             </div>
+        </div>
+
+        <!-- 첨부 파일 목록 -->
+        <div
+            class="attach-box"
+            ng-if="(files && files.length) || (post.attachments && post.attachments.length)"
+        >
+            <h4 style="margin-top: 0">첨부 파일</h4>
+            <ul>
+                <!-- files가 있으면 files, 없으면 post.attachments 사용 -->
+                <li ng-repeat="f in ( (files && files.length) ? files : (post.attachments || []) )">
+                    <a
+                        ng-href="{{ f.url }}"
+                        target="_blank"
+                    >
+                        📎 {{ f.originalFilename || f.fileName || f.name || ('파일 ' + ($index+1)) }}
+                    </a>
+                    <span
+                        class="muted"
+                        ng-if="f.sizeText || f.size"
+                    >
+                        ({{ f.sizeText || formatFileSize(f.size) }})
+                    </span>
+                </li>
+            </ul>
         </div>
     </div>
 </div>
+
+<style>
+    [ng-cloak] {
+        display: none;
+    }
+
+    /* ───────── edit.html 과 공통 레이아웃 ───────── */
+    .board-shell {
+        padding: 12px;
+    }
+    .card-header-like {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: #fff;
+        border: 1px solid #edf0f5;
+        border-radius: 12px;
+        padding: 12px 16px;
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.04);
+        margin-bottom: 12px;
+    }
+    .title-wrap {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .title-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #2d7ef7;
+    }
+    .header-actions {
+        display: flex;
+        gap: 8px;
+    }
+    .btn {
+        border: 1px solid #d7ddea;
+        background: #fff;
+        padding: 7px 12px;
+        border-radius: 10px;
+        font-size: 14px;
+        cursor: pointer;
+    }
+    .btn:hover {
+        background: #f7f9fc;
+    }
+    .btn.primary {
+        background: #2d7ef7;
+        color: #fff;
+        border-color: #2d7ef7;
+    }
+    .btn.btn-danger {
+        background: #e74c3c;
+        color: #fff;
+        border-color: #e74c3c;
+    }
+    .composer-wrap {
+        background: #fff;
+        border: 1px solid #edf0f5;
+        border-radius: 12px;
+        padding: 12px 16px;
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.04);
+        margin-bottom: 12px;
+    }
+    .status-box {
+        background: #fff;
+        border: 1px solid #edf0f5;
+        border-radius: 12px;
+        padding: 10px 16px;
+        margin-bottom: 12px;
+        color: #4b5563;
+    }
+
+    /* ───────── 보기 화면 전용 스타일 ───────── */
+    .post-title-text {
+        margin: 4px 0 6px;
+        font-size: 22px;
+    }
+    .post-meta {
+        font-size: 13px;
+        color: #6b7280;
+        display: flex;
+        gap: 6px;
+    }
+
+    .post-body {
+        padding-top: 8px;
+        border-top: 1px solid #edf0f5;
+        font-size: 15px;
+        line-height: 1.7;
+        margin-top: 4px;
+    }
+    .post-body-content {
+        word-break: break-word;
+        white-space: pre-wrap; /* 줄바꿈 유지 */
+    }
+
+    /* ★ 이미지: edit 화면과 맞추기 위해 공통 규격/중앙 정렬 */
+    .post-body img {
+        max-width: 260px; /* 원하는 최대 폭 (edit 기준 크기로 맞춤) */
+        width: 100%;
+        height: auto;
+        display: block;
+        margin: 16px auto; /* 위아래 여백 + 가운데 정렬 */
+        border-radius: 8px;
+        object-fit: contain;
+    }
+
+    /* 첨부 파일 */
+    .attach-box {
+        margin-top: 16px;
+        padding-top: 10px;
+        border-top: 1px solid #edf0f5;
+        font-size: 14px;
+    }
+    .attach-box ul {
+        list-style: none;
+        padding-left: 0;
+        margin: 8px 0 0;
+    }
+    .attach-box li {
+        margin: 4px 0;
+    }
+    .attach-box a {
+        text-decoration: none;
+        color: #2563eb;
+    }
+    .attach-box a:hover {
+        text-decoration: underline;
+    }
+    .muted {
+        color: #9ca3af;
+        font-size: 12px;
+    }
+</style>

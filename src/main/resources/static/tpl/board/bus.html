@@ -157,6 +157,7 @@
             ng-submit="createPost()"
             style="margin: 12px 0"
         >
+            <!-- 제목 -->
             <input
                 class="inline-input input-like"
                 type="text"
@@ -165,17 +166,18 @@
                 aria-label="제목"
             />
             <br />
-            <!-- ✏️ 본문 textarea : 커서 위치에 토큰 삽입을 위해 id 추가 -->
+
+            <!-- ✏️ 본문 textarea : Summernote 대상 -->
             <textarea
-                id="newPostContent"
-                class="inline-input input-like"
-                style="height: 120px; margin-top: 8px"
+                id="busEditor"
+                class="inline-input input-like rich-editor"
+                style="height: 260px; margin-top: 8px"
                 ng-model="newPost.content"
                 placeholder="내용"
                 aria-label="내용"
             ></textarea>
 
-            <!-- 🔽 첨부 파일 선택 인풋 -->
+            <!-- 첨부 파일 선택 (단순 업로드 + Summernote 외부 업로드용) -->
             <div style="margin-top: 8px">
                 <input
                     type="file"
@@ -186,7 +188,6 @@
                     aria-label="첨부 파일 선택"
                 />
 
-                <!-- 선택된 파일들의 요약 정보 표시 (기존 그대로 유지) -->
                 <span
                     class="file-meta"
                     ng-if="newPost.files && newPost.files.length"
@@ -199,29 +200,8 @@
                     class="file-meta muted"
                     ng-if="!newPost.files || !newPost.files.length"
                 >
-                    선택된 파일 없음
+                    선택된 파일 없음 (※ 에디터 안으로 이미지를 드래그&드롭해도 됩니다)
                 </span>
-            </div>
-            <!-- 🔼 첨부 파일 선택 인풋 끝 -->
-
-            <!-- ✨ 각 파일을 클릭(버튼)해서 본문에 넣는 영역 -->
-            <div
-                class="file-insert-list"
-                ng-if="newPost.files && newPost.files.length"
-            >
-                <div
-                    class="file-insert-item"
-                    ng-repeat="f in newPost.files track by $index"
-                >
-                    <span class="file-insert-text"> {{ $index + 1 }}. {{ f.name }} </span>
-                    <button
-                        type="button"
-                        class="btn sm"
-                        ng-click="insertAttachmentToken($index)"
-                    >
-                        본문에 넣기
-                    </button>
-                </div>
             </div>
 
             <div style="margin-top: 8px; text-align: right">
@@ -275,7 +255,7 @@
                 ‹ 이전
             </button>
 
-            <!-- 🔢 가운데 숫자 버튼: pages > 1 일 때 항상 표시 -->
+            <!-- 숫자 버튼 -->
             <span
                 class="pager-pages"
                 ng-if="pages > 1"
@@ -332,14 +312,14 @@
         >
             <!-- 제목/내용/댓글 -->
             <div class="c-title">
-                <!-- 🔽 제목 + 첨부파일 표시라인 -->
+                <!-- 제목 + 첨부파일 표시라인 -->
                 <div class="post-title-line">
-                    <!-- ✅ 썸네일(이미지/아이콘)은 그대로 유지 -->
+                    <!-- 썸네일/파일 아이콘 -->
                     <div
                         class="post-file-indicator"
                         ng-if="p.fileUrl || p.fileType === 'FILE'"
                     >
-                        <!-- 이미지인 경우: 썸네일 -->
+                        <!-- 이미지 썸네일 -->
                         <a
                             ng-if="p.fileType === 'IMAGE' && p.fileUrl"
                             ng-href="{{ p.fileUrl }}"
@@ -353,7 +333,7 @@
                             />
                         </a>
 
-                        <!-- 일반 파일인 경우: 아이콘 -->
+                        <!-- 일반 파일 아이콘 -->
                         <a
                             ng-if="p.fileType === 'FILE' && p.fileUrl"
                             class="post-file-icon-link"
@@ -365,28 +345,25 @@
                         </a>
                     </div>
 
-                    <!-- 제목 (클릭 시 상세 보기 이동) -->
+                    <!-- 제목 (상세 보기로 이동) -->
                     <div class="post-title">
                         <a
                             href=""
-                            ng-click="goDetail(p)"
+                            ng-click="goView(p)"
                             class="post-title-link"
                         >
                             <strong>{{ p.title }}</strong>
                         </a>
                     </div>
                 </div>
-                <!-- 🔼 제목 + 첨부파일 표시라인 끝 -->
 
-                <!-- 🔥 목록에서는 파일 메타(이름/크기/타입) 숨김: 두개임 같은 내용만 보이게 -->
-                <!-- (post-file-meta 블록 전체 삭제) -->
-
-                <!-- 본문 요약: [[file1 width=...]] 같은 토큰은 잘라내고 앞부분만 표시 -->
+                <!-- 🔥 본문 요약: HTML / base64 제거 + 80자까지만 표시 -->
                 <div
                     class="post-snippet"
                     ng-if="p.content"
                 >
-                    {{ (p.content || '').split('[[')[0] }}
+                    {{ p.content | stripHtml | limitTo: 80 }}
+                    <span ng-if="(p.content | stripHtml).length > 80">…</span>
                 </div>
 
                 <button
@@ -568,7 +545,6 @@
                 ‹ 이전
             </button>
 
-            <!-- 🔢 하단 숫자 버튼: pages > 1 일 때 항상 표시 -->
             <span
                 class="pager-pages"
                 ng-if="pages > 1"
@@ -865,22 +841,6 @@
     }
     .file-meta.muted {
         color: #9ca3af;
-    }
-    .file-insert-list {
-        margin-top: 6px;
-    }
-    .file-insert-item {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-top: 2px;
-    }
-    .file-insert-text {
-        font-size: 12px;
-        color: #4b5563;
-        flex: 1 1 auto;
-        min-width: 0;
-        word-break: break-all;
     }
     .badge {
         display: inline-block;

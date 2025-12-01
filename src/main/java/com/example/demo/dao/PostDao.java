@@ -158,12 +158,18 @@ public class PostDao {                         // 게시글 관련 DB 작업을 
     private String findBoardUuidByCode(String boardCode) {
         // board 테이블은 코드에 관계없이 고정(프로젝트 스키마 기준)
         final String sql = "SELECT uuid FROM board WHERE board_code = ? AND is_active = 1"; // 활성화된(board.is_active=1) 게시판 중에서 uuid 조회
-        List<String> list = jdbc.query(                   // JdbcTemplate으로 쿼리 실행
-                sql,                                      // 위에서 정의한 SQL 사용
-                (rs, i) -> rs.getString(1),               // 결과 한 행당 첫 번째 컬럼(uuid)을 String으로 매핑
-                boardCode                                 // ? 자리에 들어갈 파라미터(board_code)
-        );
-        return list.isEmpty() ? null : list.get(0);       // 결과가 없으면 null, 있으면 첫 번째 uuid 반환
+        try {
+            List<String> list = jdbc.query(                   // JdbcTemplate으로 쿼리 실행
+                    sql,                                      // 위에서 정의한 SQL 사용
+                    (rs, i) -> rs.getString(1),               // 결과 한 행당 첫 번째 컬럼(uuid)을 String으로 매핑
+                    boardCode                                 // ? 자리에 들어갈 파라미터(board_code)
+            );
+            return list.isEmpty() ? null : list.get(0);       // 결과가 없으면 null, 있으면 첫 번째 uuid 반환
+        } catch (DataAccessException e) {
+            // board 테이블이 없거나 접근 실패하면 그냥 null 반환해서 fallback 사용
+            System.out.println("[PostDao] findBoardUuidByCode 실패, boardCode=" + boardCode + " / " + e.getMessage());
+            return null;
+        }
     }
 
     private boolean boardColumnIsUuid(SchemaInfo s) {
@@ -465,6 +471,14 @@ public class PostDao {                         // 게시글 관련 DB 작업을 
         // (테이블명, PK 컬럼명, board 컬럼명, created_at/updated_at 등)
         var s = ensurePostResolved();
 
+        // ★ boardCode 가 비어 있으면 임시로 "BUS" 사용 (NOT NULL 에러 방지용)
+        String boardCode = d.getBoardCode();
+        if (!hasText(boardCode)) {
+            boardCode = "BUS";
+            d.setBoardCode(boardCode);
+            System.out.println("[PostDao] boardCode 가 비어있어 임시로 'BUS' 사용");
+        }
+
         // INSERT 시 사용할 컬럼 이름들을 담을 리스트
         List<String> cols = new ArrayList<>();      // INSERT할 컬럼명 목록
         // 각 컬럼에 매핑될 실제 값(바인딩 파라미터)을 담을 리스트
@@ -485,34 +499,47 @@ public class PostDao {                         // 게시글 관련 DB 작업을 
             vals.add(generatedUuid);
         }
 
-        // ★ 핵심: post.board 컬럼이 board_uuid 컬럼인지, board_code 컬럼인지에 따라 다르게 처리
-        if (boardColumnIsUuid(s)) {                  // 게시판을 uuid 기반으로 연결하는 스키마라면
-            // DTO에 들어있는 boardCode(예: "BUS", "NORM")를 이용해 실제 board 테이블의 uuid 조회
-            String boardUuid = findBoardUuidByCode(d.getBoardCode());
-            // 만약 code에 해당하는 board를 찾지 못하면 예외 발생
-            if (boardUuid == null)
-                throw new IllegalStateException("board_code를 찾을 수 없습니다: " + d.getBoardCode());
-            // INSERT 컬럼에 board 컬럼명(s.board = "board_uuid" 등) 추가
-            cols.add(s.board);
-            // 값 목록에는 방금 조회한 boardUuid 추가
-            vals.add(boardUuid);
-        } else {                                     // board_code를 문자열로 직접 저장하는 스키마인 경우
-            cols.add(s.board);                       // board_code 컬럼 추가
-            vals.add(d.getBoardCode());              // 값으로는 "BUS", "NORM" 같은 코드 문자열 추가
+        // ★ board 컬럼 처리
+        if (s.board != null) {
+            if (boardColumnIsUuid(s)) {                  // 게시판을 uuid 기반으로 연결하는 스키마라면
+                String boardUuid = null;
+                try {
+                    // boardCode(예: "BUS", "NORM")를 이용해 실제 board 테이블의 uuid 조회
+                    boardUuid = findBoardUuidByCode(boardCode);
+                } catch (Exception e) {
+                    System.out.println("[PostDao] board uuid 조회 중 예외, code=" + boardCode + " / " + e.getMessage());
+                }
+
+                if (boardUuid != null) {
+                    // 정상적으로 uuid 를 찾은 경우 → uuid 저장
+                    cols.add(s.board);
+                    vals.add(boardUuid);
+                } else {
+                    // board 테이블에 없거나 조회 실패한 경우 → 안전하게 코드 문자열 그대로 저장
+                    // (board_uuid 컬럼이 VARCHAR 타입이면 문제 없이 들어감)
+                    System.out.println("[PostDao] board uuid를 찾지 못하여 코드 문자열로 대체 저장: " + boardCode);
+                    cols.add(s.board);
+                    vals.add(boardCode);
+                }
+            } else {                                     // board_code를 문자열로 직접 저장하는 스키마인 경우
+                cols.add(s.board);                       // board_code 컬럼 추가
+                vals.add(boardCode);                     // 값으로는 "BUS", "NORM" 같은 코드 문자열 추가
+            }
         }
 
         // 제목 컬럼명 추가
-        cols.add(s.title);
-        // 제목 값 추가
-        vals.add(d.getTitle());
+        if (s.title != null) {
+            cols.add(s.title);
+            vals.add(d.getTitle());
+        }
 
         // 본문 컬럼명 추가
-        cols.add(s.content);
-        // 본문 값 추가
-        vals.add(d.getContent());
+        if (s.content != null) {
+            cols.add(s.content);
+            vals.add(d.getContent());
+        }
 
         // 🔽 첨부파일 관련 컬럼이 스키마에 존재하는 경우에만 INSERT에 포함
-
         if (s.fileUrl != null) {
             cols.add(s.fileUrl);                     // file_url 컬럼명
             vals.add(d.getFileUrl());                // DTO의 fileUrl 값(대표 파일 URL)
@@ -577,7 +604,7 @@ public class PostDao {                         // 게시글 관련 DB 작업을 
             }, kh);                                             // 실행 후 생성된 키는 kh에 담김
         } catch (DataAccessException e) {
             // 위 SQL이 실패한 경우(예: created_at/updated_at 컬럼이 실제로는 없는데 hasCreated/hasUpdated가 true인 경우 등)
-            // created_at/updated_at 컬럼을 뺀 INSERT SQL로 재시도
+            System.out.println("[PostDao] insert 1차 시도 실패, created/updated 제거 후 재시도: " + e.getMessage());
             String sql2 = "INSERT INTO " + s.table + " (" +
                     String.join(", ", cols) + ") VALUES (" +
                     String.join(", ", Collections.nCopies(cols.size(), "?")) + ")";

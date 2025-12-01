@@ -1,271 +1,232 @@
-<!-- /tpl/board/edit.html -->
+<!-- src/main/resources/static/tpl/board/edit.html -->
 <div
-    style="background: #fff; border-radius: 16px; box-shadow: 0 10px 30px rgba(31, 38, 135, 0.08); padding: 18px"
+    class="board-shell"
     ng-cloak
 >
-    <div style="background: #fbfdff; border: 1px solid #edf0f5; border-radius: 12px; padding: 18px">
-        <div class="section-header">
-            <div class="section-title">
-                <span class="dot"></span>
-                <h2 style="margin: 0">게시글 수정</h2>
+    <!-- 헤더 -->
+    <div class="section-header card-header-like">
+        <div class="title-wrap">
+            <span class="title-dot"></span>
+            <h2 style="margin: 0">게시글 수정</h2>
+        </div>
+        <div class="header-actions">
+            <button
+                class="btn"
+                type="button"
+                ng-click="goList()"
+                ng-disabled="saving || loading"
+            >
+                목록
+            </button>
+            <button
+                class="btn btn-danger"
+                type="button"
+                ng-click="remove()"
+                ng-disabled="saving || deleting || loading"
+            >
+                삭제
+            </button>
+            <button
+                class="btn primary"
+                type="button"
+                ng-click="save()"
+                ng-disabled="saving || loading"
+            >
+                저장
+            </button>
+        </div>
+    </div>
+
+    <!-- 로딩 -->
+    <div
+        class="status-box"
+        ng-if="loading"
+    >
+        ⏳ 게시글 정보를 불러오는 중입니다...
+    </div>
+
+    <!-- 수정 폼 -->
+    <div
+        class="composer-wrap"
+        ng-if="!loading"
+    >
+        <form ng-submit="save()">
+            <!-- 제목 -->
+            <div style="margin-bottom: 8px">
+                <input
+                    class="inline-input input-like"
+                    type="text"
+                    ng-model="form.title"
+                    placeholder="제목"
+                    aria-label="제목"
+                />
             </div>
 
-            <div class="actions">
+            <!-- ✏️ 본문 : Summernote 대상 -->
+            <textarea
+                id="editEditor"
+                class="inline-input input-like rich-editor"
+                style="height: 260px; margin-top: 8px"
+                ng-model="form.content"
+                placeholder="내용"
+                aria-label="내용"
+            ></textarea>
+
+            <!-- 새 첨부 파일 선택 (원래 쓰던 부분 유지) -->
+            <div style="margin-top: 10px">
+                <input
+                    type="file"
+                    multiple
+                    file-model="form.files"
+                    aria-label="새 첨부 파일 선택"
+                />
+                <span
+                    class="file-meta"
+                    ng-if="form.files && form.files.length"
+                >
+                    새로 선택한 파일 {{ form.files.length }}개
+                </span>
+                <span
+                    class="file-meta muted"
+                    ng-if="!form.files || !form.files.length"
+                >
+                    새 파일을 첨부하지 않으면 기존 파일은 그대로 유지됩니다.
+                </span>
+            </div>
+
+            <div style="margin-top: 10px; text-align: right">
                 <button
                     class="btn"
-                    ng-click="cancel()"
+                    type="button"
+                    ng-click="goList()"
+                    ng-disabled="saving || loading"
                 >
                     목록
                 </button>
-
                 <button
-                    class="btn danger"
-                    ng-click="remove()"
-                    ng-disabled="deleting"
-                >
-                    삭제
-                </button>
-
-                <button
-                    class="btn blue"
-                    ng-click="save()"
-                    ng-disabled="saving"
+                    class="btn primary"
+                    type="submit"
+                    ng-disabled="saving || loading"
                 >
                     저장
                 </button>
             </div>
-        </div>
+        </form>
+    </div>
 
-        <!-- 로딩 표시 -->
+    <!-- 현재 첨부 파일 영역 (기존 스타일 참고해서 구성) -->
+    <div
+        class="composer-wrap"
+        ng-if="!loading && attachments && attachments.length"
+        style="margin-top: 10px"
+    >
+        <h4 style="margin-top: 0; margin-bottom: 8px">현재 첨부 파일</h4>
         <div
-            ng-if="loading"
-            class="status-box"
+            ng-repeat="f in attachments track by (f.id || f.uuid || f.fileId || $index)"
+            style="margin-bottom: 6px"
         >
-            ⏳ 불러오는 중...
-        </div>
-
-        <!-- ▶ 본문 -->
-        <div ng-if="!loading">
-            <!-- 제목 -->
-            <input
-                class="inline-input"
-                placeholder="제목"
-                ng-model="form.title"
-            />
-
-            <!-- 내용 : 토큰이 그대로 보이는 텍스트 영역 -->
-            <textarea
-                id="editContent"
-                class="inline-input"
-                style="height: 300px; margin-top: 8px"
-                placeholder="내용"
-                ng-model="form.content"
-            ></textarea>
-
-            <!-- ★★★ 토큰을 실제 이미지로 치환해서 보여주는 본문 미리보기 ★★★ -->
-            <div style="margin-top: 12px; padding: 10px; border-radius: 10px; border: 1px solid #e5e7eb; background: #f9fafb">
-                <div style="font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #4b5563">
-                    본문 미리보기
-                    <span style="font-size: 11px; color: #9ca3af; margin-left: 6px"> ([[file:n width=60]] 자리에 실제 이미지가 표시됩니다) </span>
-                </div>
-
-                <div
-                    style="min-height: 40px; font-size: 14px; line-height: 1.6; color: #111827"
-                    ng-bind-html="previewHtml"
-                ></div>
+            <div>
+                [{{$index+1}}]
+                <strong>{{ f.originalFilename || f.fileName || f.name }}</strong>
+                ({{ f.fileType || f.type }})
             </div>
-
-            <!-- ===============================
-                 🔥 현재 첨부파일 (이미지 미리보기 제거 + 본문에 넣기)
-            ================================= -->
             <div
-                style="margin-top: 16px; padding-top: 14px; border-top: 1px solid #e2e8f0"
-                ng-if="meta"
+                class="muted"
+                style="font-size: 12px"
             >
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px">
-                    현재 첨부 파일
-                    <span
-                        ng-if="meta.fileList && meta.fileList.length > 0"
-                        style="font-size: 13px; color: #666"
-                    >
-                        ({{ meta.fileList.length }}개)
-                    </span>
-                </div>
-
-                <!-- ✅ file_list_json 기반: 여러 개 첨부파일 (이미지 <img> 제거) -->
-                <div ng-if="meta.fileList && meta.fileList.length > 0">
-                    <ul style="margin: 0; padding-left: 0">
-                        <li
-                            ng-repeat="f in meta.fileList track by $index"
-                            style="margin-bottom: 10px; list-style: none"
-                        >
-                            <!-- 파일 링크 / 이름만 표시 -->
-                            <div style="font-size: 13px; margin-bottom: 2px">
-                                <span style="color: #6b7280; margin-right: 4px">[{{ $index + 1 }}]</span>
-                                <a
-                                    ng-href="{{ f.url }}"
-                                    target="_blank"
-                                    rel="noopener"
-                                    style="text-decoration: underline; color: #2563eb"
-                                >
-                                    {{ f.fileName || ('첨부파일 ' + ($index + 1)) }}
-                                </a>
-                                <span style="font-size: 11px; color: #9ca3af; margin-left: 6px"> ({{ f.fileType || 'FILE' }}) </span>
-                            </div>
-
-                            <!-- 본문에 넣기 + 크기 옵션 -->
-                            <div style="font-size: 12px; color: #4b5563; margin-top: 2px">
-                                본문에 넣기:
-                                <button
-                                    type="button"
-                                    class="btn light sm"
-                                    ng-click="setFileWidth($index, 30)"
-                                >
-                                    작게(30%)
-                                </button>
-                                <button
-                                    type="button"
-                                    class="btn light sm"
-                                    ng-click="setFileWidth($index, 60)"
-                                >
-                                    보통(60%)
-                                </button>
-                                <button
-                                    type="button"
-                                    class="btn light sm"
-                                    ng-click="setFileWidth($index, 100)"
-                                >
-                                    크게(100%)
-                                </button>
-
-                                <span style="font-size: 11px; color: #9ca3af; margin-left: 6px"> 현재: {{ previewWidths[$index] || 100 }}% </span>
-                            </div>
-                        </li>
-                    </ul>
-
-                    <div style="font-size: 12px; color: #6b7280; margin-top: 4px">
-                        ※ 본문에는
-                        <code>[[file:n width=60]]</code>
-                        형식의 토큰이 들어가며, 위의 <strong>본문 미리보기</strong>에서 실제 이미지 위치/크기를 확인할 수 있습니다.
-                    </div>
-                </div>
-
-                <!-- ✅ 구(旧) 스키마: fileList 없고 fileUrl만 있는 경우 (이미지 <img> 제거) -->
-                <div ng-if="(!meta.fileList || meta.fileList.length === 0) && meta.fileUrl">
-                    <div style="font-size: 13px; margin-bottom: 4px">
-                        <span style="color: #6b7280; margin-right: 4px">[1]</span>
-                        <a
-                            ng-href="{{ meta.fileUrl }}"
-                            target="_blank"
-                            style="text-decoration: underline; color: #2563eb"
-                        >
-                            {{ meta.fileName || '첨부 파일 열기' }}
-                        </a>
-                        <span style="font-size: 11px; color: #9ca3af; margin-left: 6px"> ({{ meta.fileType || 'FILE' }}) </span>
-                    </div>
-
-                    <div style="font-size: 12px; color: #4b5563; margin-top: 2px">
-                        본문에 넣기:
-                        <button
-                            type="button"
-                            class="btn light sm"
-                            ng-click="setFileWidth(0, 30)"
-                        >
-                            작게(30%)
-                        </button>
-                        <button
-                            type="button"
-                            class="btn light sm"
-                            ng-click="setFileWidth(0, 60)"
-                        >
-                            보통(60%)
-                        </button>
-                        <button
-                            type="button"
-                            class="btn light sm"
-                            ng-click="setFileWidth(0, 100)"
-                        >
-                            크게(100%)
-                        </button>
-
-                        <span style="font-size: 11px; color: #9ca3af; margin-left: 6px"> 현재: {{ previewWidths[0] || 100 }}% </span>
-                    </div>
-                </div>
-
-                <!-- 첨부가 완전히 없을 때 -->
-                <div
-                    ng-if="(!meta.fileList || meta.fileList.length === 0) && !meta.fileUrl"
-                    style="font-size: 13px; color: #9ca3af"
-                >
-                    첨부된 파일이 없습니다.
-                </div>
-            </div>
-
-            <!-- ===============================
-                 🔥 새 파일 업로드 선택
-            ================================= -->
-            <div style="margin-top: 18px; padding: 12px; border-radius: 10px; border: 1px dashed #94a3b8; background: #f8fafc">
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 6px">새로운 파일 업로드 (선택 사항)</div>
-
-                <label
-                    for="editFile"
-                    style="display: inline-block; padding: 6px 12px; border-radius: 6px; cursor: pointer; background: #fff; border: 1px solid #d1d5db; font-size: 13px"
-                >
-                    파일 선택
-                    <!-- 🔹 여러 개 파일 선택 허용 + onFileChange 호출 -->
-                    <input
-                        id="editFile"
-                        type="file"
-                        multiple
-                        style="display: none"
-                        onchange="angular.element(this).scope().onFileChange(this)"
-                    />
-                </label>
-
-                <!-- 🔹 선택된 파일명들 표시 (여러 개) -->
-                <span
-                    ng-if="form.files && form.files.length"
-                    style="margin-left: 8px; color: #475569; font-size: 13px"
-                >
-                    선택된 파일: {{ form.files.length }}개
-                </span>
-
-                <ul
-                    ng-if="form.files && form.files.length"
-                    style="margin-top: 6px; padding-left: 18px; font-size: 12px; color: #4b5563"
-                >
-                    <li ng-repeat="f in form.files">{{ f.name }}</li>
-                </ul>
-
-                <div style="font-size: 12px; margin-top: 6px; color: #6b7280">
-                    ※ 새 파일을 선택하지 않으면 기존 첨부 파일은 그대로 유지됩니다.<br />
-                    ※ 본문에 삽입된 <code>[[file:n width=...]]</code> 토큰은 첨부파일 순서 / 크기에 따라 이미지/파일로 표시됩니다.
-                </div>
-            </div>
-
-            <!-- 작성자/날짜 -->
-            <div style="margin-top: 20px; color: #6b7280; font-size: 13px">
-                <div>작성자: {{ meta.writerName || meta.writerId }}</div>
-                <div>작성일: {{ meta.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
-                <div>수정일: {{ meta.updatedAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
-            </div>
-
-            <!-- 하단 버튼 -->
-            <div style="margin-top: 16px">
-                <button
-                    class="btn"
-                    ng-click="cancel()"
-                >
-                    취소
-                </button>
-                <button
-                    class="btn blue"
-                    ng-click="save()"
-                    ng-disabled="saving"
-                >
-                    저장
-                </button>
+                작성자: {{ f.writerName || f.writerId || post.writerName || post.writerId }}<br />
+                작성일: {{ (f.createdAt || post.createdAt) | date:'yyyy-MM-dd HH:mm' }}<br />
+                수정일: {{ (f.updatedAt || post.updatedAt) | date:'yyyy-MM-dd HH:mm' }}
             </div>
         </div>
     </div>
 </div>
+
+<!-- 스타일은 bus.html 과 거의 동일하게 유지 -->
+<style>
+    [ng-cloak] {
+        display: none;
+    }
+    .board-shell {
+        padding: 12px;
+    }
+    .card-header-like {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: #fff;
+        border: 1px solid #edf0f5;
+        border-radius: 12px;
+        padding: 12px 16px;
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.04);
+        margin-bottom: 12px;
+    }
+    .title-wrap {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .title-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #2d7ef7;
+    }
+    .btn {
+        border: 1px solid #d7ddea;
+        background: #fff;
+        padding: 7px 12px;
+        border-radius: 10px;
+        font-size: 14px;
+        cursor: pointer;
+    }
+    .btn:hover {
+        background: #f7f9fc;
+    }
+    .btn.primary {
+        background: #2d7ef7;
+        color: #fff;
+        border-color: #2d7ef7;
+    }
+    .btn.btn-danger {
+        background: #e74c3c;
+        color: #fff;
+        border-color: #e74c3c;
+    }
+    .composer-wrap {
+        background: #fff;
+        border: 1px solid #edf0f5;
+        border-radius: 12px;
+        padding: 12px 16px;
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.04);
+        margin-bottom: 12px;
+    }
+    .input-like {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #d7ddea;
+        border-radius: 10px;
+        padding: 10px 12px;
+        outline: none;
+        font-size: 14px;
+    }
+    .input-like:focus {
+        border-color: #2d7ef7;
+    }
+    .file-meta {
+        font-size: 12px;
+        color: #6b7280;
+        margin-left: 6px;
+    }
+    .file-meta.muted {
+        color: #9ca3af;
+    }
+    .status-box {
+        background: #fff;
+        border: 1px solid #edf0f5;
+        border-radius: 12px;
+        padding: 10px 16px;
+        margin-bottom: 12px;
+        color: #4b5563;
+    }
+</style>

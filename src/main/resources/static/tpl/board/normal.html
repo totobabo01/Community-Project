@@ -165,17 +165,17 @@
                 aria-label="제목"
             />
             <br />
-            <!-- ✏️ 본문 textarea : 커서 위치에 토큰 삽입을 위해 id 추가 -->
+            <!-- ✏️ 본문 textarea : TinyMCE 에디터 대상 -->
             <textarea
-                id="newPostContent"
-                class="inline-input input-like"
-                style="height: 120px; margin-top: 8px"
+                id="busEditor"
+                class="inline-input input-like rich-editor"
+                style="height: 260px; margin-top: 8px"
                 ng-model="newPost.content"
                 placeholder="내용"
                 aria-label="내용"
             ></textarea>
 
-            <!-- 🔽 첨부 파일 선택 인풋 -->
+            <!-- 🔽 첨부 파일 선택 인풋 (에디터용 이미지/파일 업로드) -->
             <div style="margin-top: 8px">
                 <input
                     type="file"
@@ -204,25 +204,7 @@
             </div>
             <!-- 🔼 첨부 파일 선택 인풋 끝 -->
 
-            <!-- ✨ 각 파일을 클릭(버튼)해서 본문에 넣는 영역 -->
-            <div
-                class="file-insert-list"
-                ng-if="newPost.files && newPost.files.length"
-            >
-                <div
-                    class="file-insert-item"
-                    ng-repeat="f in newPost.files track by $index"
-                >
-                    <span class="file-insert-text"> {{ $index + 1 }}. {{ f.name }} </span>
-                    <button
-                        type="button"
-                        class="btn sm"
-                        ng-click="insertAttachmentToken($index)"
-                    >
-                        본문에 넣기
-                    </button>
-                </div>
-            </div>
+            <!-- ✅ [[file:...]] 토큰용 '본문에 넣기' UI는 제거함 (에디터에서 직접 이미지를 삽입) -->
 
             <div style="margin-top: 8px; text-align: right">
                 <button
@@ -377,9 +359,6 @@
                     </div>
                 </div>
                 <!-- 🔼 제목 + 첨부파일 표시라인 끝 -->
-
-                <!-- 🔥 목록에서는 파일 메타(이름/크기/타입) 숨김: 두개임 같은 내용만 보이게 -->
-                <!-- (post-file-meta 블록 전체 삭제) -->
 
                 <!-- 본문 요약: [[file1 width=...]] 같은 토큰은 잘라내고 앞부분만 표시 -->
                 <div
@@ -865,22 +844,6 @@
     }
     .file-meta.muted {
         color: #9ca3af;
-    }
-    .file-insert-list {
-        margin-top: 6px;
-    }
-    .file-insert-item {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-top: 2px;
-    }
-    .file-insert-text {
-        font-size: 12px;
-        color: #4b5563;
-        flex: 1 1 auto;
-        min-width: 0;
-        word-break: break-all;
     }
     .badge {
         display: inline-block;

@@ -26,16 +26,16 @@ public class BigPostDao {
     }
 
     // ─────────────────────────────────────
-    // 공통 RowMapper
+    // 공통 RowMapper  (DB 컬럼: id, writer_id)
     // ─────────────────────────────────────
     private static class BigPostRowMapper implements RowMapper<BigPostDto> {
         @Override
         public BigPostDto mapRow(ResultSet rs, int rowNum) throws SQLException {
             BigPostDto d = new BigPostDto();
-            d.setId(rs.getLong("id"));
+            d.setId(rs.getLong("id"));                 // PK
             d.setTitle(rs.getString("title"));
             d.setContent(rs.getString("content"));
-            d.setWriterId(rs.getString("writer_id"));
+            d.setWriterId(rs.getString("writer_id"));  // 작성자
 
             Timestamp cts = rs.getTimestamp("created_at");
             if (cts != null) {
@@ -81,17 +81,17 @@ public class BigPostDao {
         if (lowId < minId) lowId = minId;
 
         String sql =
-            "SELECT id, title, content, writer_id, created_at, updated_at " +
-            "FROM big_posts " +
-            "WHERE id BETWEEN ? AND ? " +
-            "ORDER BY id DESC";
+                "SELECT id, title, content, writer_id, created_at, updated_at " +
+                "FROM big_posts " +
+                "WHERE id BETWEEN ? AND ? " +
+                "ORDER BY id DESC";
 
         return jdbc.query(sql, new BigPostRowMapper(), lowId, highId);
     }
 
     // ─────────────────────────────────────
     // ③ 특정 page 안에서 chunk 로 나눠서 가져오기
-    //    (lazy-load용, 그대로 둠)
+    //    (lazy-load용)
     // ─────────────────────────────────────
     public List<BigPostDto> findChunkInPage(int page, int pageSize, Long lastId, int size) {
         if (page < 0) page = 0;
@@ -109,9 +109,9 @@ public class BigPostDao {
         if (pageLow < minId) pageLow = minId;
 
         StringBuilder sb = new StringBuilder(
-            "SELECT id, title, content, writer_id, created_at, updated_at " +
-            "FROM big_posts " +
-            "WHERE id BETWEEN ? AND ? "
+                "SELECT id, title, content, writer_id, created_at, updated_at " +
+                "FROM big_posts " +
+                "WHERE id BETWEEN ? AND ? "
         );
         List<Object> args = new ArrayList<>();
         args.add(pageLow);
@@ -131,6 +131,11 @@ public class BigPostDao {
 
     // ─────────────────────────────────────
     // ④ 전체 테이블 기준 "무한 스크롤"용 메서드
+    //    # bigpost.select.first 예시와 비슷한 형태
+    //    SELECT id, title, writer_id, created_at
+    //      FROM big_posts
+    //      ORDER BY id DESC
+    //      LIMIT ?
     // ─────────────────────────────────────
     public List<BigPostDto> findFirstChunk(int size) {
         if (size <= 0) size = 100;
@@ -302,12 +307,6 @@ public class BigPostDao {
 
     // ─────────────────────────────────────
     // ⑪ 검색 + 페이지 (id 구간 방식, LIMIT만 사용)
-    //
-    //   - 1페이지: 최신 id 기준 0~999 범위 안에서 검색조건 만족하는 글
-    //   - 2페이지: 1000~1999 범위 안에서 검색조건 만족하는 글
-    //   - ...
-    //
-    //   → OFFSET 전혀 사용하지 않고, 기존 findPage 와 성능 비슷.
     // ─────────────────────────────────────
     public List<BigPostDto> searchPageByIdRange(
             String type,
