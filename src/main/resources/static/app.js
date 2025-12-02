@@ -4,7 +4,7 @@
 
     const app = angular.module('busApp', ['ngRoute']);
 
-    // HTML 태그 + data:image base64 + [[file:...]] 토큰 지우는 필터
+    // HTML 태그 + data:image base64 + [[file:...]] 토큰 + "파일 2" 같은 레이블 지우는 필터
     app.filter('stripHtml', function () {
         return function (input) {
             if (!input) return '';
@@ -12,13 +12,22 @@
             var text = String(input);
 
             // 0) [[file:...]] 토큰 제거 (예: [[file:1 width=100]])
-            text = text.replace(/\[\[file:[^\]]+\]\]/g, '');
+            text = text.replace(/\[\[file:[^\]]+\]\]/gi, '');
 
             // 1) HTML 태그 제거
             text = text.replace(/<[^>]+>/g, '');
 
             // 2) data:image ... base64=~~~ 이런 거 통째로 제거
-            text = text.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '');
+            text = text.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/gi, '');
+
+            // 3) 토큰/메타에서 남은 "파일 1", "[파일 2]" 같은 텍스트 제거
+            text = text.replace(/\[?\s*파일\s*\d+\s*\]?/g, '');
+
+            // 4) "첨부 파일" 문구 제거
+            text = text.replace(/첨부\s*파일/gi, '');
+
+            // 5) 공백 정리
+            text = text.replace(/\s+/g, ' ');
 
             return text.trim();
         };
@@ -1356,23 +1365,37 @@
         // 편집 폼
         $scope.form = {
             title: '',
-            content: '', // 서버로 보낼 최종 문자열 (BUS/NORM이면 토큰 문자열 또는 HTML)
+            content: '', // 서버로 보낼 최종 문자열 (BUS/NORM → 토큰 문자열, BIG → HTML)
             files: null, // 새로 선택한 파일들
         };
 
         // 메타 정보
         $scope.meta = null;
 
-        // 목록으로 돌아가기
+        // ───────────────── 목록으로 돌아가기 ─────────────────
+        // ───────────────── 목록으로 돌아가기 ─────────────────
         function backToList() {
-            const path = '/board/' + code.toLowerCase();
-            $location.path(path).search({});
+            let pathCode;
+
+            switch (code) {
+                case 'BUS':
+                    pathCode = 'bus';
+                    break;
+                case 'NORM': // ← 일반 게시판은 /board/normal 로
+                    pathCode = 'normal';
+                    break;
+                case 'BIG':
+                    pathCode = 'big';
+                    break;
+                default:
+                    pathCode = code.toLowerCase();
+            }
+
+            $location.path('/board/' + pathCode).search({});
         }
         $scope.cancel = backToList;
 
-        // ─────────────────────────────────────
-        // 메타 정규화
-        // ─────────────────────────────────────
+        // ───────────────── 메타 정규화 ─────────────────
         function normalizeMeta(p) {
             const meta = angular.copy(p.meta || {}) || {};
 
@@ -1402,28 +1425,37 @@
             return meta;
         }
 
-        // ─────────────────────────────────────
-        // 토큰([[file:n width=..]]) → 에디터용 HTML(<img ... data-file-index="...">)
-        //  ※ 기존에 저장된 HTML(<p>, <img src="data:..."> 등)은 그대로 두고,
-        //     토큰만 <img>로 치환하도록 수정
-        // ─────────────────────────────────────
+        // ───────────────── 토큰 → 에디터용 HTML ─────────────────
+        // [[file:n width=.. align=..]] → <img data-file-index="..."> + style
         function tokensToEditorHtml(content, meta) {
-            if (!USE_TOKEN) {
-                // BIG 게시판: 원래 HTML 그대로
-                return content || '';
-            }
+            if (!USE_TOKEN) return content || '';
 
             const m = meta || {};
             let html = content || '';
 
-            // [[file:n width=..]] 토큰을 <img>로 치환
-            const tokenRe = /\[\[file:(\d+)(?:\s+width=(\d+))?\s*\]\]/g;
+            // ★ 예전 버전에서 내용에 남아 있던 "[파일 2]", "파일 3", "첨부 파일" 같은 찌꺼기 텍스트 제거
+            html = html
+                .replace(/\[?\s*파일\s*\d+\s*\]?/gi, '') // [파일 2], 파일 3 등
+                .replace(/첨부\s*파일/gi, ''); // "첨부 파일"
 
-            html = html.replace(tokenRe, function (_, numStr, wStr) {
-                const n = parseInt(numStr, 10); // 1-based
+            const tokenRe = /\[\[file:(\d+)([^\]]*)\]\]/gi;
+
+            html = html.replace(tokenRe, function (_, numStr, attrStr) {
+                const n = parseInt(numStr, 10);
                 const idx = n - 1;
-                let width = wStr ? parseInt(wStr, 10) : 100;
-                if (isNaN(width) || width <= 0 || width > 100) width = 100;
+
+                let widthRaw = null; // "50", "50%", "300px"
+                let align = 'center';
+
+                attrStr = attrStr || '';
+
+                // width=50 / width=50% / width=300px
+                const mWidth = /width\s*=\s*([0-9]{1,4}(?:px|%)?)/i.exec(attrStr);
+                if (mWidth && mWidth[1]) widthRaw = mWidth[1];
+
+                // align=left|right|center
+                const mAlign = /align\s*=\s*(left|right|center)/i.exec(attrStr);
+                if (mAlign && mAlign[1]) align = mAlign[1].toLowerCase();
 
                 let url = null;
                 let fileName = null;
@@ -1433,69 +1465,102 @@
                     url = f.url || f.fileUrl || f.downloadUrl || f.path || null;
                     fileName = f.fileName || f.originalFilename || f.filename || f.name || '파일 ' + n;
                 } else if ((!m.fileList || m.fileList.length === 0) && n === 1) {
+                    // 예전 단일 파일 방식
                     url = m.fileUrl || m.url || null;
                     fileName = m.fileName || '첨부 파일';
                 }
 
-                if (!url) {
-                    return '[파일 ' + n + ']';
+                // ★ url 이 없으면 더 이상 "[파일 n]" 텍스트로 남기지 말고 그냥 제거
+                if (!url) return '';
+
+                // style 조립
+                const styleParts = [];
+
+                if (widthRaw) {
+                    if (/^\d+$/.test(widthRaw)) {
+                        // 숫자만 오면 %로 간주
+                        styleParts.push('width:' + parseInt(widthRaw, 10) + '%');
+                    } else {
+                        styleParts.push('width:' + widthRaw);
+                    }
+                    styleParts.push('max-width:100%');
+                } else {
+                    styleParts.push('max-width:100%');
                 }
 
-                return '<img ' + 'src="' + url + '" ' + 'data-file-index="' + idx + '" ' + 'style="max-width:100%; width:' + width + '%; border-radius:8px;" ' + 'alt="' + (fileName || '') + '"' + '/>';
-            });
+                styleParts.push('height:auto');
+                styleParts.push('border-radius:8px');
 
-            // ❌ 더 이상 HTML 전체를 이스케이프하지 않음
-            // ❌ \n → <br/> 강제 변환도 생략 (기존 HTML은 그대로, 순수 텍스트는 썸머노트가 알아서 처리)
+                if (align === 'left') {
+                    styleParts.push('float:left');
+                    styleParts.push('margin:8px 12px 8px 0');
+                } else if (align === 'right') {
+                    styleParts.push('float:right');
+                    styleParts.push('margin:8px 0 8px 12px');
+                } else {
+                    // center
+                    styleParts.push('display:block');
+                    styleParts.push('margin:16px auto');
+                }
+
+                const styleAttr = styleParts.join(';');
+
+                return '<img src="' + url + '" data-file-index="' + idx + '" style="' + styleAttr + ';" alt="' + (fileName || '') + '"/>';
+            });
 
             return html;
         }
 
-        // ─────────────────────────────────────
-        // 에디터 HTML → 토큰 문자열 (BUS/NORM 전용)
-        //   img[data-file-index] → [[file:n width=..]]
-        //   ✱ 나머지 HTML(<p>, <b> 등)은 그대로 유지하도록 수정
-        // ─────────────────────────────────────
+        // ───────────────── 에디터 HTML → 토큰 ─────────────────
+        // img[data-file-index] → [[file:n width=.. align=..]]
         function editorHtmlToTokens(html) {
-            if (!USE_TOKEN) {
-                // BIG 게시판은 HTML 그대로 저장
-                return html || '';
-            }
-
+            if (!USE_TOKEN) return html || '';
             if (!window.jQuery) return html || '';
-            const $ = window.jQuery;
 
+            const $ = window.jQuery;
             const $root = $('<div>').html(html || '');
 
-            // img[data-file-index] → 토큰
             $root.find('img[data-file-index]').each(function () {
                 const $img = $(this);
                 const idx = parseInt($img.attr('data-file-index'), 10);
+
                 if (isNaN(idx) || idx < 0) {
                     $img.remove();
                     return;
                 }
+
                 const n = idx + 1;
-                let width = 100;
+                let widthRaw = null;
+                let align = 'center';
 
                 const style = $img.attr('style') || '';
-                const m = /width:\s*([0-9\.]+)%/i.exec(style);
-                if (m) {
-                    const w = parseInt(m[1], 10);
-                    if (!isNaN(w) && w > 0 && w <= 100) width = w;
+
+                // width: 50%; / width: 300px;
+                const mWidth = /width\s*:\s*([0-9\.]+(?:px|%)?)/i.exec(style);
+                if (mWidth && mWidth[1]) widthRaw = mWidth[1];
+
+                // 정렬 추출
+                if (/float\s*:\s*left/i.test(style) || /margin-right\s*:\s*\d+px/i.test(style)) {
+                    align = 'left';
+                } else if (/float\s*:\s*right/i.test(style) || /margin-left\s*:\s*\d+px/i.test(style)) {
+                    align = 'right';
+                } else {
+                    align = 'center';
                 }
 
-                const token = '[[file:' + n + ' width=' + width + ']]';
+                // 토큰 문자열 생성
+                let token = '[[file:' + n;
+                if (widthRaw) token += ' width=' + widthRaw;
+                if (align) token += ' align=' + align;
+                token += ']]';
+
                 $img.replaceWith(token);
             });
 
-            // 🔁 이제 텍스트만 뽑지 않고, HTML 그대로 리턴
-            let out = $root.html() || '';
-            return out;
+            return $root.html() || '';
         }
 
-        // ─────────────────────────────────────
-        // Summernote 에디터 초기화
-        // ─────────────────────────────────────
+        // ───────────────── Summernote 에디터 초기화 ─────────────────
         function initEditor(initialHtml) {
             $timeout(function () {
                 if (!window.jQuery || !window.jQuery.fn || !window.jQuery.fn.summernote) return;
@@ -1549,10 +1614,7 @@
 
                                     $scope.form.files = list;
 
-                                    // 이미 미리보기한 파일이면 다시 안 넣기
-                                    if (file._previewed) {
-                                        return;
-                                    }
+                                    if (file._previewed) return;
                                     file._previewed = true;
 
                                     var idx = $scope.form.files.push(file) - 1;
@@ -1574,18 +1636,19 @@
             }, 0);
         }
 
-        // 수정 화면에서 파일 선택 input으로 고른 경우 → 에디터에 자동 삽입
+        // 파일 input으로 선택했을 때 자동 미리보기
         $scope.$watch(
             function () {
                 return $scope.form && $scope.form.files;
             },
             function (newVal) {
                 if (!newVal || !window.jQuery) return;
+
                 const $ = window.jQuery;
                 const $editor = $('#editEditor');
                 if (!$editor.length || !$editor.data('summernote')) return;
 
-                var list;
+                let list;
                 if (Array.isArray(newVal)) {
                     list = newVal;
                 } else if (typeof newVal.length === 'number' && typeof newVal.item === 'function') {
@@ -1609,7 +1672,7 @@
             }
         );
 
-        // 뷰/컨트롤러 파괴 시 에디터 정리
+        // 컨트롤러 파괴 시 에디터 정리
         $scope.$on('$destroy', function () {
             if (window.jQuery) {
                 const $ = window.jQuery;
@@ -1620,9 +1683,7 @@
             }
         });
 
-        // ─────────────────────────────────────
-        // 단건 조회 (수정 진입 시)
-        // ─────────────────────────────────────
+        // ───────────────── 단건 조회 (수정 진입 시) ─────────────────
         function fetchOne() {
             $scope.loading = true;
 
@@ -1648,7 +1709,12 @@
                         files: null,
                     };
 
-                    // ✅ 예전 글처럼 토큰이 하나도 없는데 첨부파일만 있는 경우:
+                    // ★ 서버에 저장돼 있던 "[파일 2]", "파일 3", "첨부 파일" 같은 텍스트도 한 번 정리
+                    if (USE_TOKEN) {
+                        $scope.form.content = ($scope.form.content || '').replace(/\[?\s*파일\s*\d+\s*\]?/gi, '').replace(/첨부\s*파일/gi, '');
+                    }
+
+                    // 토큰이 없고 첨부파일만 있는 옛날 글 → 기본 토큰 추가
                     if (USE_TOKEN && $scope.meta.fileList && $scope.meta.fileList.length > 0 && !/\[\[file:\d+/.test($scope.form.content || '')) {
                         var extra = '';
                         $scope.meta.fileList.forEach(function (_, i) {
@@ -1671,9 +1737,7 @@
                 });
         }
 
-        // ─────────────────────────────────────
-        // 저장
-        // ─────────────────────────────────────
+        // ───────────────── 저장 ─────────────────
         $scope.save = function () {
             if ($scope.saving) return;
 
@@ -1684,7 +1748,7 @@
 
             const payload = {
                 title: $scope.form.title,
-                content: $scope.form.content, // BUS/NORM: 토큰 포함 HTML, BIG: HTML
+                content: $scope.form.content, // BUS/NORM → 토큰 문자열, BIG → HTML
             };
 
             let url = null;
@@ -1735,6 +1799,7 @@
             $http(httpConfig)
                 .then(function () {
                     alert('저장되었습니다.');
+                    // ✅ 저장 후 항상 해당 게시판 목록으로 이동
                     backToList();
                 })
                 .catch(function (err) {
@@ -1746,9 +1811,7 @@
                 });
         };
 
-        // ─────────────────────────────────────
-        // 삭제
-        // ─────────────────────────────────────
+        // ───────────────── 삭제 ─────────────────
         $scope.remove = function () {
             if ($scope.deleting) return;
             if (!confirm('정말 삭제하시겠습니까?')) return;
@@ -1798,7 +1861,7 @@
         const key = $routeParams.key;
         const type = String($location.search().type || 'str').toLowerCase(); // 'num' | 'str'
 
-        // ───────── 목록 경로 계산 ─────────
+        // 목록 경로 계산
         function getListPath(code) {
             switch (code) {
                 case 'bus':
@@ -1812,13 +1875,12 @@
                     return '/board/bus';
             }
         }
-
         function backToList() {
             $location.path(getListPath(rawCode)).search({});
         }
         $scope.backToList = backToList;
 
-        // ───────── 파일 메타 정규화 ─────────
+        // 파일 메타 정규화
         function normalizeFileMeta(raw) {
             if (!raw) return null;
             const url = raw.url || raw.fileUrl || raw.downloadUrl || raw.path || raw.link || null;
@@ -1851,7 +1913,7 @@
             }
         }
 
-        // ───────── 유틸 (확장자/사이즈/이미지 판별) ─────────
+        // 파일 관련 유틸
         $scope.getFileExt = function (fileOrName) {
             if (!fileOrName) return '확장자 없음';
             var name = fileOrName;
@@ -1884,90 +1946,115 @@
             return /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif)$/i.test(name);
         };
 
-        // HTML 속성용 이스케이프 (alt, title 등)
         function escapeAttr(str) {
             return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
         }
 
-        // ───────── 본문 토큰 치환 ─────────
-        // ───────── 본문 토큰 치환 ─────────
-        // TinyMCE 가 만든 HTML 이라 전체 escape 하면 안 됨
+        // --- 이 위쪽은 [1/2] 내용 동일 ---
+
+        // ───────── 본문 토큰 치환(★ width/align 완전 수정 버전) ─────────
         function buildRenderedContent(p) {
             if (!p) return null;
 
-            // content(본문)가 없으면 일단 빈 문자열로 시작
             let html = String(p.content || '');
 
-            // 잘못 저장된 형태 "[ [[file:1]]" → "[[file:1]]" 정리
+            // 0) 잘못된 형태 "[ [[file:1]]" → "[[file:1]]"
             html = html.replace(/\[\s*\[\s*file/gi, '[[file');
+
+            // 1) 기존 <img> 태그 제거
+            html = html.replace(/<img[^>]*>/gi, '');
+
+            // 2) base64 이미지 제거
+            html = html.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/gi, '');
 
             const attachments = p.attachments || [];
 
-            // [[file:1]], [[file:2 width=60%]] 등 찾기
+            // [[file:1 width=50 align=left]] 등 잡기
             const re = /\[\[\s*file\s*:(\d+)([^\]]*)\]\]/gi;
 
-            // 토큰이 실제로 한 번이라도 쓰였는지 체크
             let tokenUsed = false;
 
-            html = html.replace(re, function (full, numStr, attrStr) {
-                tokenUsed = true; // 토큰을 하나라도 발견하면 true
+            html = html.replace(re, function (full, numStr, paramStr) {
+                tokenUsed = true;
 
                 const n = parseInt(numStr, 10);
                 const idx = isNaN(n) ? -1 : n - 1;
                 const att = attachments[idx];
 
-                let paramStr = attrStr || '';
-                const widthMatch = paramStr.match(/(?:width|w)\s*=\s*([0-9]{1,4}%?)/i);
-                let widthVal = widthMatch && widthMatch[1] ? widthMatch[1] : '100%';
+                // ------- width 파싱 (완전 재구현) -------
+                // width=50   width=50%   width=300px   w=300  w=300px
+                let widthVal = null;
+                const w = paramStr.match(/(?:width|w)\s*=\s*([0-9]+)(px|%)?/i);
+                if (w) {
+                    const num = w[1];
+                    const unit = w[2] || '%'; // 기본 단위는 %
+                    widthVal = num + unit;
+                }
 
-                let styleAttr;
-                if (/%$/.test(widthVal)) {
-                    styleAttr = 'style="max-width:100%;width:' + widthVal + ';height:auto;border-radius:10px;display:block;margin:12px auto;"';
+                // ------- align 파싱 -------
+                let alignVal = 'center';
+                const a = paramStr.match(/align\s*=\s*(left|right|center)/i);
+                if (a && a[1]) alignVal = a[1].toLowerCase();
+
+                // 이미지가 존재하지 않으면 토큰 그대로 반환
+                if (!att || !att.url) return full;
+
+                const safeUrl = att.url;
+                const safeName = escapeAttr(att.fileName || '첨부파일 ' + n);
+
+                // ───── 최종 style 생성 ─────
+                const styleParts = [];
+
+                // width 적용
+                if (widthVal) {
+                    styleParts.push('width:' + widthVal);
+                }
+                // 항상 max-width 제한 (레이아웃 깨지지 않게)
+                styleParts.push('max-width:100%');
+                styleParts.push('height:auto');
+                styleParts.push('border-radius:10px');
+                styleParts.push('display:block');
+
+                // 정렬
+                if (alignVal === 'left') {
+                    styleParts.push('margin:16px auto 16px 0');
+                } else if (alignVal === 'right') {
+                    styleParts.push('margin:16px 0 16px auto');
                 } else {
-                    styleAttr = 'style="max-width:100%;width:' + parseInt(widthVal, 10) + 'px;height:auto;border-radius:10px;display:block;margin:12px auto;"';
+                    styleParts.push('margin:16px auto');
                 }
 
-                if (att && att.url) {
-                    const safeUrl = att.url;
-                    const safeName = escapeAttr(att.fileName || '첨부파일 ' + n);
+                const styleAttr = 'style="' + styleParts.join(';') + ';"';
 
-                    if ($scope.isImage(att)) {
-                        // 이미지로 인라인 출력
-                        return '<div class="inline-img-wrap">' + '<img class="inline-img" src="' + safeUrl + '" alt="' + safeName + '" ' + styleAttr + ' />' + '</div>';
-                    } else {
-                        // 일반 파일이면 링크로
-                        return '<div class="inline-file-link-wrap">' + '<a class="inline-file-link" href="' + safeUrl + '" download="' + safeName + '">' + '📎 ' + safeName + '</a>' + '</div>';
-                    }
-                }
-
-                // 첨부를 못 찾으면 토큰 그대로 둔다
-                return full;
+                // ───── 이미지 렌더링 ─────
+                return `
+                <div class="inline-img-wrap">
+                    <img class="inline-img" src="${safeUrl}" alt="${safeName}" ${styleAttr} />
+                </div>
+            `;
             });
 
-            // 🔥 만약 [[file:n]] 토큰이 하나도 없는데 첨부파일이 있다면
-            //    이미지 첨부들을 본문 맨 아래에 자동으로 붙여준다.
+            // 토큰이 하나도 없는데 첨부파일이 있다 → 자동으로 아래쪽 출력
             if (!tokenUsed && attachments.length) {
-                let extraImgHtml = '';
+                let extra = '';
                 attachments.forEach(function (att, i) {
-                    if (!$scope.isImage(att)) return; // 이미지가 아니면 무시
-
+                    if (!$scope.isImage(att)) return;
                     const safeUrl = att.url;
                     const safeName = escapeAttr(att.fileName || '첨부파일 ' + (i + 1));
-
-                    extraImgHtml += '<div class="inline-img-wrap">' + '<img class="inline-img" src="' + safeUrl + '" alt="' + safeName + '" style="max-width:100%;height:auto;border-radius:10px;display:block;margin:12px auto;" />' + '</div>';
+                    extra += `
+                    <div class="inline-img-wrap">
+                        <img class="inline-img" src="${safeUrl}" alt="${safeName}"
+                             style="max-width:100%;height:auto;border-radius:10px;display:block;margin:16px auto;" />
+                    </div>
+                `;
                 });
-
-                if (extraImgHtml) {
-                    // 본문이 비어 있으면 이미지들만, 아니면 본문 뒤에 이어 붙이기
-                    html = (html || '') + extraImgHtml;
-                }
+                html += extra;
             }
 
-            // 최종 HTML을 신뢰된 HTML로 Angular에 넘김
             return $sce.trustAsHtml(html);
         }
 
-        // ───────── 게시글 1건 로딩 ─────────
+        // ───────── 게시글 1건 불러오기 ─────────
         function loadOne() {
             $scope.loading = true;
             let url = null;
@@ -1985,7 +2072,6 @@
                 .then(function (res) {
                     const p = res.data || {};
 
-                    // 첨부파일 리스트 파싱
                     let fileList = safeParseFileList(p.fileListJson || p.file_list_json);
                     if ((!fileList || fileList.length === 0) && p.fileUrl) {
                         fileList = [
@@ -2001,7 +2087,6 @@
                     p.attachments = fileList || [];
                     p.fileCount = p.attachments.length;
 
-                    // 하단 첨부 파일 리스트용 데이터 준비
                     $scope.files = (p.attachments || []).map(function (f) {
                         return {
                             url: f.url,
@@ -2020,18 +2105,16 @@
                 });
         }
 
-        // 로그인 정보 (권한용)
         AuthService.loadMe().finally(function () {
             $scope.me = AuthService.getMe();
         });
 
-        // 최초 1회 로딩
         loadOne();
     });
 
     // ───────────────── 게시판 라우트별 컨트롤러 ─────────────────
     // src/main/resources/static/app.js 안에 있는 BoardBusCtrl 전체 교체
-    app.controller('BoardBusCtrl', function ($scope, $controller, $timeout) {
+    app.controller('BoardBusCtrl', function ($scope, $controller, $timeout, $http) {
         // 공통 게시판 기능(BoardBaseCtrl) 상속
         angular.extend(this, $controller('BoardBaseCtrl', { $scope: $scope }));
 
@@ -2196,49 +2279,273 @@
             });
         });
 
+        // ───────────────── 게시글 삭제 (버튼: ng-click="deletePost(p)") ─────────────────
+        $scope.deletePost = function (p) {
+            if (!p) return;
+            if (!confirm('정말 삭제하시겠습니까?')) return;
+
+            const code = String($scope.boardCode || 'BUS').toUpperCase();
+            const hasUuid = !!p.uuid;
+            const type = hasUuid ? 'str' : 'num';
+            const key = hasUuid ? p.uuid : p.id;
+
+            let url = null;
+            if (code === 'BIG' && type === 'num') {
+                // (BUS 게시판에서는 안 쓰이지만, 혹시 코드 재사용할 수 있으니 그대로 둠)
+                url = '/api/big-board/' + encodeURIComponent(key);
+            } else if (type === 'num') {
+                url = '/api/posts/' + encodeURIComponent(key);
+            } else {
+                url = '/api/posts/key/' + encodeURIComponent(key);
+            }
+
+            $scope.loading = true;
+
+            $http
+                .delete(url)
+                .then(function () {
+                    alert('삭제되었습니다.');
+                    // 삭제 후 목록 다시 로딩
+                    if (typeof $scope.loadPosts === 'function') {
+                        $scope.loadPosts();
+                    }
+                })
+                .catch(function (err) {
+                    console.error('삭제 실패', err);
+                    alert('삭제 중 오류가 발생했습니다.');
+                })
+                .finally(function () {
+                    $scope.loading = false;
+                });
+        };
+
         // 첫 진입 시 목록 로딩
         $scope.loadPosts && $scope.loadPosts();
     });
 
-    app.controller('BoardNormalCtrl', function ($scope, $controller) {
-        // 공통 게시판 기능(BoardBaseCtrl) 상속
+    // src/main/resources/static/app.js
+    app.controller('BoardNormalCtrl', function ($scope, $controller, $timeout, $http) {
+        // 공통 게시판 기능 상속
         angular.extend(this, $controller('BoardBaseCtrl', { $scope: $scope }));
 
-        // 이 컨트롤러가 담당하는 게시판 코드 설정
-        // → BoardBaseCtrl.loadPosts() 안에서
-        //   /api/boards/NORM/posts 로 요청을 보내게 된다.
+        // 이 컨트롤러는 일반 게시판(NORM) 고정
         $scope.boardCode = 'NORM';
 
-        // 검색 상태 기본값 (안전하게 한 번 더 세팅)
+        // ───────────────── 새 글 폼 기본값 + boardCode 보장 ─────────────────
+        function ensureNewPost() {
+            $scope.newPost = $scope.newPost || {};
+            $scope.newPost.title = $scope.newPost.title || '';
+            $scope.newPost.content = $scope.newPost.content || '';
+            $scope.newPost.files = $scope.newPost.files || [];
+            $scope.newPost.boardCode = $scope.boardCode; // 항상 NORM 세팅
+        }
+        ensureNewPost();
+
+        // 검색 기본값
         if (!$scope.q) {
             $scope.q = {
-                type: 'author', // 작성자 기준 검색
+                type: 'author',
                 keyword: '',
                 from: null,
                 to: null,
             };
         }
 
-        // 검색툴바는 기본 닫힘
         $scope.searchOpen = false;
-
-        // 페이지 크기 기본값 (일반 게시판도 10개씩)
         $scope.pageSizes = [5, 10, 15, 20];
         $scope.pageSize = $scope.pageSize || 10;
         $scope.page = $scope.page || 0;
+
+        // ───────────────── Summernote 에디터 초기화 ─────────────────
+        function initNormalEditor() {
+            $timeout(function () {
+                if (!window.jQuery || !window.jQuery.fn || !window.jQuery.fn.summernote) return;
+
+                var $ = window.jQuery;
+                var $editor = $('#normalEditor'); // ★ 일반 게시판 전용 에디터 id
+                if ($editor.length === 0) return;
+
+                // 기존 에디터 제거
+                if ($editor.data('summernote')) {
+                    $editor.summernote('destroy');
+                }
+
+                $editor.summernote({
+                    height: 260,
+                    placeholder: '내용을 입력하세요.',
+                    lang: 'ko-KR',
+                    disableDragAndDrop: true,
+                    toolbar: [
+                        ['style', ['bold', 'italic', 'underline', 'clear']],
+                        ['para', ['ul', 'ol', 'paragraph']],
+                        ['insert', ['link', 'picture']],
+                        ['view', ['codeview']],
+                    ],
+                    callbacks: {
+                        onInit: function () {
+                            ensureNewPost();
+                            var html = ($scope.newPost && $scope.newPost.content) || '';
+                            $editor.summernote('code', html);
+                        },
+                        onChange: function (contents) {
+                            $scope.$applyAsync(function () {
+                                ensureNewPost();
+                                $scope.newPost.content = contents;
+                            });
+                        },
+                        // 에디터 안으로 드롭/붙여넣기된 이미지
+                        onImageUpload: function (files) {
+                            if (!files || !files.length) return;
+                            Array.prototype.slice.call(files).forEach(function (file) {
+                                var reader = new FileReader();
+                                reader.onload = function (e) {
+                                    $editor.summernote('insertImage', e.target.result, function ($img) {
+                                        $img.attr('draggable', 'false');
+                                        $img.css({
+                                            'max-width': '100%',
+                                            height: 'auto',
+                                        });
+                                    });
+                                };
+                                reader.readAsDataURL(file);
+                            });
+                        },
+                    },
+                });
+
+                $scope._normalEditorEl = $editor;
+            }, 0);
+        }
+
+        // 뷰 로드 후: 폼이 열려 있으면 에디터 생성
+        $scope.$on('$viewContentLoaded', function () {
+            ensureNewPost();
+            if ($scope.showComposer) {
+                initNormalEditor();
+            }
+        });
+
+        // 글쓰기 토글 감시
+        $scope.$watch('showComposer', function (v) {
+            if (v) {
+                ensureNewPost();
+                initNormalEditor();
+            } else if (window.jQuery) {
+                var $ = window.jQuery;
+                var $editor = $('#normalEditor');
+                if ($editor.length && $editor.data('summernote')) {
+                    $editor.summernote('destroy');
+                }
+            }
+        });
+
+        /**
+         * 🔥 파일 선택(하단 input type="file") → 에디터에 미리보기 자동 삽입
+         *  - newPost.files 가 바뀔 때만 동작
+         *  - Blob(File) 타입만 골라서 FileReader에 넘김
+         */
+        $scope.$watch('newPost.files', function (newVal) {
+            if (!newVal || !window.jQuery) return;
+
+            ensureNewPost();
+
+            var $ = window.jQuery;
+            var $editor = $('#normalEditor');
+            if (!$editor.length || !$editor.data('summernote')) return;
+
+            // --- newVal 을 "진짜 파일 배열"로 정규화 ---
+            var list = [];
+
+            // 1) 이미 배열
+            if (Array.isArray(newVal)) {
+                list = newVal;
+            }
+            // 2) File / Blob 한 개
+            else if (newVal instanceof Blob) {
+                list = [newVal];
+            }
+            // 3) {0: File, 1: File, length:2} 같은 유사 배열
+            else if (typeof newVal === 'object') {
+                Object.keys(newVal).forEach(function (k) {
+                    var v = newVal[k];
+                    if (v instanceof Blob) {
+                        list.push(v);
+                    }
+                });
+            }
+
+            // --- 진짜 파일만 에디터에 삽입 ---
+            list.forEach(function (file, idx) {
+                if (!file || !(file instanceof Blob)) return;
+                if (file._previewed) return;
+                file._previewed = true;
+
+                var reader = new FileReader();
+                reader.onload = function (e) {
+                    $editor.summernote('insertImage', e.target.result, function ($img) {
+                        $img.attr('data-file-index', idx);
+                        $img.attr('draggable', 'false');
+                        $img.css({
+                            'max-width': '100%',
+                            height: 'auto',
+                        });
+                    });
+                };
+                reader.readAsDataURL(file);
+            });
+        });
+
+        // ───────────────── 게시글 삭제 (버튼: ng-click="deletePost(p)") ─────────────────
+        $scope.deletePost = function (p) {
+            if (!p) return;
+            if (!confirm('정말 삭제하시겠습니까?')) return;
+
+            const code = String($scope.boardCode || 'NORM').toUpperCase();
+            const hasUuid = !!p.uuid;
+            const type = hasUuid ? 'str' : 'num';
+            const key = hasUuid ? p.uuid : p.id;
+
+            let url = null;
+            if (code === 'BIG' && type === 'num') {
+                // 일반 게시판에선 안 쓰지만, 혹시 공용 코드 재사용 고려해서 그대로 둠
+                url = '/api/big-board/' + encodeURIComponent(key);
+            } else if (type === 'num') {
+                url = '/api/posts/' + encodeURIComponent(key);
+            } else {
+                url = '/api/posts/key/' + encodeURIComponent(key);
+            }
+
+            $scope.loading = true;
+
+            $http
+                .delete(url)
+                .then(function () {
+                    alert('삭제되었습니다.');
+                    if (typeof $scope.loadPosts === 'function') {
+                        $scope.loadPosts();
+                    }
+                })
+                .catch(function (err) {
+                    console.error('삭제 실패', err);
+                    alert('삭제 중 오류가 발생했습니다.');
+                })
+                .finally(function () {
+                    $scope.loading = false;
+                });
+        };
 
         // 첫 진입 시 목록 로딩
         $scope.loadPosts && $scope.loadPosts();
     });
 
     // src/main/resources/static/app.js (일부)
-    // 대용량 게시판 컨트롤러
-    app.controller('BoardBigCtrl', function ($scope, $controller, $http, $location, AuthService, $window) {
-        'use strict';
+    // 대용량 게시판 컨트롤러 등록
+    app.controller('BoardBigCtrl', function ($scope, $controller, $http, $location, AuthService, $window, $timeout) {
+        'use strict'; // JS 엄격 모드 활성화 (실수 줄이기용)
 
-        console.log('[BIG] BoardBigCtrl 초기화');
+        console.log('[BIG] BoardBigCtrl 초기화'); // 콘솔에 컨트롤러 초기화 로그 출력
 
-        // 공통 Base 기능 상속 (검색 토글, 검색 폼 등)
+        // 공통 Base 기능 상속 (검색 토글, 검색 폼, 공통 페이지네이션 등)
         angular.extend(this, $controller('BoardBaseCtrl', { $scope: $scope }));
 
         // 이 컨트롤러가 담당하는 게시판 코드
@@ -2247,29 +2554,50 @@
         // ─────────────────────────────────────
         // 상수 설정
         // ─────────────────────────────────────
-        var PAGE_SIZE = 1000; // 서버에서 한 번에 가져올 개수
-        var CHUNK_SIZE = 100; // 스크롤 한 번에 화면에 추가할 개수
-        var MAX_PER_PAGE = 1000; // 한 페이지에서 화면에 최대 표시 개수
-        var APPROX_TOTAL = 100000000; // totalElements 못 받았을 때 대략치(1억)
-        var CHUNKS_PER_DB_PAGE = MAX_PER_PAGE / CHUNK_SIZE; // 1000 / 100 = 10
+        var PAGE_SIZE = 1000; // 서버에서 한 번의 요청으로 DB에서 최대 가져올 개수
+        var CHUNK_SIZE = 100; // 스크롤 한 번에 화면에 추가로 보여줄 개수
+        var MAX_PER_PAGE = 1000; // 한 화면에서 최대로 보여줄 개수
+        var APPROX_TOTAL = 100000000; // totalElements를 못 받을 때 대략 총 개수(1억)
+        var CHUNKS_PER_DB_PAGE = MAX_PER_PAGE / CHUNK_SIZE; // 한 DB 페이지(1000개)를 몇 chunk로 나누는지
 
         // ─────────────────────────────────────
         // 페이지 / 카운트 상태
         // ─────────────────────────────────────
-        $scope.pageSize = PAGE_SIZE; // DB 기준 pageSize(1000)
+        $scope.pageSize = PAGE_SIZE;
         $scope.pageSizes = [PAGE_SIZE];
-        $scope.page = 0; // DB 기준 페이지 index (0부터)
+        $scope.page = 0;
         $scope.pages = Math.ceil(APPROX_TOTAL / PAGE_SIZE);
         $scope.total = APPROX_TOTAL;
-        $scope.totalCount = APPROX_TOTAL; // 전체 건수
-        $scope.totalPages = Math.ceil(APPROX_TOTAL / CHUNK_SIZE); // 100개 단위 페이지 수
-        $scope.logicalPage = 1; // UI용 페이지 번호 (100개 단위)
+        $scope.totalCount = APPROX_TOTAL;
+        $scope.totalPages = Math.ceil(APPROX_TOTAL / CHUNK_SIZE);
+        $scope.logicalPage = 1;
 
-        $scope.posts = []; // 실제 화면에 보이는 목록
-        $scope._pagePosts = []; // 서버에서 받아온 "해당 DB 페이지 전체 목록"(최대 1000개)
-        $scope.displayCount = 0; // 화면에 몇 개까지 보여주는지 (100, 200, …)
-        $scope.loading = false;
-        $scope.loadingMore = false; // 스크롤 추가 로딩 중 여부
+        $scope.posts = []; // 실제 화면에 표시되는 게시글 목록
+        $scope._pagePosts = []; // 서버에서 받아온 해당 DB 페이지 전체 목록
+        $scope.displayCount = 0; // 현재 화면에 보여주고 있는 개수
+        $scope.loading = false; // 서버에서 목록 로딩 중인지 여부
+        $scope.loadingMore = false; // 스크롤로 추가 로딩 중인지 여부
+
+        // ★ 렌더링(브라우저가 DOM 그리는 중) 로딩 표시용 플래그
+        $scope.rendering = false;
+
+        // ★ 렌더링 로딩 오버레이 헬퍼
+        function withRenderLoading(fn) {
+            // 렌더링 스피너 ON
+            $scope.rendering = true;
+
+            // 한 틱 뒤에 실제 무거운 작업 실행 (먼저 스피너를 그리기 위해)
+            $timeout(function () {
+                try {
+                    fn();
+                } finally {
+                    // DOM 그리는 것도 한 틱 양보한 뒤 스피너 OFF
+                    $timeout(function () {
+                        $scope.rendering = false;
+                    }, 0);
+                }
+            }, 0);
+        }
 
         // 글쓰기 폼 & composer 표시 상태
         $scope.showComposer = false;
@@ -2299,7 +2627,7 @@
             var writer = (p.writerId || p.writer || p.writerName || '').toString();
             if (!myId || !writer) return false;
 
-            return myId === writer; // 관리자라도 내 글만 가능
+            return myId === writer;
         };
 
         // ─────────────────────────────────────
@@ -2313,7 +2641,7 @@
         };
 
         // ─────────────────────────────────────
-        // 글 등록
+        // 글 등록 (POST /api/big-board)
         // ─────────────────────────────────────
         $scope.submit = function () {
             if ($scope.saving) return;
@@ -2359,10 +2687,12 @@
         // ─────────────────────────────────────
         function updateLogicalPage() {
             var base = ($scope.page || 0) * CHUNKS_PER_DB_PAGE;
+
             var chunkIndex = 0;
             if ($scope.displayCount && CHUNK_SIZE > 0) {
                 chunkIndex = Math.max(0, Math.ceil($scope.displayCount / CHUNK_SIZE) - 1);
             }
+
             $scope.logicalPage = base + chunkIndex + 1;
         }
 
@@ -2377,7 +2707,7 @@
             if (pageParam < 0) pageParam = 0;
 
             var q = $scope.q || {};
-            var params = { page: pageParam }; // size는 서버 기본값 1000 사용
+            var params = { page: pageParam };
             if (q.type) params.type = q.type;
             if (q.keyword) params.keyword = q.keyword;
             if (q.from) params.from = q.from;
@@ -2392,57 +2722,56 @@
                     var page = res.data || {};
                     console.log('[BIG] 응답 데이터 =', page);
 
-                    var list;
-                    if (Array.isArray(page)) {
-                        list = page;
-                    } else if (page.content && angular.isArray(page.content)) {
-                        list = page.content;
-                    } else if (page.items && angular.isArray(page.items)) {
-                        list = page.items;
-                    } else {
-                        list = [];
-                    }
+                    // ★ 여기부터는 렌더링 로딩 오버레이로 감싸서 실행
+                    withRenderLoading(function () {
+                        var list;
 
-                    $scope._pagePosts = list || [];
+                        if (Array.isArray(page)) {
+                            list = page;
+                        } else if (page.content && angular.isArray(page.content)) {
+                            list = page.content;
+                        } else if (page.items && angular.isArray(page.items)) {
+                            list = page.items;
+                        } else {
+                            list = [];
+                        }
 
-                    // 처음 화면에서는 100개만 보여줌
-                    $scope.displayCount = Math.min(CHUNK_SIZE, $scope._pagePosts.length, MAX_PER_PAGE);
-                    $scope.posts = $scope._pagePosts.slice(0, $scope.displayCount);
+                        $scope._pagePosts = list || [];
 
-                    // 페이지 크기(서버 기준 1000)
-                    var size = page.size;
-                    if (!size || size <= 0) size = PAGE_SIZE;
-                    $scope.pageSize = size;
+                        // 처음에는 100개(또는 그보다 적으면 그 개수만큼)만 표시
+                        $scope.displayCount = Math.min(CHUNK_SIZE, $scope._pagePosts.length, MAX_PER_PAGE);
+                        $scope.posts = $scope._pagePosts.slice(0, $scope.displayCount);
 
-                    // 전체 개수
-                    var total = page.totalElements;
-                    if (typeof total !== 'number') total = APPROX_TOTAL;
-                    $scope.total = total;
+                        var size = page.size;
+                        if (!size || size <= 0) size = PAGE_SIZE;
+                        $scope.pageSize = size;
 
-                    // DB 기준 페이지 수
-                    $scope.pages = Math.ceil(total / size) || 1;
+                        var total = page.totalElements;
+                        if (typeof total !== 'number') total = APPROX_TOTAL;
+                        $scope.total = total;
 
-                    // 100개 단위 UI 페이지 수
-                    $scope.totalPages = Math.ceil(total / CHUNK_SIZE) || 1;
+                        $scope.pages = Math.ceil(total / size) || 1;
+                        $scope.totalPages = Math.ceil(total / CHUNK_SIZE) || 1;
 
-                    // 현재 DB 페이지
-                    var curPage;
-                    if (typeof page.page === 'number') curPage = page.page;
-                    else if (typeof page.pageNumber === 'number') curPage = page.pageNumber;
-                    else curPage = pageParam;
+                        var curPage;
+                        if (typeof page.page === 'number') curPage = page.page;
+                        else if (typeof page.pageNumber === 'number') curPage = page.pageNumber;
+                        else curPage = pageParam;
 
-                    if (curPage < 0) curPage = 0;
-                    if (curPage >= $scope.pages) curPage = $scope.pages - 1;
-                    $scope.page = curPage;
+                        if (curPage < 0) curPage = 0;
+                        if (curPage >= $scope.pages) curPage = $scope.pages - 1;
+                        $scope.page = curPage;
 
-                    $scope.totalCount = total;
+                        $scope.totalCount = total;
 
-                    updateLogicalPage();
-                    console.log('[BIG] 로딩 완료 → dbPage =', $scope.page, ', logicalPage =', $scope.logicalPage, ', 표시 =', $scope.displayCount);
+                        updateLogicalPage();
+                        console.log('[BIG] 로딩 완료 → dbPage =', $scope.page, ', logicalPage =', $scope.logicalPage, ', 표시 =', $scope.displayCount);
+                    });
                 })
                 .catch(function (err) {
                     console.error('BIG 게시판 로딩 실패', err);
                     alert('대용량 게시판 데이터를 불러오는 중 오류가 발생했습니다.');
+
                     $scope._pagePosts = [];
                     $scope.posts = [];
                     $scope.displayCount = 0;
@@ -2467,24 +2796,27 @@
             if (!$scope._pagePosts || !$scope._pagePosts.length) return;
 
             var limit = Math.min(MAX_PER_PAGE, $scope._pagePosts.length);
-            if ($scope.displayCount >= limit) return; // 이미 최대
+            if ($scope.displayCount >= limit) return;
 
             $scope.loadingMore = true;
 
             var next = $scope.displayCount + CHUNK_SIZE;
             if (next > limit) next = limit;
 
-            $scope.displayCount = next;
-            $scope.posts = $scope._pagePosts.slice(0, $scope.displayCount);
+            // ★ 추가로 100개 붙이는 작업도 렌더링 오버레이 안에서 실행
+            withRenderLoading(function () {
+                $scope.displayCount = next;
+                $scope.posts = $scope._pagePosts.slice(0, $scope.displayCount);
 
-            updateLogicalPage();
-            $scope.loadingMore = false;
+                updateLogicalPage();
+                $scope.loadingMore = false;
+            });
         };
 
         // ─────────────────────────────────────
-        // 스크롤 이벤트: "이전보다 조금 더 내려갔을 때"만 100개 추가
+        // 스크롤 이벤트
         // ─────────────────────────────────────
-        var lastLoadScrollY = 0; // 마지막으로 100개를 추가했을 때의 scrollY
+        var lastLoadScrollY = 0;
 
         function onScroll() {
             if ($scope.loading || $scope.loadingMore) return;
@@ -2492,12 +2824,9 @@
             var scrollBottom = window.innerHeight + window.scrollY;
             var docHeight = document.body.offsetHeight;
 
-            // 바닥 80px 이내에 왔을 때만
             var nearBottom = docHeight - scrollBottom <= 80;
             if (!nearBottom) return;
 
-            // 🔴 직전에 100개를 추가했던 위치랑 거의 같으면 다시 추가하지 않음
-            //    → 사용자가 실제로 더 내려가야만 다음 100개 로딩
             if ($scope.displayCount > 0 && window.scrollY <= lastLoadScrollY + 40) {
                 return;
             }
@@ -2505,8 +2834,6 @@
             $scope.$applyAsync(function () {
                 var before = $scope.displayCount;
                 $scope.loadMoreInPage();
-
-                // 실제로 100개가 추가되었으면 그 시점의 scrollY를 기억
                 if ($scope.displayCount !== before) {
                     lastLoadScrollY = window.scrollY;
                 }
@@ -2526,7 +2853,6 @@
             return $scope.page > 0;
         };
 
-        // pageSize * (page+1) < total 이고, 이 페이지에서 1000개까지 다 본 경우에만 다음 페이지
         $scope.hasNextPage = function () {
             var morePage = ($scope.page + 1) * $scope.pageSize < $scope.total;
             if (!morePage) return false;
@@ -2570,9 +2896,8 @@
         // ─────────────────────────────────────
         $scope.goView = function (p) {
             if (!p || !p.id) return;
-
             var path = '/board/big/view/' + encodeURIComponent(p.id);
-            $location.path(path).search({ type: 'num' }); // 숫자 PK
+            $location.path(path).search({ type: 'num' });
         };
 
         $scope.goEdit = function (p) {
@@ -2597,7 +2922,9 @@
                 });
         };
 
+        // ─────────────────────────────────────
         // 초기 로딩
+        // ─────────────────────────────────────
         $scope.loadPosts();
     });
 

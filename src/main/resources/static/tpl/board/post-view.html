@@ -3,7 +3,7 @@
     class="board-shell"
     ng-cloak
 >
-    <!-- 헤더: edit.html 과 같은 card-header-like 사용 -->
+    <!-- 헤더 -->
     <div class="section-header card-header-like">
         <div class="title-wrap">
             <span class="title-dot"></span>
@@ -45,21 +45,19 @@
         ⏳ 게시글을 불러오는 중입니다...
     </div>
 
-    <!-- 본문 + 첨부파일 카드 (edit.html 의 composer-wrap 스타일 재사용) -->
+    <!-- 본문 + 첨부파일 카드 -->
     <div
         class="composer-wrap"
         ng-if="!loading && post"
     >
-        <!-- ★ 본문: [[file:1]] 토큰이 치환된 HTML 출력 -->
+        <!-- 본문 -->
         <div class="post-body">
-            <!-- 컨트롤러에서 만든 renderedContent가 있으면 그걸 사용 -->
             <div
                 class="post-body-content"
                 ng-if="renderedContent"
                 ng-bind-html="renderedContent"
             ></div>
 
-            <!-- renderedContent가 없으면 안전하게 원본 content만 출력 -->
             <div
                 class="post-body-content"
                 ng-if="!renderedContent"
@@ -75,7 +73,6 @@
         >
             <h4 style="margin-top: 0">첨부 파일</h4>
             <ul>
-                <!-- files가 있으면 files, 없으면 post.attachments 사용 -->
                 <li ng-repeat="f in ( (files && files.length) ? files : (post.attachments || []) )">
                     <a
                         ng-href="{{ f.url }}"
@@ -100,7 +97,7 @@
         display: none;
     }
 
-    /* ───────── edit.html 과 공통 레이아웃 ───────── */
+    /* ───────── 공통 레이아웃 ───────── */
     .board-shell {
         padding: 12px;
     }
@@ -189,21 +186,30 @@
     }
     .post-body-content {
         word-break: break-word;
-        white-space: pre-wrap; /* 줄바꿈 유지 */
+        white-space: pre-wrap;
     }
 
-    /* ★ 이미지: edit 화면과 맞추기 위해 공통 규격/중앙 정렬 */
+    /* ✅ 이미지: 에디터에서 설정한 width/정렬은 그대로 두고,
+       화면 밖으로만 안 튀게 살짝만 제한 */
+    .post-body-content img,
     .post-body img {
-        max-width: 260px; /* 원하는 최대 폭 (edit 기준 크기로 맞춤) */
-        width: 100%;
+        max-width: 100%;
         height: auto;
-        display: block;
-        margin: 16px auto; /* 위아래 여백 + 가운데 정렬 */
-        border-radius: 8px;
-        object-fit: contain;
+        /* width, margin, display, float 등은 절대 건드리지 않음! */
     }
 
-    /* 첨부 파일 */
+    /* 토큰 렌더링용 inline-img 래퍼(필요하면 사용) */
+    .inline-img-wrap {
+        text-align: center;
+        margin: 8px 0;
+    }
+    .inline-img {
+        max-width: 100%;
+        height: auto;
+        border-radius: 8px;
+    }
+
+    /* 첨부 파일 리스트 */
     .attach-box {
         margin-top: 16px;
         padding-top: 10px;

@@ -4,6 +4,17 @@
     ng-init="showComposer=false; searchOpen=false; q = q || { type:'author', keyword:'', from:null, to:null };"
     ng-cloak
 >
+    <!-- ★ 로딩/렌더링 전체 오버레이 -->
+    <div
+        class="loading-overlay"
+        ng-if="loading || rendering"
+    >
+        <div class="loading-box">
+            <div class="spinner"></div>
+            <div class="loading-text">페이지 로딩중입니다...</div>
+        </div>
+    </div>
+
     <!-- 헤더 -->
     <div class="section-header card-header-like">
         <div class="title-wrap">
@@ -142,10 +153,10 @@
         </div>
     </div>
 
-    <!-- 로딩 표시 -->
+    <!-- 로딩 표시 (작은 텍스트, 전체 오버레이 아닐 때만) -->
     <div
         class="status-box"
-        ng-if="loading"
+        ng-if="loading && !rendering"
         aria-live="polite"
     >
         ⏳ 불러오는 중...
@@ -365,6 +376,46 @@
     .board-shell {
         padding: 12px;
     }
+
+    /* ★ 전체 로딩 오버레이 */
+    .loading-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(255, 255, 255, 0.7);
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .loading-box {
+        padding: 20px 32px;
+        border-radius: 12px;
+        background: #ffffff;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+    }
+    .loading-box .loading-text {
+        font-weight: 500;
+        color: #444;
+    }
+    .loading-box .spinner {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        border: 4px solid #e0e0e0;
+        border-top-color: #3b82f6;
+        animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
     .card-header-like {
         display: flex;
         align-items: center;

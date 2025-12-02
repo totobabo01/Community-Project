@@ -1,4 +1,4 @@
-<!-- src/main/resources/static/tpl/board/bus.html -->
+<!-- src/main/resources/static/tpl/board/normal.html -->
 <div
     class="board-shell"
     ng-init="showComposer=false; searchOpen=false; q = q || { type:'author', keyword:'', from:null, to:null };"
@@ -157,6 +157,7 @@
             ng-submit="createPost()"
             style="margin: 12px 0"
         >
+            <!-- 제목 -->
             <input
                 class="inline-input input-like"
                 type="text"
@@ -165,9 +166,11 @@
                 aria-label="제목"
             />
             <br />
-            <!-- ✏️ 본문 textarea : TinyMCE 에디터 대상 -->
+
+            <!-- ✏️ 본문 textarea : Summernote 대상 -->
+            <!-- ✏️ 본문 textarea : Summernote 대상 -->
             <textarea
-                id="busEditor"
+                id="normalEditor"
                 class="inline-input input-like rich-editor"
                 style="height: 260px; margin-top: 8px"
                 ng-model="newPost.content"
@@ -175,7 +178,7 @@
                 aria-label="내용"
             ></textarea>
 
-            <!-- 🔽 첨부 파일 선택 인풋 (에디터용 이미지/파일 업로드) -->
+            <!-- 첨부 파일 선택 (단순 업로드 + Summernote 외부 업로드용) -->
             <div style="margin-top: 8px">
                 <input
                     type="file"
@@ -186,7 +189,6 @@
                     aria-label="첨부 파일 선택"
                 />
 
-                <!-- 선택된 파일들의 요약 정보 표시 (기존 그대로 유지) -->
                 <span
                     class="file-meta"
                     ng-if="newPost.files && newPost.files.length"
@@ -199,12 +201,9 @@
                     class="file-meta muted"
                     ng-if="!newPost.files || !newPost.files.length"
                 >
-                    선택된 파일 없음
+                    선택된 파일 없음 (※ 에디터 안으로 이미지를 드래그&드롭해도 됩니다)
                 </span>
             </div>
-            <!-- 🔼 첨부 파일 선택 인풋 끝 -->
-
-            <!-- ✅ [[file:...]] 토큰용 '본문에 넣기' UI는 제거함 (에디터에서 직접 이미지를 삽입) -->
 
             <div style="margin-top: 8px; text-align: right">
                 <button
@@ -257,7 +256,7 @@
                 ‹ 이전
             </button>
 
-            <!-- 🔢 가운데 숫자 버튼: pages > 1 일 때 항상 표시 -->
+            <!-- 숫자 버튼 -->
             <span
                 class="pager-pages"
                 ng-if="pages > 1"
@@ -314,14 +313,14 @@
         >
             <!-- 제목/내용/댓글 -->
             <div class="c-title">
-                <!-- 🔽 제목 + 첨부파일 표시라인 -->
+                <!-- 제목 + 첨부파일 표시라인 -->
                 <div class="post-title-line">
-                    <!-- ✅ 썸네일(이미지/아이콘)은 그대로 유지 -->
+                    <!-- 썸네일/파일 아이콘 -->
                     <div
                         class="post-file-indicator"
                         ng-if="p.fileUrl || p.fileType === 'FILE'"
                     >
-                        <!-- 이미지인 경우: 썸네일 -->
+                        <!-- 이미지 썸네일 -->
                         <a
                             ng-if="p.fileType === 'IMAGE' && p.fileUrl"
                             ng-href="{{ p.fileUrl }}"
@@ -335,7 +334,7 @@
                             />
                         </a>
 
-                        <!-- 일반 파일인 경우: 아이콘 -->
+                        <!-- 일반 파일 아이콘 -->
                         <a
                             ng-if="p.fileType === 'FILE' && p.fileUrl"
                             class="post-file-icon-link"
@@ -347,25 +346,25 @@
                         </a>
                     </div>
 
-                    <!-- 제목 (클릭 시 상세 보기 이동) -->
+                    <!-- 제목 (상세 보기로 이동) -->
                     <div class="post-title">
                         <a
                             href=""
-                            ng-click="goDetail(p)"
+                            ng-click="goView(p)"
                             class="post-title-link"
                         >
                             <strong>{{ p.title }}</strong>
                         </a>
                     </div>
                 </div>
-                <!-- 🔼 제목 + 첨부파일 표시라인 끝 -->
 
-                <!-- 본문 요약: [[file1 width=...]] 같은 토큰은 잘라내고 앞부분만 표시 -->
+                <!-- 🔥 본문 요약: HTML / base64 제거 + 80자까지만 표시 -->
                 <div
                     class="post-snippet"
                     ng-if="p.content"
                 >
-                    {{ (p.content || '').split('[[')[0] }}
+                    {{ p.content | stripHtml | limitTo: 80 }}
+                    <span ng-if="(p.content | stripHtml).length > 80">…</span>
                 </div>
 
                 <button
@@ -547,7 +546,6 @@
                 ‹ 이전
             </button>
 
-            <!-- 🔢 하단 숫자 버튼: pages > 1 일 때 항상 표시 -->
             <span
                 class="pager-pages"
                 ng-if="pages > 1"
