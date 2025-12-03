@@ -168,7 +168,6 @@
             <br />
 
             <!-- ✏️ 본문 textarea : Summernote 대상 -->
-            <!-- ✏️ 본문 textarea : Summernote 대상 -->
             <textarea
                 id="normalEditor"
                 class="inline-input input-like rich-editor"
@@ -178,7 +177,7 @@
                 aria-label="내용"
             ></textarea>
 
-            <!-- 첨부 파일 선택 (단순 업로드 + Summernote 외부 업로드용) -->
+            <!-- 첨부 파일 선택 -->
             <div style="margin-top: 8px">
                 <input
                     type="file"
@@ -358,12 +357,12 @@
                     </div>
                 </div>
 
-                <!-- 🔥 본문 요약: HTML / base64 제거 + 80자까지만 표시 -->
+                <!-- 🔥 본문 요약: HTML / base64 / &nbsp; 제거 + 80자까지만 표시 -->
                 <div
                     class="post-snippet"
-                    ng-if="p.content"
+                    ng-if="p.content && (p.content | stripHtml)"
                 >
-                    {{ p.content | stripHtml | limitTo: 80 }}
+                    {{ (p.content | stripHtml) | limitTo: 80 }}
                     <span ng-if="(p.content | stripHtml).length > 80">…</span>
                 </div>
 

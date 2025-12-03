@@ -37,7 +37,7 @@
         </div>
     </div>
 
-    <!-- 로딩 -->
+    <!-- 로딩 상태 -->
     <div
         class="status-box"
         ng-if="loading"
@@ -62,7 +62,7 @@
                 />
             </div>
 
-            <!-- ✏️ 본문 : Summernote 대상 -->
+            <!-- ✏️ 본문 : Summernote 대상 (쓰기 화면과 동일 구조) -->
             <textarea
                 id="editEditor"
                 class="inline-input input-like rich-editor"
@@ -72,7 +72,7 @@
                 aria-label="내용"
             ></textarea>
 
-            <!-- 새 첨부 파일 선택 (원래 쓰던 부분 유지) -->
+            <!-- 새 첨부 파일 선택 -->
             <div style="margin-top: 10px">
                 <input
                     type="file"
@@ -94,6 +94,7 @@
                 </span>
             </div>
 
+            <!-- 버튼 영역 -->
             <div style="margin-top: 10px; text-align: right">
                 <button
                     class="btn"
@@ -114,7 +115,7 @@
         </form>
     </div>
 
-    <!-- 현재 첨부 파일 영역 (기존 스타일 참고해서 구성) -->
+    <!-- 현재 첨부 파일 영역 (보기 화면의 첨부 파일 영역과 비슷하게) -->
     <div
         class="composer-wrap"
         ng-if="!loading && attachments && attachments.length"
@@ -128,7 +129,7 @@
             <div>
                 [{{$index+1}}]
                 <strong>{{ f.originalFilename || f.fileName || f.name }}</strong>
-                ({{ f.fileType || f.type }})
+                <span class="muted"> ({{ f.fileType || f.type }}) </span>
             </div>
             <div
                 class="muted"
@@ -142,14 +143,16 @@
     </div>
 </div>
 
-<!-- 스타일은 bus.html 과 거의 동일하게 유지 -->
+<!-- 스타일 : bus/normal 작성 화면과 동일하게 맞추기 -->
 <style>
     [ng-cloak] {
         display: none;
     }
+
     .board-shell {
         padding: 12px;
     }
+
     .card-header-like {
         display: flex;
         align-items: center;
@@ -161,17 +164,20 @@
         box-shadow: 0 8px 22px rgba(0, 0, 0, 0.04);
         margin-bottom: 12px;
     }
+
     .title-wrap {
         display: flex;
         align-items: center;
         gap: 10px;
     }
+
     .title-dot {
         width: 10px;
         height: 10px;
         border-radius: 50%;
         background: #2d7ef7;
     }
+
     .btn {
         border: 1px solid #d7ddea;
         background: #fff;
@@ -180,19 +186,23 @@
         font-size: 14px;
         cursor: pointer;
     }
+
     .btn:hover {
         background: #f7f9fc;
     }
+
     .btn.primary {
         background: #2d7ef7;
         color: #fff;
         border-color: #2d7ef7;
     }
+
     .btn.btn-danger {
         background: #e74c3c;
         color: #fff;
         border-color: #e74c3c;
     }
+
     .composer-wrap {
         background: #fff;
         border: 1px solid #edf0f5;
@@ -201,6 +211,7 @@
         box-shadow: 0 8px 22px rgba(0, 0, 0, 0.04);
         margin-bottom: 12px;
     }
+
     .input-like {
         width: 100%;
         box-sizing: border-box;
@@ -210,17 +221,21 @@
         outline: none;
         font-size: 14px;
     }
+
     .input-like:focus {
         border-color: #2d7ef7;
     }
+
     .file-meta {
         font-size: 12px;
         color: #6b7280;
         margin-left: 6px;
     }
+
     .file-meta.muted {
         color: #9ca3af;
     }
+
     .status-box {
         background: #fff;
         border: 1px solid #edf0f5;
@@ -228,5 +243,17 @@
         padding: 10px 16px;
         margin-bottom: 12px;
         color: #4b5563;
+    }
+
+    .muted {
+        color: #9ca3af;
+    }
+
+    /* 에디터 안에서 이미지가 보기 화면과 똑같이 보이도록 */
+    .note-editor.note-frame .note-editing-area .note-editable img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+        margin: 16px auto; /* 보기 화면에서랑 동일하게 중앙 정렬 느낌 */
     }
 </style>

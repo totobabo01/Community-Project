@@ -5,6 +5,7 @@
     const app = angular.module('busApp', ['ngRoute']);
 
     // HTML 태그 + data:image base64 + [[file:...]] 토큰 + "파일 2" 같은 레이블 지우는 필터
+    // HTML 태그 + data:image base64 + [[file:...]] 토큰 + "파일 2" 같은 레이블 지우는 필터
     app.filter('stripHtml', function () {
         return function (input) {
             if (!input) return '';
@@ -21,10 +22,13 @@
             text = text.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/gi, '');
 
             // 3) 토큰/메타에서 남은 "파일 1", "[파일 2]" 같은 텍스트 제거
-            text = text.replace(/\[?\s*파일\s*\d+\s*\]?/g, '');
+            text = text.replace(/\[?\s*파일\s*\d+\\s*\]?/g, '');
 
             // 4) "첨부 파일" 문구 제거
             text = text.replace(/첨부\s*파일/gi, '');
+
+            // ✅ 4.5) &nbsp; → 일반 공백으로
+            text = text.replace(/&nbsp;/gi, ' ');
 
             // 5) 공백 정리
             text = text.replace(/\s+/g, ' ');
@@ -1351,6 +1355,8 @@
 
     // src/main/resources/static/app.js 中 일부: BoardEditCtrl 전체 교체
     app.controller('BoardEditCtrl', function ($scope, $http, $routeParams, $location, $sce, $timeout) {
+        'use strict';
+
         $scope.loading = true;
         $scope.saving = false;
         $scope.deleting = false;
@@ -1359,7 +1365,7 @@
         const type = String($routeParams.type || 'str'); // 'num' | 'str'
         const key = $routeParams.key; // 글 id 또는 uuid
 
-        // BIG 게시판은 토큰 안 쓰고 그대로 HTML, 그 외(BUS/NORM)는 토큰 사용
+        // BIG 게시판만 그대로 HTML, 그 외(BUS/NORM)는 토큰 사용
         const USE_TOKEN = code !== 'BIG';
 
         // 편집 폼
@@ -1369,10 +1375,10 @@
             files: null, // 새로 선택한 파일들
         };
 
-        // 메타 정보
+        // 메타/첨부 정보
         $scope.meta = null;
+        $scope.attachments = [];
 
-        // ───────────────── 목록으로 돌아가기 ─────────────────
         // ───────────────── 목록으로 돌아가기 ─────────────────
         function backToList() {
             let pathCode;
@@ -1381,7 +1387,7 @@
                 case 'BUS':
                     pathCode = 'bus';
                     break;
-                case 'NORM': // ← 일반 게시판은 /board/normal 로
+                case 'NORM': // 일반 게시판은 /board/normal
                     pathCode = 'normal';
                     break;
                 case 'BIG':
@@ -1393,7 +1399,10 @@
 
             $location.path('/board/' + pathCode).search({});
         }
+
+        // 템플릿에서 쓰는 이름 둘 다 연결
         $scope.cancel = backToList;
+        $scope.goList = backToList;
 
         // ───────────────── 메타 정규화 ─────────────────
         function normalizeMeta(p) {
@@ -1433,10 +1442,8 @@
             const m = meta || {};
             let html = content || '';
 
-            // ★ 예전 버전에서 내용에 남아 있던 "[파일 2]", "파일 3", "첨부 파일" 같은 찌꺼기 텍스트 제거
-            html = html
-                .replace(/\[?\s*파일\s*\d+\s*\]?/gi, '') // [파일 2], 파일 3 등
-                .replace(/첨부\s*파일/gi, ''); // "첨부 파일"
+            // 예전 "[파일 2]", "첨부 파일" 같은 찌꺼기 제거
+            html = html.replace(/\[?\s*파일\s*\d+\s*\]?/gi, '').replace(/첨부\s*파일/gi, '');
 
             const tokenRe = /\[\[file:(\d+)([^\]]*)\]\]/gi;
 
@@ -1470,7 +1477,7 @@
                     fileName = m.fileName || '첨부 파일';
                 }
 
-                // ★ url 이 없으면 더 이상 "[파일 n]" 텍스트로 남기지 말고 그냥 제거
+                // url 이 없으면 아예 제거
                 if (!url) return '';
 
                 // style 조립
@@ -1702,6 +1709,7 @@
                     const p = res.data || {};
 
                     $scope.meta = normalizeMeta(p);
+                    $scope.attachments = ($scope.meta && $scope.meta.fileList) || [];
 
                     $scope.form = {
                         title: p.title || '',
@@ -1709,7 +1717,7 @@
                         files: null,
                     };
 
-                    // ★ 서버에 저장돼 있던 "[파일 2]", "파일 3", "첨부 파일" 같은 텍스트도 한 번 정리
+                    // BUS/NORM 에서 예전 텍스트 찌꺼기 정리
                     if (USE_TOKEN) {
                         $scope.form.content = ($scope.form.content || '').replace(/\[?\s*파일\s*\d+\s*\]?/gi, '').replace(/첨부\s*파일/gi, '');
                     }
@@ -1799,8 +1807,7 @@
             $http(httpConfig)
                 .then(function () {
                     alert('저장되었습니다.');
-                    // ✅ 저장 후 항상 해당 게시판 목록으로 이동
-                    backToList();
+                    backToList(); // 저장 후 목록으로
                 })
                 .catch(function (err) {
                     console.error('저장 실패', err);
@@ -1857,11 +1864,11 @@
         $scope.renderedContent = null;
         $scope.files = []; // ⬅ 첨부 목록(하단 리스트용)
 
-        const rawCode = String($routeParams.code || '').toLowerCase();
+        const rawCode = String($routeParams.code || '').toLowerCase(); // 'bus' | 'norm' | 'normal' | 'big'
         const key = $routeParams.key;
         const type = String($location.search().type || 'str').toLowerCase(); // 'num' | 'str'
 
-        // 목록 경로 계산
+        // ───────── 목록 경로 계산 ─────────
         function getListPath(code) {
             switch (code) {
                 case 'bus':
@@ -1880,7 +1887,7 @@
         }
         $scope.backToList = backToList;
 
-        // 파일 메타 정규화
+        // ───────── 파일 메타 정규화 ─────────
         function normalizeFileMeta(raw) {
             if (!raw) return null;
             const url = raw.url || raw.fileUrl || raw.downloadUrl || raw.path || raw.link || null;
@@ -1913,7 +1920,7 @@
             }
         }
 
-        // 파일 관련 유틸
+        // ───────── 파일 관련 유틸 ─────────
         $scope.getFileExt = function (fileOrName) {
             if (!fileOrName) return '확장자 없음';
             var name = fileOrName;
@@ -1950,108 +1957,90 @@
             return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
         }
 
-        // --- 이 위쪽은 [1/2] 내용 동일 ---
+        // ───────── 토큰 → HTML (에디터와 100% 동일 로직) ─────────
+        function tokensToHtml(content, meta) {
+            // BIG 게시판은 토큰 안 쓰고 그대로 HTML 사용
+            if (rawCode === 'big') return content || '';
 
-        // ───────── 본문 토큰 치환(★ width/align 완전 수정 버전) ─────────
-        function buildRenderedContent(p) {
-            if (!p) return null;
+            const m = meta || {};
+            let html = content || '';
 
-            let html = String(p.content || '');
+            // 예전에 남아 있던 "[파일 2]", "파일 3", "첨부 파일" 같은 텍스트 제거
+            html = html
+                .replace(/\[?\s*파일\s*\d+\s*\]?/gi, '') // [파일 2], 파일 3 등
+                .replace(/첨부\s*파일/gi, '');
 
-            // 0) 잘못된 형태 "[ [[file:1]]" → "[[file:1]]"
-            html = html.replace(/\[\s*\[\s*file/gi, '[[file');
+            const tokenRe = /\[\[file:(\d+)([^\]]*)\]\]/gi;
 
-            // 1) 기존 <img> 태그 제거
-            html = html.replace(/<img[^>]*>/gi, '');
-
-            // 2) base64 이미지 제거
-            html = html.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/gi, '');
-
-            const attachments = p.attachments || [];
-
-            // [[file:1 width=50 align=left]] 등 잡기
-            const re = /\[\[\s*file\s*:(\d+)([^\]]*)\]\]/gi;
-
-            let tokenUsed = false;
-
-            html = html.replace(re, function (full, numStr, paramStr) {
-                tokenUsed = true;
-
+            html = html.replace(tokenRe, function (_, numStr, attrStr) {
                 const n = parseInt(numStr, 10);
-                const idx = isNaN(n) ? -1 : n - 1;
-                const att = attachments[idx];
+                const idx = n - 1;
 
-                // ------- width 파싱 (완전 재구현) -------
-                // width=50   width=50%   width=300px   w=300  w=300px
-                let widthVal = null;
-                const w = paramStr.match(/(?:width|w)\s*=\s*([0-9]+)(px|%)?/i);
-                if (w) {
-                    const num = w[1];
-                    const unit = w[2] || '%'; // 기본 단위는 %
-                    widthVal = num + unit;
+                let widthRaw = null; // "50", "50%", "300px"
+                let align = 'center';
+
+                attrStr = attrStr || '';
+
+                // width=50 / width=50% / width=300px
+                const mWidth = /width\s*=\s*([0-9]{1,4}(?:px|%)?)/i.exec(attrStr);
+                if (mWidth && mWidth[1]) widthRaw = mWidth[1];
+
+                // align=left|right|center
+                const mAlign = /align\s*=\s*(left|right|center)/i.exec(attrStr);
+                if (mAlign && mAlign[1]) align = mAlign[1].toLowerCase();
+
+                let url = null;
+                let fileName = null;
+
+                if (m.fileList && m.fileList.length >= n) {
+                    const f = m.fileList[idx] || {};
+                    url = f.url || f.fileUrl || f.downloadUrl || f.path || null;
+                    fileName = f.fileName || f.originalFilename || f.filename || f.name || '파일 ' + n;
+                } else if ((!m.fileList || m.fileList.length === 0) && n === 1) {
+                    // 예전 단일 파일 방식
+                    url = m.fileUrl || m.url || null;
+                    fileName = m.fileName || '첨부 파일';
                 }
 
-                // ------- align 파싱 -------
-                let alignVal = 'center';
-                const a = paramStr.match(/align\s*=\s*(left|right|center)/i);
-                if (a && a[1]) alignVal = a[1].toLowerCase();
+                // url 이 없으면 토큰 자체 제거
+                if (!url) return '';
 
-                // 이미지가 존재하지 않으면 토큰 그대로 반환
-                if (!att || !att.url) return full;
-
-                const safeUrl = att.url;
-                const safeName = escapeAttr(att.fileName || '첨부파일 ' + n);
-
-                // ───── 최종 style 생성 ─────
+                // style 조립
                 const styleParts = [];
 
-                // width 적용
-                if (widthVal) {
-                    styleParts.push('width:' + widthVal);
-                }
-                // 항상 max-width 제한 (레이아웃 깨지지 않게)
-                styleParts.push('max-width:100%');
-                styleParts.push('height:auto');
-                styleParts.push('border-radius:10px');
-                styleParts.push('display:block');
-
-                // 정렬
-                if (alignVal === 'left') {
-                    styleParts.push('margin:16px auto 16px 0');
-                } else if (alignVal === 'right') {
-                    styleParts.push('margin:16px 0 16px auto');
+                if (widthRaw) {
+                    if (/^\d+$/.test(widthRaw)) {
+                        // 숫자만 오면 %로 간주
+                        styleParts.push('width:' + parseInt(widthRaw, 10) + '%');
+                    } else {
+                        styleParts.push('width:' + widthRaw);
+                    }
+                    styleParts.push('max-width:100%');
                 } else {
+                    styleParts.push('max-width:100%');
+                }
+
+                styleParts.push('height:auto');
+                styleParts.push('border-radius:8px');
+
+                if (align === 'left') {
+                    styleParts.push('float:left');
+                    styleParts.push('margin:8px 12px 8px 0');
+                } else if (align === 'right') {
+                    styleParts.push('float:right');
+                    styleParts.push('margin:8px 0 8px 12px');
+                } else {
+                    // center
+                    styleParts.push('display:block');
                     styleParts.push('margin:16px auto');
                 }
 
-                const styleAttr = 'style="' + styleParts.join(';') + ';"';
+                const styleAttr = styleParts.join(';');
 
-                // ───── 이미지 렌더링 ─────
-                return `
-                <div class="inline-img-wrap">
-                    <img class="inline-img" src="${safeUrl}" alt="${safeName}" ${styleAttr} />
-                </div>
-            `;
+                return '<img src="' + escapeAttr(url) + '" data-file-index="' + idx + '" style="' + styleAttr + ';" alt="' + escapeAttr(fileName || '') + '"/>';
             });
 
-            // 토큰이 하나도 없는데 첨부파일이 있다 → 자동으로 아래쪽 출력
-            if (!tokenUsed && attachments.length) {
-                let extra = '';
-                attachments.forEach(function (att, i) {
-                    if (!$scope.isImage(att)) return;
-                    const safeUrl = att.url;
-                    const safeName = escapeAttr(att.fileName || '첨부파일 ' + (i + 1));
-                    extra += `
-                    <div class="inline-img-wrap">
-                        <img class="inline-img" src="${safeUrl}" alt="${safeName}"
-                             style="max-width:100%;height:auto;border-radius:10px;display:block;margin:16px auto;" />
-                    </div>
-                `;
-                });
-                html += extra;
-            }
-
-            return $sce.trustAsHtml(html);
+            return html;
         }
 
         // ───────── 게시글 1건 불러오기 ─────────
@@ -2072,6 +2061,7 @@
                 .then(function (res) {
                     const p = res.data || {};
 
+                    // 첨부 파일 리스트 정리
                     let fileList = safeParseFileList(p.fileListJson || p.file_list_json);
                     if ((!fileList || fileList.length === 0) && p.fileUrl) {
                         fileList = [
@@ -2087,6 +2077,7 @@
                     p.attachments = fileList || [];
                     p.fileCount = p.attachments.length;
 
+                    // 하단 첨부 파일 리스트용
                     $scope.files = (p.attachments || []).map(function (f) {
                         return {
                             url: f.url,
@@ -2097,18 +2088,33 @@
                         };
                     });
 
+                    // 토큰 변환에 쓸 meta 구조 (편집쪽 normalizeMeta와 비슷하게)
+                    const meta = {
+                        fileList: p.attachments || [],
+                        fileUrl: p.fileUrl || null,
+                        fileName: p.fileName || null,
+                        fileType: p.fileType || null,
+                        writerName: p.writerName || p.writer_name || null,
+                        writerId: p.writerId || p.writer_id || null,
+                        createdAt: p.createdAt || p.created_at || null,
+                        updatedAt: p.updatedAt || p.updated_at || null,
+                    };
+
                     $scope.post = p;
-                    $scope.renderedContent = buildRenderedContent(p);
+                    const html = tokensToHtml(p.content || '', meta);
+                    $scope.renderedContent = $sce.trustAsHtml(html);
                 })
                 .finally(function () {
                     $scope.loading = false;
                 });
         }
 
+        // ───────── 로그인 정보 로딩 ─────────
         AuthService.loadMe().finally(function () {
             $scope.me = AuthService.getMe();
         });
 
+        // 초기 1회 로딩
         loadOne();
     });
 
@@ -2566,8 +2572,8 @@
         $scope.pageSize = PAGE_SIZE;
         $scope.pageSizes = [PAGE_SIZE];
         $scope.page = 0;
-        $scope.pages = Math.ceil(APPROX_TOTAL / PAGE_SIZE);
-        $scope.total = APPROX_TOTAL;
+        $scope.pages = Math.ceil(APPROX_TOTAL / PAGE_SIZE); // Math.ceil(...) → 올림으로 조각 개수 계산
+        $scope.total = APPROX_TOTAL; // APPROX_TOTAL → 대용량 게시판에서 실제 totalElements를 매번 세지 않고, 대략적인 총 게시글 수를 가정한 값
         $scope.totalCount = APPROX_TOTAL;
         $scope.totalPages = Math.ceil(APPROX_TOTAL / CHUNK_SIZE);
         $scope.logicalPage = 1;

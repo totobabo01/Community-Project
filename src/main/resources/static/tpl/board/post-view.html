@@ -59,7 +59,7 @@
             ></div>
 
             <div
-                class="post-body-content"
+                class="post-body-content text-mode"
                 ng-if="!renderedContent"
             >
                 {{ post.content }}
@@ -178,35 +178,67 @@
     }
 
     .post-body {
-        padding-top: 8px;
+        /* 🔻 위쪽 여백 없애서 에디터와 수직 위치 최대한 맞추기 */
+        padding-top: 0;
+        margin-top: 0;
         border-top: 1px solid #edf0f5;
+
         font-size: 15px;
-        line-height: 1.7;
-        margin-top: 4px;
+        line-height: 1.6;
+
+        /* float / block 이미지가 있어도 카드 밖으로 안 나가게 */
+        overflow: hidden;
     }
+    .post-body::after {
+        content: '';
+        display: block;
+        clear: both;
+    }
+
     .post-body-content {
         word-break: break-word;
+        margin: 0; /* p 마진만 사용 */
+    }
+
+    /* plain text 모드에서만 줄바꿈 유지 */
+    .post-body-content.text-mode {
         white-space: pre-wrap;
     }
 
-    /* ✅ 이미지: 에디터에서 설정한 width/정렬은 그대로 두고,
-       화면 밖으로만 안 튀게 살짝만 제한 */
+    /* ✅ Summernote 편집기와 비슷하게 p 여백 맞추기 */
+    .post-body-content p {
+        margin: 0 0 10px;
+    }
+    .post-body-content p:last-child {
+        margin-bottom: 0;
+    }
+    /* 빈 문단은 거의 안 보이게 */
+    .post-body-content p:empty {
+        margin: 0;
+        height: 0;
+    }
+    .post-body-content p > br:only-child {
+        display: none;
+    }
+
+    /* ✅ inline-img: 토큰 → HTML 로 바뀐 이미지용 래퍼 */
+    .post-body-content .inline-img-wrap {
+        text-align: center;
+        margin: 16px 0;
+        width: 100%;
+    }
+    .post-body-content .inline-img {
+        max-width: 100%;
+        height: auto;
+        border-radius: 10px;
+        display: inline-block;
+    }
+
+    /* 혹시 다른 img 태그가 있어도 폭만 제한 */
     .post-body-content img,
     .post-body img {
         max-width: 100%;
         height: auto;
-        /* width, margin, display, float 등은 절대 건드리지 않음! */
-    }
-
-    /* 토큰 렌더링용 inline-img 래퍼(필요하면 사용) */
-    .inline-img-wrap {
-        text-align: center;
-        margin: 8px 0;
-    }
-    .inline-img {
-        max-width: 100%;
-        height: auto;
-        border-radius: 8px;
     }
 
     /* 첨부 파일 리스트 */
