@@ -178,16 +178,14 @@
     }
 
     .post-body {
-        /* 🔻 위쪽 여백 없애서 에디터와 수직 위치 최대한 맞추기 */
         padding-top: 0;
         margin-top: 0;
         border-top: 1px solid #edf0f5;
 
         font-size: 15px;
         line-height: 1.6;
-
-        /* float / block 이미지가 있어도 카드 밖으로 안 나가게 */
         overflow: hidden;
+        text-align: left;
     }
     .post-body::after {
         content: '';
@@ -195,9 +193,12 @@
         clear: both;
     }
 
+    /* 🔧 보기 화면에서 내용 전체를 살짝 더 오른쪽으로 (좌우 16px) */
     .post-body-content {
         word-break: break-word;
-        margin: 0; /* p 마진만 사용 */
+        margin: 0;
+        padding: 0 16px; /* ★ 여기 숫자 바꾸면 위치 미세조정 가능 */
+        text-align: left;
     }
 
     /* plain text 모드에서만 줄바꿈 유지 */
@@ -205,14 +206,13 @@
         white-space: pre-wrap;
     }
 
-    /* ✅ Summernote 편집기와 비슷하게 p 여백 맞추기 */
+    /* 문단 여백 – 에디터와 비슷하게 */
     .post-body-content p {
         margin: 0 0 10px;
     }
     .post-body-content p:last-child {
         margin-bottom: 0;
     }
-    /* 빈 문단은 거의 안 보이게 */
     .post-body-content p:empty {
         margin: 0;
         height: 0;
@@ -221,9 +221,9 @@
         display: none;
     }
 
-    /* ✅ inline-img: 토큰 → HTML 로 바뀐 이미지용 래퍼 */
+    /* inline-img: 토큰 → HTML 로 바뀐 이미지용 래퍼 */
     .post-body-content .inline-img-wrap {
-        text-align: center;
+        text-align: left;
         margin: 16px 0;
         width: 100%;
     }
@@ -231,14 +231,16 @@
         max-width: 100%;
         height: auto;
         border-radius: 10px;
-        display: inline-block;
+        display: block;
+        margin: 10px 0 12px 0;
     }
 
-    /* 혹시 다른 img 태그가 있어도 폭만 제한 */
     .post-body-content img,
     .post-body img {
         max-width: 100%;
         height: auto;
+        display: block;
+        margin: 10px 0 12px 0 !important;
     }
 
     /* 첨부 파일 리스트 */

@@ -252,31 +252,30 @@ public class PostDao {                         // 게시글 관련 DB 작업을 
     public List<PostDto> findByBoard(String code) {
         var s = ensurePostResolved();                          // 먼저 스키마 정보(테이블명/컬럼명)를 확보
 
-       // ✅ 수정: updated_at > created_at > id 순으로 정렬
-StringBuilder orderBy = new StringBuilder();
+        // ✅ 수정: updated_at > created_at > id 순으로 정렬
+        StringBuilder orderBy = new StringBuilder();
 
-if (s.updatedAt != null) {
-    // 1순위: updated_at 이 있으면 그걸로 최신 순
-    orderBy.append(s.updatedAt).append(" DESC");
-    // 2순위: created_at 이 있으면 같이 정렬
-    if (s.createdAt != null) {
-        orderBy.append(", ").append(s.createdAt).append(" DESC");
-    }
-} else if (s.createdAt != null) {
-    // updated_at 없으면 created_at 기준
-    orderBy.append(s.createdAt).append(" DESC");
-} else if (s.id != null) {
-    // 둘 다 없으면 id 기준
-    orderBy.append(s.id).append(" DESC");
-} else {
-    orderBy.append(s.title).append(" DESC");
-}
+        if (s.updatedAt != null) {
+            // 1순위: updated_at 이 있으면 그걸로 최신 순
+            orderBy.append(s.updatedAt).append(" DESC");
+            // 2순위: created_at 이 있으면 같이 정렬
+            if (s.createdAt != null) {
+                orderBy.append(", ").append(s.createdAt).append(" DESC");
+            }
+        } else if (s.createdAt != null) {
+            // updated_at 없으면 created_at 기준
+            orderBy.append(s.createdAt).append(" DESC");
+        } else if (s.id != null) {
+            // 둘 다 없으면 id 기준
+            orderBy.append(s.id).append(" DESC");
+        } else {
+            orderBy.append(s.title).append(" DESC");
+        }
 
-// 마지막으로 id 가 있고 아직 포함 안돼 있으면 tie-breaker 로 추가
-if (s.id != null && !orderBy.toString().contains(s.id + " DESC")) {
-    orderBy.append(", ").append(s.id).append(" DESC");
-}
-
+        // 마지막으로 id 가 있고 아직 포함 안돼 있으면 tie-breaker 로 추가
+        if (s.id != null && !orderBy.toString().contains(s.id + " DESC")) {
+            orderBy.append(", ").append(s.id).append(" DESC");
+        }
 
         if (boardColumnIsUuid(s)) {                            // 게시글 테이블의 board 컬럼이 board_uuid 타입인 경우
             String sql =
@@ -350,32 +349,30 @@ if (s.id != null && !orderBy.toString().contains(s.id + " DESC")) {
     ) {
         var s = ensurePostResolved();                 // 스키마 정보 확보
 
-     
-       // ✅ 수정: updated_at > created_at > id 순으로 정렬
-StringBuilder orderBy = new StringBuilder();
+        // ✅ 수정: updated_at > created_at > id 순으로 정렬
+        StringBuilder orderBy = new StringBuilder();
 
-if (s.updatedAt != null) {
-    // 1순위: updated_at 이 있으면 그걸로 최신 순
-    orderBy.append(s.updatedAt).append(" DESC");
-    // 2순위: created_at 이 있으면 같이 정렬
-    if (s.createdAt != null) {
-        orderBy.append(", ").append(s.createdAt).append(" DESC");
-    }
-} else if (s.createdAt != null) {
-    // updated_at 없으면 created_at 기준
-    orderBy.append(s.createdAt).append(" DESC");
-} else if (s.id != null) {
-    // 둘 다 없으면 id 기준
-    orderBy.append(s.id).append(" DESC");
-} else {
-    orderBy.append(s.title).append(" DESC");
-}
+        if (s.updatedAt != null) {
+            // 1순위: updated_at 이 있으면 그걸로 최신 순
+            orderBy.append(s.updatedAt).append(" DESC");
+            // 2순위: created_at 이 있으면 같이 정렬
+            if (s.createdAt != null) {
+                orderBy.append(", ").append(s.createdAt).append(" DESC");
+            }
+        } else if (s.createdAt != null) {
+            // updated_at 없으면 created_at 기준
+            orderBy.append(s.createdAt).append(" DESC");
+        } else if (s.id != null) {
+            // 둘 다 없으면 id 기준
+            orderBy.append(s.id).append(" DESC");
+        } else {
+            orderBy.append(s.title).append(" DESC");
+        }
 
-// 마지막으로 id 가 있고 아직 포함 안돼 있으면 tie-breaker 로 추가
-if (s.id != null && !orderBy.toString().contains(s.id + " DESC")) {
-    orderBy.append(", ").append(s.id).append(" DESC");
-}
-
+        // 마지막으로 id 가 있고 아직 포함 안돼 있으면 tie-breaker 로 추가
+        if (s.id != null && !orderBy.toString().contains(s.id + " DESC")) {
+            orderBy.append(", ").append(s.id).append(" DESC");
+        }
 
         int offset = Math.max(0, page) * Math.max(1, size);
 
@@ -493,11 +490,12 @@ if (s.id != null && !orderBy.toString().contains(s.id + " DESC")) {
     public Long insert(PostDto d) {
         var s = ensurePostResolved();
 
+        // 🔥 방법2: boardCode 비어 있으면 기본값을 'NORM' 으로 사용
         String boardCode = d.getBoardCode();
         if (!hasText(boardCode)) {
-            boardCode = "BUS";
+            boardCode = "NORM";
             d.setBoardCode(boardCode);
-            System.out.println("[PostDao] boardCode 가 비어있어 임시로 'BUS' 사용");
+            System.out.println("[PostDao] boardCode 가 비어있어 임시로 'NORM' 사용");
         }
 
         List<String> cols = new ArrayList<>();

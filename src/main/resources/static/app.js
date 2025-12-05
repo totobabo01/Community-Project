@@ -133,10 +133,6 @@
                 templateUrl: '/users-new.html',
                 controller: 'UsersNewCtrl',
             })
-            .when('/board/bus', {
-                templateUrl: '/tpl/board/bus.html', // ← 여기! '/tpl/%20board/bus.html' 아니고 이게 정답
-                controller: 'BoardBusCtrl',
-            })
             // 게시판 (일반)
             .when('/board/normal', {
                 templateUrl: '/tpl/board/normal.html', // ← 여기! '/tpl/%20board/normal.html' 아님
@@ -445,21 +441,72 @@
 
     // ───────────────── Bus + Users (홈 탭) ─────────────────
     app.controller('BusController', function ($scope, $http, $timeout, $location, $q) {
-        $scope.items = [];
-        $scope.filteredItems = [];
+        // ================== 버스 지도/검색 ==================
+        const DAEJEON_CENTER = [127.3845, 36.3504]; // 경도, 위도 (대전 중심)
+
         $scope.keyword = '';
         $scope.statusMessage = '';
         $scope.statusType = '';
 
-        $scope.loadData = function () {
-            setTimed($scope, 'statusType', 'statusMessage', 'info', '⏳ 데이터를 불러오는 중입니다...', null, $timeout);
+        let ngiiMap = null; // ngii_wmts.map 객체 (OpenLayers 기반)
+        // 나중에 정류장 마커용 레이어를 올리려면 여기서 따로 관리하면 됨
+        // let markerLayer = null;
+
+        // 상태 메시지 헬퍼
+        function setStatus(type, msg, ms) {
+            setTimed($scope, 'statusType', 'statusMessage', type, msg, ms, $timeout);
+        }
+
+        // ✅ 국토지리정보원 지도 초기화 (ngii_wmts.map 사용)
+        function initMap() {
+            if (ngiiMap) return; // 한 번만 생성
+
+            if (!window.ngii_wmts || !ngii_wmts.map) {
+                console.error('[NGII] ngii_wmts.map 을 찾을 수 없습니다. 스크립트 로딩 확인 필요');
+                return;
+            }
+
+            // 샘플 코드: new ngii_wmts.map("map1", { zoom: 2 });
+            // 우리 프로젝트: id="busMap" 에 붙이고, 처음엔 한국 전체가 보이게 zoom 적당히 4~7 사이
+            ngiiMap = new ngii_wmts.map('busMap', {
+                zoom: 7, // 전국보다는 좀 더 확대된 정도
+            });
+
+            // center 옵션은 샘플엔 없어서, 제공 여부가 애매해서
+            // 먼저 map 생성 후 setCenter / setZoom 함수가 있으면 사용
+            try {
+                if (ngiiMap.setCenter && ngiiMap.setZoom) {
+                    // 좌표계는 NGII 설명대로 EPSG:5179(중부원점)일 가능성이 큼.
+                    // 대부분의 래퍼에서 경도, 위도를 그대로 넘기면 내부에서 변환해주므로 일단 그대로 사용.
+                    ngiiMap.setCenter(DAEJEON_CENTER[0], DAEJEON_CENTER[1]); // (x=경도, y=위도)
+                    ngiiMap.setZoom(7);
+                }
+            } catch (e) {
+                console.warn('[NGII] setCenter / setZoom 호출 중 오류 (무시 가능):', e);
+            }
+        }
+
+        // Angular가 DOM을 만든 뒤 지도 초기화 한 번 실행
+        $timeout(initMap, 0);
+
+        // ================== (정류장 검색 부분은 그대로 유지: 나중에 지도 위 마커 연동 가능) ==================
+        $scope.searchStops = function () {
+            const kw = ($scope.keyword || '').trim();
+
+            if (!kw) {
+                setStatus('error', '정류장 이름을 입력해 주세요.', 1500);
+                return;
+            }
+
+            initMap(); // 혹시 아직 안 만들어졌으면 생성
+
+            setStatus('info', '⏳ 정류장 정보를 불러오는 중입니다...', 0);
 
             const params = {
                 pageNo: 1,
-                numOfRows: 500,
+                numOfRows: 300,
+                stNm: kw, // 정류장 이름 검색
             };
-
-            if (($scope.keyword || '').trim()) params.stNm = $scope.keyword.trim();
 
             $http
                 .get('/api/bus/stops', { params })
@@ -467,8 +514,9 @@
                     const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
 
                     let list = [];
-                    if (Array.isArray(data)) list = data;
-                    else if (data?.response?.body?.items) {
+                    if (Array.isArray(data)) {
+                        list = data;
+                    } else if (data?.response?.body?.items) {
                         const it = data.response.body.items.item || data.response.body.items.bs || [];
                         list = Array.isArray(it) ? it : [it];
                     } else if (data?.body?.items) {
@@ -476,44 +524,25 @@
                         list = Array.isArray(it) ? it : [it];
                     }
 
-                    if (!Array.isArray(list)) {
-                        $scope.items = [];
-                        $scope.filteredItems = [];
-                        return setTimed($scope, 'statusType', 'statusMessage', 'error', '⚠️ 응답 데이터가 목록이 아닙니다.', 2000, $timeout);
+                    if (!Array.isArray(list) || !list.length) {
+                        setStatus('error', '❗ "' + kw + '" 정류장을 찾지 못했습니다.', 2000);
+                        return;
                     }
 
-                    $scope.items = list.map((it) => ({
-                        bsNm: it.bsNm || it.stationNm || it.name || '이름 없음',
-                        xPos: it.xPos || it.gpsX || it.lng || '',
-                        yPos: it.yPos || it.gpsY || it.lat || '',
-                    }));
+                    // 🔥 여기서부터는 “NGII 지도 위에 마커 올리기” 부분인데,
+                    //   ngii_wmts 래퍼의 마커 API를 정확히 알아야 해서
+                    //   일단은 검색 성공 메시지만 띄우고, 마커는 다음 단계에서 같이 맞춰보자.
+                    //
+                    // console.log(list);  // 좌표(xPos/yPos 또는 gpsX/gpsY)를 잘 넘어오는지 확인용
 
-                    $scope.filterData();
-                    setTimed($scope, 'statusType', 'statusMessage', 'success', '✅ ' + $scope.items.length + '개의 데이터를 불러왔습니다.', 1500, $timeout);
+                    setStatus('success', '✅ "' + kw + '" 관련 정류장 ' + list.length + '곳을 찾았습니다. (지도 마커는 다음 단계에서 추가 예정)', 2500);
                 })
                 .catch(function () {
-                    setTimed($scope, 'statusType', 'statusMessage', 'error', '❌ 데이터를 불러오지 못했습니다.', 2500, $timeout);
+                    setStatus('error', '❌ 정류장 정보를 불러오지 못했습니다.', 2500);
                 });
         };
 
-        $scope.filterData = function () {
-            const kw = ($scope.keyword || '').trim().toLowerCase();
-            if (!kw) {
-                $scope.filteredItems = $scope.items.slice();
-                return setTimed($scope, 'statusType', 'statusMessage', 'info', '🔍 전체 데이터를 표시합니다.', 1000, $timeout);
-            }
-
-            $scope.filteredItems = $scope.items.filter((item) => ((item.bsNm || '') + '').toLowerCase().includes(kw));
-
-            const kwDisp = ($scope.keyword || '').trim();
-            if ($scope.filteredItems.length) {
-                setTimed($scope, 'statusType', 'statusMessage', 'success', '✅ "' + kwDisp + '" 관련 ' + $scope.filteredItems.length + '건을 찾았습니다.', 1500, $timeout);
-            } else {
-                setTimed($scope, 'statusType', 'statusMessage', 'error', '❗ "' + kwDisp + '"에 대한 결과가 없습니다.', 1500, $timeout);
-            }
-        };
-
-        // (홈 탭의 사용자 미니 관리) — 생략(기존 그대로)
+        // ================== (아래는 기존 "사용자 미니 관리" 그대로) ==================
         $scope.users = [];
         $scope.userStatusMessage = '';
         $scope.userStatusType = '';
@@ -2119,216 +2148,6 @@
     });
 
     // ───────────────── 게시판 라우트별 컨트롤러 ─────────────────
-    // src/main/resources/static/app.js 안에 있는 BoardBusCtrl 전체 교체
-    app.controller('BoardBusCtrl', function ($scope, $controller, $timeout, $http) {
-        // 공통 게시판 기능(BoardBaseCtrl) 상속
-        angular.extend(this, $controller('BoardBaseCtrl', { $scope: $scope }));
-
-        // 이 컨트롤러는 BUS 게시판 고정
-        $scope.boardCode = 'BUS';
-
-        // ───────────────── 새 글 폼 기본값 + boardCode 보장 ─────────────────
-        function ensureNewPost() {
-            $scope.newPost = $scope.newPost || {};
-            $scope.newPost.title = $scope.newPost.title || '';
-            $scope.newPost.content = $scope.newPost.content || '';
-            $scope.newPost.files = $scope.newPost.files || [];
-            // 🔥 항상 boardCode 를 같이 넣어준다 (서버에서 null 안 가게)
-            $scope.newPost.boardCode = $scope.boardCode;
-        }
-        ensureNewPost();
-
-        // 검색 기본값
-        if (!$scope.q) {
-            $scope.q = {
-                type: 'author',
-                keyword: '',
-                from: null,
-                to: null,
-            };
-        }
-
-        $scope.searchOpen = false;
-        $scope.pageSizes = [5, 10, 15, 20];
-        $scope.pageSize = $scope.pageSize || 10;
-        $scope.page = $scope.page || 0;
-
-        // ───────────────── Summernote 에디터 초기화 ─────────────────
-        function initBusEditor() {
-            $timeout(function () {
-                if (!window.jQuery || !window.jQuery.fn || !window.jQuery.fn.summernote) return;
-
-                var $ = window.jQuery;
-                var $editor = $('#busEditor');
-                if ($editor.length === 0) return;
-
-                // 기존 에디터 제거
-                if ($editor.data('summernote')) {
-                    $editor.summernote('destroy');
-                }
-
-                $editor.summernote({
-                    height: 260,
-                    placeholder: '내용을 입력하세요.',
-                    lang: 'ko-KR', // 없으면 무시됨
-                    disableDragAndDrop: true, // 🔥 드래그&드롭 자체 비활성화
-                    toolbar: [
-                        ['style', ['bold', 'italic', 'underline', 'clear']],
-                        ['para', ['ul', 'ol', 'paragraph']],
-                        ['insert', ['link', 'picture']],
-                        ['view', ['codeview']],
-                    ],
-                    callbacks: {
-                        onInit: function () {
-                            ensureNewPost();
-                            var html = ($scope.newPost && $scope.newPost.content) || '';
-                            $editor.summernote('code', html);
-                        },
-                        onChange: function (contents) {
-                            $scope.$applyAsync(function () {
-                                ensureNewPost();
-                                $scope.newPost.content = contents;
-                            });
-                        },
-                        /**
-                         * 드롭/붙여넣기 이미지
-                         * - 에디터 안에만 이미지 넣고 newPost.files 는 건드리지 않음
-                         */
-                        onImageUpload: function (files) {
-                            if (!files || !files.length) return;
-                            Array.prototype.slice.call(files).forEach(function (file) {
-                                var reader = new FileReader();
-                                reader.onload = function (e) {
-                                    $editor.summernote('insertImage', e.target.result, function ($img) {
-                                        // 🔥 이미지 드래그 막기
-                                        $img.attr('draggable', 'false');
-                                        // 보기 좋은 기본 스타일
-                                        $img.css({
-                                            'max-width': '100%',
-                                            height: 'auto',
-                                        });
-                                    });
-                                };
-                                reader.readAsDataURL(file);
-                            });
-                        },
-                    },
-                });
-
-                $scope._busEditorEl = $editor;
-            }, 0);
-        }
-
-        // 뷰 로드 후: 폼이 열려 있으면 에디터 생성
-        $scope.$on('$viewContentLoaded', function () {
-            ensureNewPost();
-            if ($scope.showComposer) {
-                initBusEditor();
-            }
-        });
-
-        // 글쓰기 토글 감시
-        $scope.$watch('showComposer', function (v) {
-            if (v) {
-                ensureNewPost();
-                initBusEditor();
-            } else if (window.jQuery) {
-                var $ = window.jQuery;
-                var $editor = $('#busEditor');
-                if ($editor.length && $editor.data('summernote')) {
-                    $editor.summernote('destroy');
-                }
-            }
-        });
-
-        /**
-         * 🔥 파일 선택(하단 input type="file") → 에디터에 미리보기 자동 삽입
-         *  - newPost.files 가 바뀔 때만 동작
-         */
-        $scope.$watch('newPost.files', function (newVal) {
-            if (!newVal || !window.jQuery) return;
-
-            ensureNewPost(); // 파일 바뀔 때도 boardCode 유지
-
-            var $ = window.jQuery;
-            var $editor = $('#busEditor');
-            if (!$editor.length || !$editor.data('summernote')) return;
-
-            // 어떤 타입이든 배열로 변환
-            var list;
-            if (Array.isArray(newVal)) {
-                list = newVal;
-            } else if (typeof newVal.length === 'number' && typeof newVal.item === 'function') {
-                list = Array.prototype.slice.call(newVal);
-            } else {
-                list = [newVal];
-            }
-
-            list.forEach(function (file, idx) {
-                // 이미 에디터에 넣은 파일은 건너뛴다
-                if (!file || file._previewed) return;
-                file._previewed = true;
-
-                var reader = new FileReader();
-                reader.onload = function (e) {
-                    $editor.summernote('insertImage', e.target.result, function ($img) {
-                        // 첨부파일 인덱스 정보 + 드래그 방지
-                        $img.attr('data-file-index', idx);
-                        $img.attr('draggable', 'false');
-                        $img.css({
-                            'max-width': '100%',
-                            height: 'auto',
-                        });
-                    });
-                };
-                reader.readAsDataURL(file);
-            });
-        });
-
-        // ───────────────── 게시글 삭제 (버튼: ng-click="deletePost(p)") ─────────────────
-        $scope.deletePost = function (p) {
-            if (!p) return;
-            if (!confirm('정말 삭제하시겠습니까?')) return;
-
-            const code = String($scope.boardCode || 'BUS').toUpperCase();
-            const hasUuid = !!p.uuid;
-            const type = hasUuid ? 'str' : 'num';
-            const key = hasUuid ? p.uuid : p.id;
-
-            let url = null;
-            if (code === 'BIG' && type === 'num') {
-                // (BUS 게시판에서는 안 쓰이지만, 혹시 코드 재사용할 수 있으니 그대로 둠)
-                url = '/api/big-board/' + encodeURIComponent(key);
-            } else if (type === 'num') {
-                url = '/api/posts/' + encodeURIComponent(key);
-            } else {
-                url = '/api/posts/key/' + encodeURIComponent(key);
-            }
-
-            $scope.loading = true;
-
-            $http
-                .delete(url)
-                .then(function () {
-                    alert('삭제되었습니다.');
-                    // 삭제 후 목록 다시 로딩
-                    if (typeof $scope.loadPosts === 'function') {
-                        $scope.loadPosts();
-                    }
-                })
-                .catch(function (err) {
-                    console.error('삭제 실패', err);
-                    alert('삭제 중 오류가 발생했습니다.');
-                })
-                .finally(function () {
-                    $scope.loading = false;
-                });
-        };
-
-        // 첫 진입 시 목록 로딩
-        $scope.loadPosts && $scope.loadPosts();
-    });
-
     // src/main/resources/static/app.js
     app.controller('BoardNormalCtrl', function ($scope, $controller, $timeout, $http) {
         // 공통 게시판 기능 상속
