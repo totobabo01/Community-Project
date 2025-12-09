@@ -18,23 +18,21 @@
         <!-- jQuery (필수) -->
         <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 
-        <!-- ▽▽▽ 국토지리정보원 OpenAPI (OpenLayers 기반) ▽▽▽ -->
-        <!-- OpenLayers CSS -->
+        <!-- ★ NGII(OpenLayers) 공식 라이브러리 사용 -->
         <link
             rel="stylesheet"
             href="https://map.ngii.go.kr/static/emap/css/map/OpenLayers-6.4.3.css"
             type="text/css"
         />
-
-        <!-- OpenLayers JS -->
         <script src="https://map.ngii.go.kr/static/emap/js/map/OpenLayers-6.4.3.js"></script>
 
-        <!-- polyfill + proj4 (샘플 그대로) -->
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.4.4/proj4.js"></script>
+        <!-- ✅ polyfill 은 ERR_NAME_NOT_RESOLVED 떠서 제거 -->
+        <!-- <script src="https://cdn.polyfill.io/v2/polyfill.min.js?features=requestAnimationFrame,Element.prototype.classList,URL"></script> -->
 
-        <!-- 국토지리정보원 WMTS 스크립트 (★ 너의 API KEY 사용) -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.4.4/proj4.js"></script>
+        <!-- apikey 는 본인 것으로 유지 -->
         <script src="https://map.ngii.go.kr/openapi/wmts_ngiiMap_v6.4.3.js?apikey=518BD309EE343709E6FF861BEE6F05D2"></script>
-        <!-- △△△ 여기까지 NGII 지도 관련 △△△ -->
+        <!-- ★ 여기까지가 NGII + OpenLayers + proj4 -->
 
         <!-- Summernote Lite CSS / JS -->
         <link
@@ -213,7 +211,7 @@
                 border: 1px solid #90caf9;
             }
 
-            /* 지도 박스: 기존 박스 디자인 그대로 활용 */
+            /* 지도 박스 */
             #output {
                 height: 420px;
                 overflow: hidden;
@@ -223,7 +221,7 @@
                 background: #fbfdff;
             }
 
-            /* 🔥 NGII(OpenLayers) 지도 컨테이너 크기 지정 */
+            /* ★ NGII/OpenLayers 지도 컨테이너 */
             #busMap {
                 width: 100%;
                 height: 100%;
@@ -233,11 +231,6 @@
                 list-style: none;
                 padding: 0;
                 margin: 0;
-            }
-            li {
-                margin-bottom: 8px;
-                font-size: 16px;
-                line-height: 1.4;
             }
             strong {
                 color: #2c3e50;
@@ -375,6 +368,51 @@
             .quick-cards {
                 display: none;
             }
+
+            /* 🔹 지도 + 정류장 목록 레이아웃 */
+            .bus-layout {
+                display: flex;
+                gap: 16px;
+                align-items: flex-start;
+            }
+            .bus-map-wrap {
+                flex: 2;
+            }
+            .stop-list {
+                flex: 1.4;
+                max-height: 420px;
+                overflow: auto;
+                border: 1px solid #edf0f5;
+                border-radius: 12px;
+                background: #fbfdff;
+                padding: 10px 12px;
+            }
+            .stop-list h3 {
+                margin: 0 0 8px;
+                font-size: 15px;
+                font-weight: 600;
+                color: #111827;
+            }
+            .stop-item {
+                padding: 8px 6px;
+                border-radius: 8px;
+                cursor: pointer;
+                margin-bottom: 4px;
+            }
+            .stop-item:hover {
+                background: #eef3ff;
+            }
+            .stop-name {
+                font-weight: 600;
+                color: #111827;
+                font-size: 14px;
+            }
+            .stop-meta {
+                display: block;
+                font-size: 12px;
+                color: #6b7280;
+                margin-top: 2px;
+            }
         </style>
     </head>
 
@@ -509,12 +547,12 @@
             >
                 <div ng-controller="BusController">
                     <section>
-                        <!-- 🔎 정류장 이름 검색 + 검색 버튼 -->
+                        <!-- 🔎 정류장 이름 검색 -->
                         <div class="search-box">
                             <input
                                 type="text"
                                 ng-model="keyword"
-                                placeholder="정류장 이름 검색"
+                                placeholder="정류장 이름 입력 (예: 정부청사, 시청, 둔산정부청사 등)"
                             />
                             <button
                                 type="button"
@@ -537,9 +575,36 @@
                             {{ statusMessage }}
                         </div>
 
-                        <!-- ✅ 지도 박스 -->
-                        <div id="output">
-                            <div id="busMap"></div>
+                        <!-- ✅ 지도 + 정류장 목록 -->
+                        <div class="bus-layout">
+                            <!-- 지도 -->
+                            <div class="bus-map-wrap">
+                                <div id="output">
+                                    <div id="busMap"></div>
+                                </div>
+                            </div>
+
+                            <!-- 정류장 목록 -->
+                            <aside
+                                class="stop-list"
+                                ng-if="stops.length"
+                            >
+                                <h3>검색된 정류장 ({{ stops.length }}곳)</h3>
+                                <ul>
+                                    <li
+                                        class="stop-item"
+                                        ng-repeat="s in stops"
+                                        ng-click="focusStop(s)"
+                                    >
+                                        <span class="stop-name"> {{ s.nodenm || s.nodeNm }} </span>
+                                        <span class="stop-meta">
+                                            정류장ID: {{ s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}
+                                            <br />
+                                            좌표: {{ s.gpslati || s.gpsLat }}, {{ s.gpslong || s.gpsLong }}
+                                        </span>
+                                    </li>
+                                </ul>
+                            </aside>
                         </div>
                     </section>
                 </div>
@@ -581,7 +646,6 @@
                         var who = document.getElementById('whoami');
                         if (who && data.username) who.textContent = '안녕하세요, ' + data.username + '님';
 
-                        // 관리자 여부 전역 보관(메뉴는 항상 보이지만 클릭 가드에서 사용)
                         var isAdmin = !!(
                             data &&
                             (data.isAdmin ||

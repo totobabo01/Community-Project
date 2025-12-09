@@ -16,19 +16,8 @@ spring:
         username: demo_user
         password: '0000'
 
-    # (선택) schema.sql / data.sql 자동 실행 원하면 주석 해제
-    # sql:
-    #   init:
-    #     mode: always
-
-    # ⛔️ 임시 내장 계정은 DB 인증과 충돌하니 제거/주석 유지!
-    # security:
-    #   user:
-    #     name: admin
-    #     password: '{noop}admin1234'
-
 server:
-    port: 8091 # 내장 서버(Undertow/Tomcat) 포트
+    port: 8091 # 내장 서버 포트
 
 logging:
     level:
@@ -41,6 +30,22 @@ app:
         username: demo_user
         password: '0000'
 
-daegu:
-    base-url: 'https://apis.data.go.kr/6270000/dbmsapi02/getBasic02' # 공공데이터 API 엔드포인트
-    service-key: '5cedc5eab7543fd67b6d3bcc0d35d2851975c4577afae580e32f0ac0d391b255' # 발급받은 인증키(테스트용)
+# ─────────────────────────
+# TAGO(국토교통부) 버스 API 설정
+# ─────────────────────────
+tago:
+    bus:
+        # 1) 버스 위치정보 조회 서비스 (국토교통부_(TAGO)_버스위치정보)
+        location:
+            base-url: 'https://apis.data.go.kr/1613000/BusLcInfoInqireService'
+            service-key: '5cedc5eab7543fd67b6d3bcc0d35d2851975c4577afae580e32f0ac0d391b255'
+
+        # 2) 버스 노선정보 조회 서비스 (국토교통부_(TAGO)_버스노선정보)
+        route:
+            base-url: 'https://apis.data.go.kr/1613000/BusRouteInfoInqireService'
+            service-key: '5cedc5eab7543fd67b6d3bcc0d35d2851975c4577afae580e32f0ac0d391b255'
+
+        # 3) 버스 정류소정보 조회 서비스 (국토교통부_(TAGO)_버스정류소정보)
+        station:
+            base-url: 'https://apis.data.go.kr/1613000/BusSttnInfoInqireService'
+            service-key: '5cedc5eab7543fd67b6d3bcc0d35d2851975c4577afae580e32f0ac0d391b255'

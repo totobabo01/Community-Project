@@ -441,105 +441,224 @@
 
     // ───────────────── Bus + Users (홈 탭) ─────────────────
     app.controller('BusController', function ($scope, $http, $timeout, $location, $q) {
-        // ================== 버스 지도/검색 ==================
-        const DAEJEON_CENTER = [127.3845, 36.3504]; // 경도, 위도 (대전 중심)
+        const CITY_CODE = 25; // 대전 TAGO 코드
 
         $scope.keyword = '';
         $scope.statusMessage = '';
         $scope.statusType = '';
+        $scope.stops = [];
 
-        let ngiiMap = null; // ngii_wmts.map 객체 (OpenLayers 기반)
-        // 나중에 정류장 마커용 레이어를 올리려면 여기서 따로 관리하면 됨
-        // let markerLayer = null;
+        // NGII 지도 객체 (window.map1 이 있으면 그걸 씀)
+        let ngiiMap = null;
 
-        // 상태 메시지 헬퍼
         function setStatus(type, msg, ms) {
             setTimed($scope, 'statusType', 'statusMessage', type, msg, ms, $timeout);
         }
 
-        // ✅ 국토지리정보원 지도 초기화 (ngii_wmts.map 사용)
-        function initMap() {
-            if (ngiiMap) return; // 한 번만 생성
+        // ✅ NGII 지도 얻기 / 초기화
+        function getMap() {
+            if (ngiiMap) return ngiiMap;
 
-            if (!window.ngii_wmts || !ngii_wmts.map) {
-                console.error('[NGII] ngii_wmts.map 을 찾을 수 없습니다. 스크립트 로딩 확인 필요');
+            // 1) 이미 예제처럼 window.onload 에서 만든 map1 이 있다면 재사용
+            if (window.map1) {
+                ngiiMap = window.map1;
+                return ngiiMap;
+            }
+
+            // 2) 그렇지 않으면 여기서 새로 생성
+            if (!window.ngii_wmts) {
+                console.error('[BusController] ngii_wmts 를 찾지 못했습니다.');
+                return null;
+            }
+
+            const div = document.getElementById('busMap');
+            if (!div) {
+                console.warn('[BusController] #busMap 요소를 찾지 못했습니다.');
+                return null;
+            }
+
+            ngiiMap = new ngii_wmts.map('busMap'); // 옵션 필요하면 {zoom:2} 등 추가
+            window.map1 = ngiiMap; // 전역에도 보관 (예제 호환)
+
+            // 거리/면적 도구 자동 추가하고 싶으면:
+            if (typeof ngiiMap._addDefaultMeasureControl === 'function') {
+                ngiiMap._addDefaultMeasureControl();
+            }
+
+            return ngiiMap;
+        }
+
+        // DOM 준비 후 한 번 호출
+        $timeout(getMap, 0);
+
+        // 🔹 경도/위도로 지도 이동 (NGII + OpenLayers 6 기준)
+        function moveMap(lon, lat, zoom) {
+            const map = getMap();
+            if (!map) {
+                console.warn('[BusController] map 이 아직 없습니다.');
                 return;
             }
 
-            // 샘플 코드: new ngii_wmts.map("map1", { zoom: 2 });
-            // 우리 프로젝트: id="busMap" 에 붙이고, 처음엔 한국 전체가 보이게 zoom 적당히 4~7 사이
-            ngiiMap = new ngii_wmts.map('busMap', {
-                zoom: 7, // 전국보다는 좀 더 확대된 정도
-            });
-
-            // center 옵션은 샘플엔 없어서, 제공 여부가 애매해서
-            // 먼저 map 생성 후 setCenter / setZoom 함수가 있으면 사용
-            try {
-                if (ngiiMap.setCenter && ngiiMap.setZoom) {
-                    // 좌표계는 NGII 설명대로 EPSG:5179(중부원점)일 가능성이 큼.
-                    // 대부분의 래퍼에서 경도, 위도를 그대로 넘기면 내부에서 변환해주므로 일단 그대로 사용.
-                    ngiiMap.setCenter(DAEJEON_CENTER[0], DAEJEON_CENTER[1]); // (x=경도, y=위도)
-                    ngiiMap.setZoom(7);
-                }
-            } catch (e) {
-                console.warn('[NGII] setCenter / setZoom 호출 중 오류 (무시 가능):', e);
+            if (!isFinite(lon) || !isFinite(lat)) {
+                console.warn('[BusController] 잘못된 좌표:', lon, lat);
+                return;
             }
+
+            console.log('[BusController] moveMap 호출:', { lon, lat, zoom });
+
+            // 1️⃣ map 객체 안에서 OpenLayers Map 후보를 자동으로 찾기
+            let olMap = null;
+
+            // (1) 흔히 쓰는 프로퍼티 이름들 먼저 검사
+            const candidates = [map.map, map._map, map.olMap, map._olMap];
+            for (let i = 0; i < candidates.length; i++) {
+                const m = candidates[i];
+                if (m && typeof m.getView === 'function') {
+                    olMap = m;
+                    break;
+                }
+            }
+
+            // (2) 그래도 못 찾으면, map 객체의 모든 속성 중 getView 가 있는 애를 찾기
+            if (!olMap) {
+                Object.keys(map).forEach(function (k) {
+                    if (olMap) return;
+                    const v = map[k];
+                    if (v && typeof v.getView === 'function') {
+                        olMap = v;
+                    }
+                });
+            }
+
+            // 2️⃣ OpenLayers 6 뷰로 직접 이동
+            if (olMap && window.ol && typeof olMap.getView === 'function') {
+                try {
+                    const view = olMap.getView();
+                    const proj = view.getProjection();
+                    const projCode = proj && proj.getCode ? proj.getCode() : 'EPSG:3857';
+
+                    let coord;
+                    if (projCode === 'EPSG:3857') {
+                        // WGS84 → WebMercator
+                        coord = ol.proj.fromLonLat([lon, lat]);
+                    } else {
+                        // WGS84 → 현재 뷰 좌표계
+                        coord = ol.proj.transform([lon, lat], 'EPSG:4326', projCode);
+                    }
+
+                    view.setCenter(coord);
+                    if (typeof zoom === 'number') {
+                        view.setZoom(zoom);
+                    }
+
+                    console.log('[BusController] ol 기반 setCenter 완료', { coord, projCode });
+                    return;
+                } catch (e) {
+                    console.error('[BusController] ol 기반 setCenter 실패, _setCenter로 fallback 시도:', e);
+                }
+            }
+
+            // 3️⃣ 마지막 fallback: NGII 래퍼의 _setCenter (좌표계가 맞는 경우에만)
+            if (typeof map._setCenter === 'function') {
+                try {
+                    if (typeof zoom === 'number') {
+                        map._setCenter(lon, lat, zoom);
+                    } else {
+                        map._setCenter(lon, lat);
+                    }
+                    console.log('[BusController] _setCenter 로 중심 이동 완료 (fallback)');
+                    return;
+                } catch (e) {
+                    console.error('[BusController] _setCenter 호출 실패:', e);
+                }
+            }
+
+            console.warn('[BusController] moveMap: 사용할 수 있는 중심 이동 API를 찾지 못했습니다.');
         }
 
-        // Angular가 DOM을 만든 뒤 지도 초기화 한 번 실행
-        $timeout(initMap, 0);
+        // 🔹 정류장 하나를 받아서 지도 이동
+        function moveMapToStop(stop) {
+            if (!stop) return;
 
-        // ================== (정류장 검색 부분은 그대로 유지: 나중에 지도 위 마커 연동 가능) ==================
+            // TAGO: gpslati(위도), gpslong(경도)
+            const rawLat = stop.gpslati || stop.gpsLat || stop.lat || stop.latitude;
+            const rawLon = stop.gpslong || stop.gpsLong || stop.lon || stop.lng || stop.longitude;
+
+            const lat = parseFloat(rawLat);
+            const lon = parseFloat(rawLon);
+
+            console.log('[BusController] 정류장 좌표:', { rawLat, rawLon, lat, lon });
+
+            if (!isFinite(lat) || !isFinite(lon)) {
+                console.warn('[BusController] 좌표 NaN, 이동 불가');
+                return;
+            }
+
+            // 약간 확대해서 보기
+            moveMap(lon, lat, 7);
+        }
+
+        // ================== TAGO 정류장 이름 검색 ==================
         $scope.searchStops = function () {
             const kw = ($scope.keyword || '').trim();
-
             if (!kw) {
                 setStatus('error', '정류장 이름을 입력해 주세요.', 1500);
                 return;
             }
 
-            initMap(); // 혹시 아직 안 만들어졌으면 생성
+            getMap(); // 혹시 아직 안 만들어졌으면 생성
 
             setStatus('info', '⏳ 정류장 정보를 불러오는 중입니다...', 0);
 
             const params = {
+                cityCode: CITY_CODE,
+                keyword: kw,
                 pageNo: 1,
-                numOfRows: 300,
-                stNm: kw, // 정류장 이름 검색
+                numOfRows: 500,
             };
 
             $http
                 .get('/api/bus/stops', { params })
                 .then(function (res) {
                     const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+                    const body = ((data || {}).response || {}).body || {};
+                    let list = (body.items && body.items.item) || [];
 
-                    let list = [];
-                    if (Array.isArray(data)) {
-                        list = data;
-                    } else if (data?.response?.body?.items) {
-                        const it = data.response.body.items.item || data.response.body.items.bs || [];
-                        list = Array.isArray(it) ? it : [it];
-                    } else if (data?.body?.items) {
-                        const it = data.body.items.item || data.body.items.bs || [];
-                        list = Array.isArray(it) ? it : [it];
-                    }
+                    if (!Array.isArray(list)) list = list ? [list] : [];
 
-                    if (!Array.isArray(list) || !list.length) {
+                    console.log('[BusController] TAGO 전체 정류장 수:', list.length);
+
+                    const filtered = list.filter((st) => {
+                        const name = (st.nodenm || st.nodeNm || '').toString();
+                        return name.includes(kw);
+                    });
+
+                    console.log('[BusController] 필터링 결과:', filtered);
+
+                    $scope.stops = filtered;
+
+                    if (!filtered.length) {
                         setStatus('error', '❗ "' + kw + '" 정류장을 찾지 못했습니다.', 2000);
                         return;
                     }
 
-                    // 🔥 여기서부터는 “NGII 지도 위에 마커 올리기” 부분인데,
-                    //   ngii_wmts 래퍼의 마커 API를 정확히 알아야 해서
-                    //   일단은 검색 성공 메시지만 띄우고, 마커는 다음 단계에서 같이 맞춰보자.
-                    //
-                    // console.log(list);  // 좌표(xPos/yPos 또는 gpsX/gpsY)를 잘 넘어오는지 확인용
+                    // 첫 번째 정류장으로 지도 이동
+                    moveMapToStop(filtered[0]);
 
-                    setStatus('success', '✅ "' + kw + '" 관련 정류장 ' + list.length + '곳을 찾았습니다. (지도 마커는 다음 단계에서 추가 예정)', 2500);
+                    setStatus('success', '✅ "' + kw + '" 관련 정류장 ' + filtered.length + '곳을 찾았습니다. (첫 정류장으로 이동)', 2500);
                 })
-                .catch(function () {
+                .catch(function (err) {
+                    console.error('[BusController] 정류장 조회 실패:', err);
                     setStatus('error', '❌ 정류장 정보를 불러오지 못했습니다.', 2500);
                 });
+        };
+
+        // 🔹 목록에서 정류장 클릭 시 지도 이동
+        $scope.focusStop = function (stop) {
+            if (!stop) return;
+
+            $scope.keyword = stop.nodenm || stop.nodeNm || $scope.keyword;
+            moveMapToStop(stop);
         };
 
         // ================== (아래는 기존 "사용자 미니 관리" 그대로) ==================
@@ -570,6 +689,7 @@
                 buildKeySet(u).forEach((k) => {
                     if (!matched && roleIndex.has(k)) matched = roleIndex.get(k);
                 });
+
                 const role = matched ? matched.role : null;
                 u._role = role;
                 u._isAdmin = !!(role && String(role).toUpperCase().includes('ADMIN'));
@@ -601,11 +721,12 @@
         $scope.createUser = function () {
             const name = ($scope.newUser.name || '').trim();
             const email = ($scope.newUser.email || '').trim();
-            if (!name || !email) return setUserStatus('error', '이름과 이메일을 모두 입력하세요.', 2000);
 
+            if (!name || !email) return setUserStatus('error', '이름과 이메일을 모두 입력하세요.', 2000);
             if (!/^[^@\s]+@[^\s@]+\.[^\s@]+$/.test(email)) return setUserStatus('error', '이메일 형식이 올바르지 않습니다.', 2000);
 
             setUserStatus('info', '⏳ 사용자 추가 중...');
+
             $http
                 .post('/user', { name, email })
                 .then(function (res) {
@@ -613,8 +734,10 @@
                     created.roleLabel = '사용자';
                     created.roleClass = 'badge-user';
                     created._isAdmin = false;
+
                     $scope.users.unshift(created);
                     $scope.newUser = { name: '', email: '' };
+
                     const id = created.user_id || created.userId || created.id || '알 수 없음';
                     setUserStatus('success', '✅ 추가 완료 (ID: ' + id + ')', 1500);
                 })
@@ -642,6 +765,7 @@
             if (!idKey) return setUserStatus('error', 'ID를 찾을 수 없어 수정할 수 없습니다.', 2000);
 
             const payload = {};
+
             const name = (u._editName || '').trim();
             const phone = (u._editPhone || '').trim();
             const email = (u._editEmail || '').trim();
@@ -656,13 +780,16 @@
             if (!Object.keys(payload).length) return $scope.cancelEdit(u);
 
             setUserStatus('info', '⏳ 수정 중... (ID: ' + idKey + ')', 0);
+
             $http
                 .put('/user/' + encodeURIComponent(idKey), payload)
                 .then(function (res) {
                     const updated = res.data || {};
+
                     u.name = updated.name ?? name ?? u.name;
                     u.phone = updated.phone ?? phone ?? u.phone;
                     u.email = updated.email ?? email ?? u.email;
+
                     $scope.cancelEdit(u);
                     setUserStatus('success', '✅ 수정 완료 (ID: ' + idKey + ')', 1500);
                 })
@@ -674,6 +801,7 @@
         $scope.deleteUser = function (u) {
             const idKey = u && (u.user_id || u.userId || u.id);
             if (!idKey) return setUserStatus('error', 'ID를 찾을 수 없어 삭제할 수 없습니다.', 2000);
+
             if (!confirm('정말로 삭제할까요? (ID: ' + idKey + ')')) return;
 
             $http
