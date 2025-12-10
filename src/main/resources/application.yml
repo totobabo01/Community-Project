@@ -49,3 +49,8 @@ tago:
         station:
             base-url: 'https://apis.data.go.kr/1613000/BusSttnInfoInqireService'
             service-key: '5cedc5eab7543fd67b6d3bcc0d35d2851975c4577afae580e32f0ac0d391b255'
+
+        # 4) 버스 도착정보 조회 서비스 (국토교통부_(TAGO)_버스도착정보)
+        arrival:
+            base-url: 'https://apis.data.go.kr/1613000/ArvlInfoInqireService'
+            service-key: '5cedc5eab7543fd67b6d3bcc0d35d2851975c4577afae580e32f0ac0d391b255'

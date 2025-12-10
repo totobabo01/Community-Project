@@ -211,7 +211,7 @@
     });
 
     // ───────────────── Root (탭/메뉴 제어) ─────────────────
-    app.controller('RootCtrl', function ($scope, $location, $document, $timeout, AuthService, MenuService) {
+    app.controller('RootCtrl', function ($scope, $location, $document, $timeout, AuthService, MenuService, $rootScope) {
         $scope.me = null;
         $scope.menus = [];
         $scope.location = $location;
@@ -237,10 +237,19 @@
             $location.search('tab', 'home');
             syncTabs();
         };
+
+        // 🔹 버스 탭 이동 + (이미 버스 탭이면) 리셋 이벤트 브로드캐스트
         $scope.goBusTab = function () {
+            const wasBus = $scope.showBusTab; // 이전에 버스 탭이었는지 확인
+
             if ($location.path() !== '/users') $location.path('/users');
             $location.search('tab', 'bus');
             syncTabs();
+
+            // 이미 버스 탭인 상태에서 다시 누른 경우 → BusController 리셋
+            if (wasBus) {
+                $rootScope.$broadcast('reset-bus-view');
+            }
         };
 
         $scope.$on('$locationChangeSuccess', syncTabs);
@@ -440,147 +449,271 @@
     }
 
     // ───────────────── Bus + Users (홈 탭) ─────────────────
-    app.controller('BusController', function ($scope, $http, $timeout, $location, $q) {
+    // app.js 안에 있는 BusController 전체 교체
+    app.controller('BusController', function ($scope, $http, $timeout, $location, $q, $interval, $rootScope) {
         const CITY_CODE = 25; // 대전 TAGO 코드
+        const POLL_MS = 10000; // 도착정보 폴링 주기 (10초)
 
         $scope.keyword = '';
         $scope.statusMessage = '';
         $scope.statusType = '';
         $scope.stops = [];
 
-        // NGII 지도 객체 (window.map1 이 있으면 그걸 씀)
-        let ngiiMap = null;
+        // 🔔 도착정보 상태
+        $scope.arrivals = [];
+        $scope.loadingArrival = false;
 
+        let currentNodeId = null; // 현재 선택된 정류장 ID
+        let pollPromise = null; // $interval 핸들
+
+        // NGII + OpenLayers 객체
+        let ngiiMap = null; // ngii_wmts.map 인스턴스
+        let olMap = null; // 내부 OpenLayers ol.Map
+        let mapProjection = null; // 내부 맵 투영 정보
+
+        let vectorSource = null; // 정류장 마커 소스
+        let vectorLayer = null; // 정류장 마커 레이어
+
+        // ⭐ 초기 뷰 저장용 (리셋 시 사용)
+        let initialCenter = null;
+        let initialZoom = null;
+
+        // ================== 공통 메시지 함수 ==================
         function setStatus(type, msg, ms) {
             setTimed($scope, 'statusType', 'statusMessage', type, msg, ms, $timeout);
         }
 
-        // ✅ NGII 지도 얻기 / 초기화
-        function getMap() {
-            if (ngiiMap) return ngiiMap;
+        // ================== 지도 div 크기 보정 ==================
+        function ensureMapSize() {
+            const div = document.getElementById('busMap');
+            if (!div) return;
 
-            // 1) 이미 예제처럼 window.onload 에서 만든 map1 이 있다면 재사용
-            if (window.map1) {
-                ngiiMap = window.map1;
-                return ngiiMap;
+            if (!div.style.height || div.clientHeight < 200) {
+                div.style.height = '400px';
+            }
+        }
+
+        // ================== 내부 OpenLayers map 찾기 ==================
+        function getInnerOlMap() {
+            if (olMap && typeof olMap.getView === 'function') return olMap;
+            if (!ngiiMap) return null;
+
+            let candidate = null;
+
+            if (!candidate && ngiiMap.map && typeof ngiiMap.map.getView === 'function') {
+                candidate = ngiiMap.map;
             }
 
-            // 2) 그렇지 않으면 여기서 새로 생성
-            if (!window.ngii_wmts) {
-                console.error('[BusController] ngii_wmts 를 찾지 못했습니다.');
-                return null;
+            if (!candidate && typeof ngiiMap.getMap === 'function') {
+                try {
+                    const m = ngiiMap.getMap();
+                    if (m && typeof m.getView === 'function') {
+                        candidate = m;
+                    }
+                } catch (e) {
+                    console.warn('[BusController] ngiiMap.getMap() 호출 실패:', e);
+                }
+            }
+
+            if (!candidate && typeof ngiiMap._getMap === 'function') {
+                try {
+                    const gm = ngiiMap._getMap();
+                    if (gm) {
+                        if (typeof gm.getView === 'function') {
+                            candidate = gm;
+                        } else if (gm.Map && typeof gm.Map.getView === 'function') {
+                            candidate = gm.Map;
+                        } else if (gm.map && typeof gm.map.getView === 'function') {
+                            candidate = gm.map;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[BusController] ngiiMap._getMap() 호출 실패:', e);
+                }
+            }
+
+            if (!candidate && ngiiMap._map && typeof ngiiMap._map.getView === 'function') {
+                candidate = ngiiMap._map;
+            }
+
+            if (candidate) {
+                olMap = candidate;
+                try {
+                    const view = olMap.getView && olMap.getView();
+                    if (view && view.getProjection) {
+                        mapProjection = view.getProjection();
+                        console.log('[BusController] 내부 OpenLayers map 확보 완료, proj=', mapProjection && mapProjection.getCode ? mapProjection.getCode() : mapProjection);
+                    } else {
+                        console.log('[BusController] 내부 OpenLayers map 확보 (projection 정보 없음)');
+                    }
+                } catch (e) {
+                    console.log('[BusController] 내부 map 확보, projection 읽기 실패:', e);
+                }
+            } else {
+                console.warn('[BusController] 내부 OpenLayers map 을 찾지 못함');
+            }
+
+            return olMap;
+        }
+
+        // ================== 정류장 마커 레이어 준비 ==================
+        function ensureVectorLayer() {
+            const map = getInnerOlMap();
+            if (!map) return;
+
+            if (!window.ol || !ol.layer || !ol.source || !ol.geom || !ol.style) {
+                console.warn('[BusController] OpenLayers(ol) 없음, 마커 레이어 생성 불가');
+                return;
+            }
+
+            if (vectorLayer && vectorSource) return; // 이미 있음
+
+            vectorSource = new ol.source.Vector();
+            vectorLayer = new ol.layer.Vector({
+                source: vectorSource,
+                style: new ol.style.Style({
+                    image: new ol.style.Circle({
+                        radius: 6,
+                        fill: new ol.style.Fill({ color: 'rgba(255,0,0,0.9)' }),
+                        stroke: new ol.style.Stroke({ color: '#ffffff', width: 2 }),
+                    }),
+                }),
+            });
+
+            map.addLayer(vectorLayer);
+            console.log('[BusController] 정류장 마커 레이어 추가 완료');
+        }
+
+        // ================== 지도 생성 ==================
+        function initMap() {
+            // 이미 만들어져 있으면 재사용
+            if (ngiiMap) {
+                // 내부 ol.Map 도 다시 한 번 확보
+                $timeout(function () {
+                    const m = getInnerOlMap();
+                    if (m && m.updateSize) {
+                        m.updateSize();
+                    }
+                }, 0);
+                return;
             }
 
             const div = document.getElementById('busMap');
             if (!div) {
-                console.warn('[BusController] #busMap 요소를 찾지 못했습니다.');
-                return null;
-            }
-
-            ngiiMap = new ngii_wmts.map('busMap'); // 옵션 필요하면 {zoom:2} 등 추가
-            window.map1 = ngiiMap; // 전역에도 보관 (예제 호환)
-
-            // 거리/면적 도구 자동 추가하고 싶으면:
-            if (typeof ngiiMap._addDefaultMeasureControl === 'function') {
-                ngiiMap._addDefaultMeasureControl();
-            }
-
-            return ngiiMap;
-        }
-
-        // DOM 준비 후 한 번 호출
-        $timeout(getMap, 0);
-
-        // 🔹 경도/위도로 지도 이동 (NGII + OpenLayers 6 기준)
-        function moveMap(lon, lat, zoom) {
-            const map = getMap();
-            if (!map) {
-                console.warn('[BusController] map 이 아직 없습니다.');
+                console.warn('[BusController] #busMap 안 보임');
                 return;
             }
 
-            if (!isFinite(lon) || !isFinite(lat)) {
-                console.warn('[BusController] 잘못된 좌표:', lon, lat);
+            if (!window.ngii_wmts) {
+                console.error('[BusController] ngii_wmts 없음 (스크립트 로드 확인 필요)');
                 return;
             }
 
-            console.log('[BusController] moveMap 호출:', { lon, lat, zoom });
+            // 컨테이너 높이 고정 (안하면 높이 0이라 흰 화면만 보일 수 있음)
+            ensureMapSize();
 
-            // 1️⃣ map 객체 안에서 OpenLayers Map 후보를 자동으로 찾기
-            let olMap = null;
-
-            // (1) 흔히 쓰는 프로퍼티 이름들 먼저 검사
-            const candidates = [map.map, map._map, map.olMap, map._olMap];
-            for (let i = 0; i < candidates.length; i++) {
-                const m = candidates[i];
-                if (m && typeof m.getView === 'function') {
-                    olMap = m;
-                    break;
-                }
-            }
-
-            // (2) 그래도 못 찾으면, map 객체의 모든 속성 중 getView 가 있는 애를 찾기
-            if (!olMap) {
-                Object.keys(map).forEach(function (k) {
-                    if (olMap) return;
-                    const v = map[k];
-                    if (v && typeof v.getView === 'function') {
-                        olMap = v;
-                    }
+            try {
+                // ⭐ NGII 샘플과 최대한 동일하게: zoom만 지정해서 생성
+                //   (center 는 NGII 기본값 사용)
+                ngiiMap = new ngii_wmts.map('busMap', {
+                    zoom: 7, // 샘플은 2, 우리는 조금 더 확대
                 });
-            }
 
-            // 2️⃣ OpenLayers 6 뷰로 직접 이동
-            if (olMap && window.ol && typeof olMap.getView === 'function') {
-                try {
-                    const view = olMap.getView();
-                    const proj = view.getProjection();
-                    const projCode = proj && proj.getCode ? proj.getCode() : 'EPSG:3857';
+                console.log('[BusController] NGII 지도 생성 완료:', ngiiMap);
+                window.busNgiiMap = ngiiMap; // 디버깅용
 
-                    let coord;
-                    if (projCode === 'EPSG:3857') {
-                        // WGS84 → WebMercator
-                        coord = ol.proj.fromLonLat([lon, lat]);
+                // 내부 OpenLayers map 찾고, 사이즈/마커 레이어 준비 + 초기 뷰 저장
+                $timeout(function () {
+                    const m = getInnerOlMap();
+                    if (m) {
+                        const view = m.getView && m.getView();
+                        if (view) {
+                            try {
+                                const c = view.getCenter && view.getCenter();
+                                const z = view.getZoom && view.getZoom();
+                                initialCenter = c && c.slice ? c.slice() : c;
+                                initialZoom = z;
+                                console.log('[BusController] 초기 center/zoom 저장:', initialCenter, initialZoom);
+                            } catch (e) {
+                                console.warn('[BusController] 초기 center/zoom 저장 실패:', e);
+                            }
+                        }
+
+                        if (typeof m.updateSize === 'function') {
+                            m.updateSize();
+                            console.log('[BusController] OpenLayers map.updateSize 호출');
+                        }
+                        ensureVectorLayer();
                     } else {
-                        // WGS84 → 현재 뷰 좌표계
-                        coord = ol.proj.transform([lon, lat], 'EPSG:4326', projCode);
+                        console.warn('[BusController] initMap 이후에도 내부 ol.Map 을 찾지 못함');
                     }
-
-                    view.setCenter(coord);
-                    if (typeof zoom === 'number') {
-                        view.setZoom(zoom);
-                    }
-
-                    console.log('[BusController] ol 기반 setCenter 완료', { coord, projCode });
-                    return;
-                } catch (e) {
-                    console.error('[BusController] ol 기반 setCenter 실패, _setCenter로 fallback 시도:', e);
-                }
+                }, 200);
+            } catch (e) {
+                console.error('[BusController] NGII 지도 생성 실패:', e);
             }
-
-            // 3️⃣ 마지막 fallback: NGII 래퍼의 _setCenter (좌표계가 맞는 경우에만)
-            if (typeof map._setCenter === 'function') {
-                try {
-                    if (typeof zoom === 'number') {
-                        map._setCenter(lon, lat, zoom);
-                    } else {
-                        map._setCenter(lon, lat);
-                    }
-                    console.log('[BusController] _setCenter 로 중심 이동 완료 (fallback)');
-                    return;
-                } catch (e) {
-                    console.error('[BusController] _setCenter 호출 실패:', e);
-                }
-            }
-
-            console.warn('[BusController] moveMap: 사용할 수 있는 중심 이동 API를 찾지 못했습니다.');
         }
 
-        // 🔹 정류장 하나를 받아서 지도 이동
-        function moveMapToStop(stop) {
+        // 최초 진입 시 지도 생성
+        $timeout(initMap, 0);
+
+        // ================== 지도 이동 ==================
+        function moveMap(lon, lat, zoom) {
+            $timeout(function () {
+                const map = getInnerOlMap();
+
+                lon = parseFloat(lon);
+                lat = parseFloat(lat);
+                if (!isFinite(lon) || !isFinite(lat)) {
+                    console.warn('[BusController] moveMap: 잘못된 좌표', lon, lat);
+                    return;
+                }
+
+                // 1) 내부 OpenLayers map 으로 이동
+                if (map && window.ol) {
+                    try {
+                        const view = map.getView();
+                        if (!view) throw new Error('view 없음');
+
+                        let coord = [lon, lat];
+
+                        if (ol.proj && ol.proj.transform && mapProjection) {
+                            // EPSG:4326(위경도) → 내부 지도 투영으로 변환
+                            coord = ol.proj.transform([lon, lat], 'EPSG:4326', mapProjection);
+                        } else if (ol.proj && ol.proj.fromLonLat && !mapProjection) {
+                            coord = ol.proj.fromLonLat([lon, lat]);
+                        }
+
+                        view.setCenter(coord);
+                        if (typeof zoom === 'number') view.setZoom(zoom);
+
+                        console.log('[BusController] OpenLayers view.setCenter 로 이동 완료');
+                        return;
+                    } catch (e) {
+                        console.error('[BusController] OpenLayers 지도 이동 실패, ngii _setCenter로 대체:', e);
+                    }
+                }
+
+                // 2) 실패 시 NGII 전용 함수로 이동
+                console.warn('[BusController] moveMap: OpenLayers map 없음 또는 실패, ngii _setCenter 시도');
+                if (ngiiMap && typeof ngiiMap._setCenter === 'function') {
+                    try {
+                        if (typeof zoom === 'number') {
+                            ngiiMap._setCenter(lon, lat, zoom);
+                        } else {
+                            ngiiMap._setCenter(lon, lat);
+                        }
+                        console.log('[BusController] ngiiMap._setCenter 로 이동 완료');
+                    } catch (e) {
+                        console.error('[BusController] ngiiMap._setCenter 실패:', e);
+                    }
+                }
+            }, 150);
+        }
+
+        // ================== 정류장 좌표로 이동 + 마커 찍기 ==================
+        function moveMapToStop(stop, drawAllMarkers) {
             if (!stop) return;
 
-            // TAGO: gpslati(위도), gpslong(경도)
             const rawLat = stop.gpslati || stop.gpsLat || stop.lat || stop.latitude;
             const rawLon = stop.gpslong || stop.gpsLong || stop.lon || stop.lng || stop.longitude;
 
@@ -594,72 +727,278 @@
                 return;
             }
 
-            // 약간 확대해서 보기
-            moveMap(lon, lat, 7);
+            // 지도 이동 (이때부터 OpenLayers가 움직임)
+            moveMap(lon, lat, 13);
+
+            // 마커 갱신
+            $timeout(function () {
+                ensureVectorLayer();
+                const map = getInnerOlMap();
+                if (!map || !vectorSource || !window.ol || !ol.Feature || !ol.geom) return;
+
+                const view = map.getView && map.getView();
+                const proj = view && view.getProjection ? view.getProjection() : mapProjection;
+
+                vectorSource.clear();
+
+                const targets = drawAllMarkers ? $scope.stops || [] : [stop];
+                const features = [];
+
+                targets.forEach(function (s) {
+                    const rLat = s.gpslati || s.gpsLat || s.lat || s.latitude;
+                    const rLon = s.gpslong || s.gpsLong || s.lon || s.lng || s.longitude;
+
+                    const yy = parseFloat(rLat);
+                    const xx = parseFloat(rLon);
+                    if (!isFinite(yy) || !isFinite(xx)) return;
+
+                    let coord = [xx, yy];
+                    if (ol.proj && ol.proj.transform && proj) {
+                        coord = ol.proj.transform([xx, yy], 'EPSG:4326', proj);
+                    }
+
+                    const f = new ol.Feature({
+                        geometry: new ol.geom.Point(coord),
+                        stop: s,
+                    });
+                    features.push(f);
+                });
+
+                if (features.length) {
+                    vectorSource.addFeatures(features);
+                    console.log('[BusController] 정류장 마커 갱신 완료, 개수=', features.length);
+                }
+            }, 300);
         }
 
-        // ================== TAGO 정류장 이름 검색 ==================
+        // ================== 도착정보 로딩 + 폴링 ==================
+        function formatArrivalMessage(x) {
+            const secRaw = x.arrtime || x.arrTime || x.arrtime1 || x.predictTime1 || x.remaintime || x.remainTime || x.traTime;
+
+            const sec = parseInt(secRaw, 10);
+            const prevCnt = x.arrprevstationcnt || x.arrPrevStationCnt || x.staOrd || x.staord;
+
+            if (isFinite(sec)) {
+                const m = Math.floor(sec / 60);
+                const s = sec % 60;
+
+                let base;
+                if (m > 0) {
+                    base = s > 0 ? `${m}분 ${s}초 후 도착` : `${m}분 후 도착`;
+                } else {
+                    base = `${s}초 후 도착`;
+                }
+
+                if (isFinite(prevCnt) && prevCnt > 0) {
+                    return `${base} (앞 정류장 ${prevCnt}개 전)`;
+                }
+                return base;
+            }
+
+            return x.arrmsg1 || x.arrmsg || x.arrmsg_1 || x.arrmsg_2 || x.arrTime || JSON.stringify(x);
+        }
+
+        function loadArrival(nodeId) {
+            if (!nodeId) return;
+
+            $scope.loadingArrival = true;
+
+            $http
+                .get('/api/bus/arrival', {
+                    params: {
+                        cityCode: CITY_CODE,
+                        nodeId: nodeId,
+                        numOfRows: 50,
+                        pageNo: 1,
+                    },
+                })
+                .then(function (res) {
+                    let data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+                    let body = ((data || {}).response || {}).body || {};
+                    let list = (body.items && body.items.item) || [];
+
+                    if (!Array.isArray(list)) list = list ? [list] : [];
+
+                    $scope.arrivals = list.map(function (x) {
+                        const routeNo = x.routeno || x.routeNo || x.routenm || x.routeNm || x.lineNo || x.busRouteNm || '-';
+
+                        const msg = formatArrivalMessage(x);
+
+                        return {
+                            routeNo: routeNo,
+                            remainMsg: msg,
+                        };
+                    });
+
+                    console.log('[BusController] 도착정보 건수:', $scope.arrivals.length);
+                })
+                .catch(function (err) {
+                    console.error('[BusController] 도착정보 조회 실패:', err);
+                    $scope.arrivals = [];
+                })
+                .finally(function () {
+                    $scope.loadingArrival = false;
+                });
+        }
+
+        function startPolling() {
+            if (pollPromise) {
+                $interval.cancel(pollPromise);
+                pollPromise = null;
+            }
+
+            if (!currentNodeId) return;
+
+            pollPromise = $interval(function () {
+                if (currentNodeId) {
+                    console.log('[BusController] 폴링 - 도착정보 갱신, nodeId=', currentNodeId);
+                    loadArrival(currentNodeId);
+                }
+            }, POLL_MS);
+        }
+
+        function stopPolling() {
+            if (pollPromise) {
+                $interval.cancel(pollPromise);
+                pollPromise = null;
+            }
+        }
+
+        $scope.$on('$destroy', function () {
+            stopPolling();
+        });
+
+        // ================== TAGO 정류장 검색 ==================
         $scope.searchStops = function () {
             const kw = ($scope.keyword || '').trim();
             if (!kw) {
-                setStatus('error', '정류장 이름을 입력해 주세요.', 1500);
+                setStatus('error', '정류장 이름을 입력해주세요.', 1500);
                 return;
             }
 
-            getMap(); // 혹시 아직 안 만들어졌으면 생성
+            initMap();
 
-            setStatus('info', '⏳ 정류장 정보를 불러오는 중입니다...', 0);
-
-            const params = {
-                cityCode: CITY_CODE,
-                keyword: kw,
-                pageNo: 1,
-                numOfRows: 500,
-            };
+            setStatus('info', '정류장 검색 중...', 0);
 
             $http
-                .get('/api/bus/stops', { params })
+                .get('/api/bus/stops', {
+                    params: {
+                        cityCode: CITY_CODE,
+                        keyword: kw,
+                        pageNo: 1,
+                        numOfRows: 500,
+                    },
+                })
                 .then(function (res) {
-                    const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
-                    const body = ((data || {}).response || {}).body || {};
+                    let data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+                    let body = ((data || {}).response || {}).body || {};
                     let list = (body.items && body.items.item) || [];
 
                     if (!Array.isArray(list)) list = list ? [list] : [];
 
                     console.log('[BusController] TAGO 전체 정류장 수:', list.length);
 
-                    const filtered = list.filter((st) => {
-                        const name = (st.nodenm || st.nodeNm || '').toString();
+                    const filtered = list.filter(function (s) {
+                        const name = (s.nodenm || s.nodeNm || '').toString();
                         return name.includes(kw);
                     });
 
                     console.log('[BusController] 필터링 결과:', filtered);
 
                     $scope.stops = filtered;
+                    ensureMapSize();
 
                     if (!filtered.length) {
-                        setStatus('error', '❗ "' + kw + '" 정류장을 찾지 못했습니다.', 2000);
+                        setStatus('error', `❗ "${kw}" 정류장을 찾지 못했습니다.`, 2000);
+                        $scope.arrivals = [];
+                        currentNodeId = null;
+                        startPolling();
                         return;
                     }
 
-                    // 첫 번째 정류장으로 지도 이동
-                    moveMapToStop(filtered[0]);
+                    const first = filtered[0];
+                    moveMapToStop(first, true);
 
-                    setStatus('success', '✅ "' + kw + '" 관련 정류장 ' + filtered.length + '곳을 찾았습니다. (첫 정류장으로 이동)', 2500);
+                    currentNodeId = first.nodeid || first.nodeId || first.nodeno || first.nodeNo;
+                    console.log('[BusController] 검색 후 기본 nodeId:', currentNodeId);
+                    if (currentNodeId) {
+                        loadArrival(currentNodeId);
+                        startPolling();
+                    }
+
+                    setStatus('success', `✅ "${kw}" 관련 정류장 ${filtered.length}곳을 찾았습니다. (지도에 마커 표시 + 도착정보 조회)`, 2500);
                 })
                 .catch(function (err) {
                     console.error('[BusController] 정류장 조회 실패:', err);
                     setStatus('error', '❌ 정류장 정보를 불러오지 못했습니다.', 2500);
+                    $scope.arrivals = [];
+                    currentNodeId = null;
+                    startPolling();
                 });
         };
 
-        // 🔹 목록에서 정류장 클릭 시 지도 이동
+        // ================== 목록 클릭 시 이동 + 도착정보/폴링 갱신 ==================
         $scope.focusStop = function (stop) {
             if (!stop) return;
-
             $scope.keyword = stop.nodenm || stop.nodeNm || $scope.keyword;
-            moveMapToStop(stop);
+
+            moveMapToStop(stop, true);
+
+            currentNodeId = stop.nodeid || stop.nodeId || stop.nodeno || stop.nodeNo;
+            console.log('[BusController] focusStop nodeId:', currentNodeId);
+            if (currentNodeId) {
+                loadArrival(currentNodeId);
+                startPolling();
+            }
         };
+
+        // ================== 🔁 버스 탭 리셋용 함수 ==================
+        function resetBusView() {
+            console.log('[BusController] resetBusView 호출');
+
+            // 검색/상태/정류장/도착정보 초기화
+            $scope.keyword = '';
+            $scope.statusMessage = '';
+            $scope.statusType = '';
+            $scope.stops = [];
+            $scope.arrivals = [];
+            $scope.loadingArrival = false;
+
+            currentNodeId = null;
+            stopPolling();
+
+            // 마커 모두 지우기
+            if (vectorSource) {
+                vectorSource.clear();
+            }
+
+            // 지도 위치를 처음 NGII 기본 위치로 되돌리기
+            $timeout(function () {
+                const map = getInnerOlMap();
+                if (map && map.getView) {
+                    const view = map.getView();
+                    try {
+                        if (initialCenter) {
+                            view.setCenter(initialCenter);
+                        }
+                        if (typeof initialZoom === 'number') {
+                            view.setZoom(initialZoom);
+                        }
+                        if (map.updateSize) {
+                            map.updateSize();
+                        }
+                        console.log('[BusController] 초기 center/zoom 으로 리셋 완료');
+                    } catch (e) {
+                        console.warn('[BusController] resetBusView 지도 리셋 실패:', e);
+                    }
+                }
+            }, 0);
+        }
+
+        // 🔔 다른 컨트롤러에서 $rootScope.$broadcast('reset-bus-view') 하면 여기서 리셋
+        $scope.$on('reset-bus-view', function () {
+            resetBusView();
+        });
 
         // ================== (아래는 기존 "사용자 미니 관리" 그대로) ==================
         $scope.users = [];

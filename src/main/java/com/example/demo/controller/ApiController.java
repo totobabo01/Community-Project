@@ -24,6 +24,9 @@ import org.springframework.web.client.RestTemplate;                // 다른 서
  *     location:
  *       base-url: "https://apis.data.go.kr/1613000/BusLcInfoInqireService"
  *       service-key: "버스위치정보_디코딩키"
+ *     arrival:
+ *       base-url: "https://apis.data.go.kr/1613000/ArvlInfoInqireService"
+ *       service-key: "버스도착정보_디코딩키"
  */
 // ↑ 위 주석은 application.yml 안에 어떤 설정값을 넣어야 하는지 보여주는 예시.
 //   아래 @Value 애노테이션들이 이 경로의 설정 값을 읽어온다.
@@ -31,7 +34,7 @@ import org.springframework.web.client.RestTemplate;                // 다른 서
 @RequestMapping("/api/bus")                      // 이 컨트롤러 안의 모든 핸들러 URL 앞에 "/api/bus" 가 공통으로 붙는다.
 public class ApiController {
 
-    // ───────── TAGO "버스정류소정보 서비스" 설정 (정류장 이름 검색용) ─────────
+    // ───────── TAGO "버스정류소정보 서비스" 설정 (정류장 이름/목록 조회용) ─────────
     @Value("${tago.bus.station.base-url}")       // application.yml 의 tago.bus.station.base-url 값을 주입
     private String stationBaseUrl;               // 정류장 정보 API의 베이스 URL (예: BusSttnInfoInqireService)
 
@@ -44,6 +47,13 @@ public class ApiController {
 
     @Value("${tago.bus.location.service-key}")   // tago.bus.location.service-key 값 주입
     private String locationServiceKey;           // 버스 위치 정보 API의 서비스키(Decoding 키)
+
+    // ───────── TAGO "버스도착정보 조회 서비스" 설정 (정류장별 도착 예정 정보용) ─────────
+    @Value("${tago.bus.arrival.base-url}")       // tago.bus.arrival.base-url 값 주입
+    private String arrivalBaseUrl;               // 버스 도착 정보 API 베이스 URL (ArvlInfoInqireService)
+
+    @Value("${tago.bus.arrival.service-key}")    // tago.bus.arrival.service-key 값 주입
+    private String arrivalServiceKey;            // 버스 도착 정보 API의 서비스키(Decoding 키)
 
     // 외부 API 호출용 HTTP 클라이언트
     private final RestTemplate rt = new RestTemplate();
@@ -137,6 +147,51 @@ public class ApiController {
         System.out.println("[TAGO 노선 위치] URL = " + url);
         // System.out.println("[TAGO 노선 위치] 응답 = " + body);
         // ↑ 필요하면 응답 전체를 찍어서 디버깅할 때 사용 (현재는 주석 처리)
+
+        // 응답 문자열을 그대로 클라이언트에 전달
+        return ResponseEntity.ok(body);
+    }
+
+    // ─────────────────────────────────────────────
+    // 3) 정류장별 버스 도착 정보 조회
+    //    - TAGO 엔드포인트:
+    //      ArvlInfoInqireService/getSttnAcctoArvlPrearngeInfoList
+    //
+    //    호출 예시(대전):
+    //      GET /api/bus/arrival?cityCode=25&nodeId=DJB800123&numOfRows=50&pageNo=1
+    //
+    //    프론트에서는:
+    //      /api/bus/arrival?cityCode=25&nodeId=선택한정류장.nodeId
+    // ─────────────────────────────────────────────
+    @GetMapping("/arrival")  // "/api/bus/arrival" 경로의 HTTP GET 요청을 이 메서드에 매핑
+    public ResponseEntity<?> getArrival(
+            @RequestParam("cityCode") String cityCode,  // 도시 코드 (예: "25")
+            @RequestParam("nodeId") String nodeId,      // 정류장 ID (TAGO 에서 사용하는 nodeId)
+            @RequestParam(defaultValue = "50") int numOfRows, // 한 번에 가져올 행 수
+            @RequestParam(defaultValue = "1") int pageNo      // 페이지 번호
+    ) {
+        // 서비스키, cityCode, nodeId 를 URL 에 넣기 위해 각각 UTF-8 인코딩
+        String serviceKey      = URLEncoder.encode(arrivalServiceKey, StandardCharsets.UTF_8);
+        String encodedCityCode = URLEncoder.encode(cityCode,         StandardCharsets.UTF_8);
+        String encodedNodeId   = URLEncoder.encode(nodeId,           StandardCharsets.UTF_8);
+
+        // TAGO 정류장별 도착정보 조회 URL 조립
+        String url = String.format(
+                "%s/getSttnAcctoArvlPrearngeInfoList?serviceKey=%s&cityCode=%s&nodeId=%s&numOfRows=%d&pageNo=%d&_type=json",
+                arrivalBaseUrl,   // %s → 버스 도착 정보 서비스 베이스 URL
+                serviceKey,       // %s → 인코딩된 서비스키
+                encodedCityCode,  // %s → 인코딩된 cityCode
+                encodedNodeId,    // %s → 인코딩된 nodeId
+                numOfRows,        // %d → 한 번에 가져올 개수
+                pageNo            // %d → 페이지 번호
+        );
+
+        // TAGO API 호출 → 응답을 문자열로 받음
+        String body = rt.getForObject(url, String.class);
+
+        // 어떤 URL 로 호출했는지 로그 출력 (디버깅용)
+        System.out.println("[TAGO 도착정보] URL = " + url);
+        // System.out.println("[TAGO 도착정보] 응답 = " + body);
 
         // 응답 문자열을 그대로 클라이언트에 전달
         return ResponseEntity.ok(body);
