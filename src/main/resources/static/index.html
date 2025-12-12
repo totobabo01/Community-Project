@@ -188,6 +188,16 @@
                 border-radius: 10px;
                 cursor: pointer;
             }
+            /* ✅ 보조 버튼(새로고침/리셋 등) */
+            .search-box .btn-aux {
+                background: #ffffff;
+                color: #263238;
+                border: 1px solid var(--gray-400);
+            }
+            .search-box .btn-aux:hover {
+                box-shadow: 0 3px 10px rgba(0, 0, 0, 0.06);
+                transform: translateY(-1px);
+            }
 
             .status-box {
                 margin-bottom: 16px;
@@ -259,112 +269,6 @@
                 color: #2c3e50;
             }
 
-            .user-table {
-                width: 100%;
-                border-collapse: collapse;
-                background: #fff;
-                border-radius: 12px;
-                overflow: hidden;
-                border: 1px solid #edf0f5;
-            }
-            .user-table th,
-            .user-table td {
-                border-bottom: 1px solid #eee;
-                padding: 10px 12px;
-                text-align: left;
-                font-size: 14px;
-                vertical-align: middle;
-            }
-            .user-table thead th {
-                background: #f5f7fb;
-                font-weight: 600;
-            }
-            .user-table tbody tr:hover td {
-                background: #fbfdff;
-            }
-            .inline-input {
-                width: 95%;
-                padding: 6px 8px;
-                border: 1px solid #d6dbe7;
-                border-radius: 8px;
-            }
-
-            .section-header {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                margin: 6px 0 14px;
-            }
-            .section-title {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                color: var(--text-600);
-            }
-            .section-title .dot {
-                width: 10px;
-                height: 10px;
-                border-radius: 50%;
-                background: var(--blue);
-                box-shadow: 0 0 0 3px rgba(52, 120, 246, 0.15);
-            }
-            .actions {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-            }
-            .btn {
-                display: inline-flex;
-                align-items: center;
-                gap: 8px;
-                padding: 9px 14px;
-                border-radius: 10px;
-                border: 1px solid var(--gray-400);
-                background: #fff;
-                color: #263238;
-                cursor: pointer;
-                font-weight: 600;
-            }
-            .btn:hover {
-                transform: translateY(-1px);
-                box-shadow: 0 3px 10px rgba(0, 0, 0, 0.06);
-            }
-            .btn-primary {
-                border-color: var(--blue);
-                background: var(--blue);
-                color: #fff;
-            }
-            .btn-primary:hover {
-                background: var(--blue-600);
-                border-color: var(--blue-600);
-            }
-            .btn-ghost {
-                background: #fff;
-                color: #2c3e50;
-                border-color: var(--gray-400);
-            }
-            .btn-danger {
-                border-color: var(--danger);
-                background: var(--danger);
-                color: #fff;
-            }
-
-            .pill {
-                padding: 3px 8px;
-                border-radius: 999px;
-                font-size: 12px;
-                border: 1px solid var(--gray-400);
-            }
-            .pill.green {
-                background: #e8f5e9;
-                color: #2e7d32;
-                border-color: #c8e6c9;
-            }
-            .pill.gray {
-                background: #f1f1f1;
-                color: #555;
-            }
-
             .hero {
                 display: flex;
                 gap: 24px;
@@ -397,8 +301,54 @@
                 display: block;
             }
             .bus-map-wrap {
-                margin-bottom: 16px;
+                margin-bottom: 12px;
             }
+
+            /* ✅ 선택된 마커 정보 패널(추가) */
+            .selected-panel {
+                border: 1px solid #edf0f5;
+                border-radius: 12px;
+                background: #fbfdff;
+                padding: 10px 12px;
+                margin-bottom: 12px;
+            }
+            .selected-panel h3 {
+                margin: 0 0 8px;
+                font-size: 15px;
+                font-weight: 700;
+                color: #111827;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .selected-row {
+                font-size: 13px;
+                color: #374151;
+                padding: 6px 0;
+                border-top: 1px solid #e5e7eb;
+            }
+            .selected-row:first-of-type {
+                border-top: 0;
+            }
+            .badge {
+                font-size: 12px;
+                padding: 2px 8px;
+                border-radius: 999px;
+                border: 1px solid #d1d5db;
+                background: #fff;
+                color: #111827;
+            }
+            .badge.red {
+                border-color: rgba(231, 76, 60, 0.35);
+                background: rgba(231, 76, 60, 0.08);
+                color: #b42318;
+            }
+            .badge.blue {
+                border-color: rgba(52, 120, 246, 0.35);
+                background: rgba(52, 120, 246, 0.08);
+                color: #1d4ed8;
+            }
+
             .stop-list {
                 max-height: 260px;
                 overflow: auto;
@@ -447,6 +397,10 @@
                 font-size: 15px;
                 font-weight: 600;
                 color: #111827;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 10px;
             }
             .arrival-item {
                 padding: 8px 10px;
@@ -623,6 +577,16 @@
                             >
                                 검색
                             </button>
+
+                            <!-- ✅ (추가) 화면 새로고침/리셋 버튼: app.js에서 resetBusView() 만들어 연결하면 됨 -->
+                            <button
+                                type="button"
+                                class="btn-aux"
+                                ng-click="resetBusView && resetBusView()"
+                                title="지도/선택/도착정보 초기화"
+                            >
+                                새로고침
+                            </button>
                         </div>
 
                         <!-- 상태 메시지 -->
@@ -653,6 +617,82 @@
                                 </div>
                             </div>
 
+                            <!-- ✅ (추가) 마커 클릭 시 선택 정보 시각화 패널 -->
+                            <section class="selected-panel">
+                                <h3>
+                                    <span>선택된 마커 정보</span>
+                                    <span
+                                        class="badge"
+                                        ng-if="!selectedStop && !selectedBus"
+                                        >없음</span
+                                    >
+                                    <span
+                                        class="badge red"
+                                        ng-if="selectedStop"
+                                        >정류장</span
+                                    >
+                                    <span
+                                        class="badge blue"
+                                        ng-if="selectedBus"
+                                        >버스</span
+                                    >
+                                </h3>
+
+                                <!-- 아무것도 선택 안됨 -->
+                                <div
+                                    class="selected-row"
+                                    ng-if="!selectedStop && !selectedBus"
+                                >
+                                    지도에서 <b>빨간(정류장)</b> / <b>파란(버스)</b> 마킹을 클릭해보세요.
+                                </div>
+
+                                <!-- 정류장 선택됨 -->
+                                <div
+                                    class="selected-row"
+                                    ng-if="selectedStop"
+                                >
+                                    <b>정류장명:</b>
+                                    {{ selectedStop.nodenm || selectedStop.nodeNm || selectedStop.name || '-' }}
+                                </div>
+                                <div
+                                    class="selected-row"
+                                    ng-if="selectedStop"
+                                >
+                                    <b>정류장ID:</b>
+                                    {{ selectedStop.nodeid || selectedStop.nodeId || selectedStop.id || '-' }}
+                                </div>
+                                <div
+                                    class="selected-row"
+                                    ng-if="selectedStop"
+                                >
+                                    <b>좌표:</b>
+                                    {{ selectedStop.gpslati || selectedStop.gpsLat || selectedStop.lat }}, {{ selectedStop.gpslong || selectedStop.gpsLong || selectedStop.lon }}
+                                </div>
+
+                                <!-- 버스 선택됨 -->
+                                <div
+                                    class="selected-row"
+                                    ng-if="selectedBus"
+                                >
+                                    <b>차량/표시:</b>
+                                    {{ selectedBus.plateNo || selectedBus.busNo || selectedBus.id || '-' }}
+                                </div>
+                                <div
+                                    class="selected-row"
+                                    ng-if="selectedBus"
+                                >
+                                    <b>노선ID:</b>
+                                    {{ selectedBus.routeId || selectedBus.routeid || '-' }}
+                                </div>
+                                <div
+                                    class="selected-row"
+                                    ng-if="selectedBus"
+                                >
+                                    <b>좌표:</b>
+                                    {{ selectedBus.lat }}, {{ selectedBus.lon }}
+                                </div>
+                            </section>
+
                             <!-- 정류장 목록 (지도 아래) -->
                             <aside
                                 class="stop-list"
@@ -677,7 +717,16 @@
 
                             <!-- 🔔 선택 정류장 도착 정보 -->
                             <section class="arrival-list">
-                                <h3>선택 정류장 도착 정보</h3>
+                                <h3>
+                                    <span>선택 정류장 도착 정보</span>
+                                    <!-- ✅ 선택 정류장명 표시(선택된 마커/목록 클릭 둘 다 대응) -->
+                                    <span
+                                        style="font-size: 12px; color: #6b7280"
+                                        ng-if="selectedStop"
+                                    >
+                                        {{ (selectedStop.nodenm || selectedStop.nodeNm || selectedStop.name) }}
+                                    </span>
+                                </h3>
 
                                 <div ng-if="loadingArrival">도착 정보를 불러오는 중입니다...</div>
 

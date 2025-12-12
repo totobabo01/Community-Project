@@ -45,6 +45,11 @@ tago:
             base-url: 'https://apis.data.go.kr/1613000/BusRouteInfoInqireService'
             service-key: '5cedc5eab7543fd67b6d3bcc0d35d2851975c4577afae580e32f0ac0d391b255'
 
+        # ✅ 2-1) 노선 “경로 좌표” 조회 서비스 (ApiController의 route-path 용)
+        route-path:
+            base-url: 'https://apis.data.go.kr/1613000/BusRouteInfoInqireService'
+            service-key: '5cedc5eab7543fd67b6d3bcc0d35d2851975c4577afae580e32f0ac0d391b255'
+
         # 3) 버스 정류소정보 조회 서비스 (국토교통부_(TAGO)_버스정류소정보)
         station:
             base-url: 'https://apis.data.go.kr/1613000/BusSttnInfoInqireService'
