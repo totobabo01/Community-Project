@@ -1,0 +1,151 @@
+<div
+    class="board-shell"
+    ng-init="init()"
+    ng-cloak
+>
+    <!-- 헤더 (버튼 제거 버전) -->
+    <div class="section-header card-header-like">
+        <div class="title-wrap">
+            <span class="title-dot"></span>
+            <h2 style="margin: 0">게시판 통계</h2>
+        </div>
+        <!-- ✅ header-actions 삭제됨 -->
+    </div>
+
+    <!-- 서브 바 (일반 게시판 느낌) -->
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #edf0f5; border-radius: 12px; background: #fbfdff; margin-bottom: 14px">
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+            <span style="font-size: 13px; color: #6b7280">대상</span>
+            <select
+                ng-model="boardType"
+                ng-change="reload()"
+                class="stats-select"
+            >
+                <option value="NORM">일반 게시판</option>
+                <option value="BIG">대용량 게시판</option>
+            </select>
+
+            <span style="font-size: 13px; color: #6b7280">기준</span>
+            <select
+                ng-model="metric"
+                ng-change="reload()"
+                class="stats-select"
+            >
+                <option value="posts">사용자 게시물 개수</option>
+                <option value="views">사용자 조회수 합</option>
+            </select>
+
+            <span style="font-size: 13px; color: #6b7280"> 총 <b>{{ (rows && rows.length) || 0 }}</b>명 </span>
+
+            <span
+                ng-if="loading"
+                style="font-size: 12px; color: #6b7280"
+            >
+                불러오는 중...
+            </span>
+        </div>
+
+        <div style="font-size: 12px; color: #6b7280">{{ boardType === 'BIG' ? '대용량 게시판' : '일반 게시판' }} · {{ metric === 'views' ? '조회수 합' : '게시물 수' }}</div>
+    </div>
+
+    <!-- 결과 카드 -->
+    <div style="border: 1px solid #edf0f5; border-radius: 12px; background: #fff">
+        <div style="padding: 14px; border-bottom: 1px solid #edf0f5; font-weight: 700">Top 10 결과</div>
+
+        <div style="padding: 14px">
+            <!-- 차트 -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px">
+                <div class="stats-card">
+                    <div class="stats-card-title">막대 차트 (Top10)</div>
+                    <div style="height: 300px">
+                        <canvas id="barChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="stats-card">
+                    <div class="stats-card-title">원형 차트 (Top10)</div>
+                    <div style="height: 300px; display: flex; align-items: center; justify-content: center">
+                        <canvas id="pieChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top10 목록 -->
+            <div style="margin-top: 18px">
+                <div class="stats-card-title">Top10 목록</div>
+
+                <div class="stats-table">
+                    <div class="stats-table-head">
+                        <div>순위</div>
+                        <div>사용자</div>
+                        <div style="text-align: right">값</div>
+                    </div>
+
+                    <div
+                        class="stats-table-row"
+                        ng-repeat="r in rows track by $index"
+                    >
+                        <div>{{ $index + 1 }}위</div>
+                        <div class="user">{{ r.name }}</div>
+                        <div style="text-align: right">{{ (r.value || 0) | number }}</div>
+                    </div>
+
+                    <div
+                        ng-if="!rows || rows.length === 0"
+                        style="padding: 14px; color: #6b7280"
+                    >
+                        데이터가 없습니다.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 통계 전용 스타일 (버튼 스타일 제거 가능하지만 남겨도 영향 없음) -->
+    <style>
+        .stats-select {
+            padding: 6px 10px;
+            border: 1px solid #cfd7e3;
+            border-radius: 10px;
+            font-size: 13px;
+            background: #fff;
+        }
+
+        .stats-card {
+            border: 1px solid #edf0f5;
+            border-radius: 12px;
+            background: #fbfdff;
+            padding: 12px;
+        }
+
+        .stats-card-title {
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .stats-table {
+            border: 1px solid #edf0f5;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .stats-table-head,
+        .stats-table-row {
+            display: grid;
+            grid-template-columns: 80px 1fr 140px;
+            padding: 10px 12px;
+            font-size: 13px;
+        }
+        .stats-table-head {
+            background: #f8fafc;
+            font-weight: 700;
+            color: #374151;
+        }
+        .stats-table-row {
+            border-top: 1px solid #edf0f5;
+        }
+        .stats-table-row .user {
+            font-weight: 700;
+            color: #111827;
+        }
+    </style>
+</div>

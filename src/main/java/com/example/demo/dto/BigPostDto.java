@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
  *  - title       ↔ big_posts.title
  *  - content     ↔ big_posts.content
  *  - writerId    ↔ big_posts.writer_id
+ *  - viewCnt     ↔ big_posts.view_cnt   ✅ (추가: 조회수)
  *  - createdAt   ↔ big_posts.created_at
  *  - updatedAt   ↔ big_posts.updated_at
  *
@@ -31,6 +32,9 @@ public class BigPostDto {
     // big_posts.writer_id 컬럼에 대응. 작성자의 아이디(문자열) 저장.
     private String writerId;         // 작성자 아이디
 
+    // ✅ big_posts.view_cnt 컬럼에 대응. 조회수(기본값 0)
+    private long viewCnt;            // 조회수
+
     // big_posts.created_at 컬럼에 대응.
     // DB에서는 DATETIME/TIMESTAMP, 자바에서는 LocalDateTime 으로 받음.
     private LocalDateTime createdAt; // 작성일시
@@ -51,12 +55,14 @@ public class BigPostDto {
                       String title,
                       String content,
                       String writerId,
+                      long viewCnt,                 // ✅ (추가)
                       LocalDateTime createdAt,
                       LocalDateTime updatedAt) {
         this.id = id;                 // 파라미터 id 값을 필드 this.id 에 대입.
         this.title = title;           // 파라미터 title → this.title
         this.content = content;       // 파라미터 content → this.content
         this.writerId = writerId;     // 파라미터 writerId → this.writerId
+        this.viewCnt = viewCnt;       // ✅ 파라미터 viewCnt → this.viewCnt
         this.createdAt = createdAt;   // 파라미터 createdAt → this.createdAt
         this.updatedAt = updatedAt;   // 파라미터 updatedAt → this.updatedAt
     }
@@ -103,6 +109,16 @@ public class BigPostDto {
     // writerId(작성자 아이디)를 수정하는 setter.
     public void setWriterId(String writerId) {
         this.writerId = writerId; // 파라미터 writerId → 필드 writerId.
+    }
+
+    // ✅ viewCnt(조회수)를 읽는 getter.
+    public long getViewCnt() {
+        return viewCnt; // 조회수 반환.
+    }
+
+    // ✅ viewCnt(조회수)를 수정하는 setter.
+    public void setViewCnt(long viewCnt) {
+        this.viewCnt = viewCnt; // 파라미터 viewCnt → 필드 viewCnt.
     }
 
     // createdAt(작성일시)을 읽는 getter.
