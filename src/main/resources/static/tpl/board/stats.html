@@ -1,3 +1,4 @@
+<!-- src/main/resources/static/tpl/stats.html -->
 <div
     class="board-shell"
     ng-init="init()"
@@ -26,16 +27,22 @@
             </select>
 
             <span style="font-size: 13px; color: #6b7280">기준</span>
+
             <select
                 ng-model="metric"
                 ng-change="reload()"
                 class="stats-select"
             >
                 <option value="posts">사용자 게시물 개수</option>
-                <option value="views">사용자 조회수 합</option>
+                <option value="views">게시물 조회수 순위</option>
             </select>
 
-            <span style="font-size: 13px; color: #6b7280"> 총 <b>{{ (rows && rows.length) || 0 }}</b>명 </span>
+            <!-- ✅ (수정) metric에 따라 카운트/단위가 따로 보이게 -->
+            <span style="font-size: 13px; color: #6b7280">
+                총
+                <b>{{ metric === 'views' ? ((rowsViews && rowsViews.length) || 0) : ((rowsPosts && rowsPosts.length) || 0) }}</b>
+                {{ metric === 'views' ? '개' : '명' }}
+            </span>
 
             <span
                 ng-if="loading"
@@ -45,7 +52,8 @@
             </span>
         </div>
 
-        <div style="font-size: 12px; color: #6b7280">{{ boardType === 'BIG' ? '대용량 게시판' : '일반 게시판' }} · {{ metric === 'views' ? '조회수 합' : '게시물 수' }}</div>
+        <!-- ✅ (수정) 우측 안내 문구도 metric에 맞게 -->
+        <div style="font-size: 12px; color: #6b7280">{{ boardType === 'BIG' ? '대용량 게시판' : '일반 게시판' }} · {{ metric === 'views' ? '게시물 조회수 순위' : '사용자 게시물 수' }}</div>
     </div>
 
     <!-- 결과 카드 -->
@@ -53,55 +61,155 @@
         <div style="padding: 14px; border-bottom: 1px solid #edf0f5; font-weight: 700">Top 10 결과</div>
 
         <div style="padding: 14px">
-            <!-- 차트 -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px">
-                <div class="stats-card">
-                    <div class="stats-card-title">막대 차트 (Top10)</div>
-                    <div style="height: 300px">
-                        <canvas id="barChart"></canvas>
+            <!-- =========================================================
+                 ✅ A) 사용자 게시물 수 관련 비교 4가지
+                 ✅ (수정) metric=posts 일 때만 보이게
+                 ========================================================= -->
+            <div ng-if="metric === 'posts'">
+                <div style="font-weight: 800; margin: 0 0 10px 0">사용자 게시물 수 비교 (Top10)</div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px">
+                    <!-- 1) 세로 막대 -->
+                    <div class="stats-card">
+                        <div class="stats-card-title">사용자별 게시물 수 Top 10</div>
+                        <div style="height: 300px">
+                            <canvas id="postsBarChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- 2) 원형 -->
+                    <div class="stats-card">
+                        <div class="stats-card-title">게시물 수 비중(Top 10) · 사용자 점유율</div>
+                        <div style="height: 300px; display: flex; align-items: center; justify-content: center">
+                            <canvas id="postsPieChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- 3) (레이더 캔버스 유지) -->
+                    <div class="stats-card">
+                        <div class="stats-card-title">게시물 수 분포 패턴(Top 10 사용자 비교)</div>
+                        <div style="height: 300px">
+                            <canvas id="postsRadarChart"></canvas>
+                        </div>
+                        <div style="margin-top: 6px; font-size: 12px; color: #6b7280">사용자별 값의 “퍼짐/편차”가 잘 보입니다.</div>
+                    </div>
+
+                    <!-- 4) 버블 -->
+                    <div class="stats-card">
+                        <div class="stats-card-title">게시물 수 vs 순위(규모 + 분포)</div>
+                        <div style="height: 300px">
+                            <canvas id="postsBubbleChart"></canvas>
+                        </div>
+                        <div style="margin-top: 6px; font-size: 12px; color: #6b7280">Y축=값, 버블 크기=값(루트 스케일)로 “규모감”을 강조합니다.</div>
                     </div>
                 </div>
 
-                <div class="stats-card">
-                    <div class="stats-card-title">원형 차트 (Top10)</div>
-                    <div style="height: 300px; display: flex; align-items: center; justify-content: center">
-                        <canvas id="pieChart"></canvas>
+                <!-- Top10 목록 (posts) -->
+                <div style="margin-top: 18px">
+                    <div class="stats-card-title">Top10 목록 (게시물 수)</div>
+
+                    <div class="stats-table">
+                        <div class="stats-table-head">
+                            <div>순위</div>
+                            <div>사용자</div>
+                            <div style="text-align: right">게시물 수</div>
+                        </div>
+
+                        <div
+                            class="stats-table-row"
+                            ng-repeat="r in rowsPosts track by $index"
+                        >
+                            <div>{{ $index + 1 }}위</div>
+                            <div class="user">{{ r.name }}</div>
+                            <div style="text-align: right">{{ (r.value || 0) | number }}</div>
+                        </div>
+
+                        <div
+                            ng-if="!rowsPosts || rowsPosts.length === 0"
+                            style="padding: 14px; color: #6b7280"
+                        >
+                            데이터가 없습니다.
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Top10 목록 -->
-            <div style="margin-top: 18px">
-                <div class="stats-card-title">Top10 목록</div>
+            <!-- =========================================================
+                 ✅ B) 게시물 조회수 순위 관련 비교 4가지
+                 ✅ (수정) metric=views 일 때만 보이게
+                 ========================================================= -->
+            <div ng-if="metric === 'views'">
+                <div style="font-weight: 800; margin: 10px 0 10px 0">게시물 조회수 순위 비교 (Top10)</div>
 
-                <div class="stats-table">
-                    <div class="stats-table-head">
-                        <div>순위</div>
-                        <div>사용자</div>
-                        <div style="text-align: right">값</div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px">
+                    <!-- 1) 세로 막대 -->
+                    <div class="stats-card">
+                        <div class="stats-card-title">게시물 조회수 순위 Top 10</div>
+                        <div style="height: 300px">
+                            <canvas id="viewsBarChart"></canvas>
+                        </div>
                     </div>
 
-                    <div
-                        class="stats-table-row"
-                        ng-repeat="r in rows track by $index"
-                    >
-                        <div>{{ $index + 1 }}위</div>
-                        <div class="user">{{ r.name }}</div>
-                        <div style="text-align: right">{{ (r.value || 0) | number }}</div>
+                    <!-- 2) 원형 -->
+                    <div class="stats-card">
+                        <div class="stats-card-title">조회수 비중(Top 10) · 점유율</div>
+                        <div style="height: 300px; display: flex; align-items: center; justify-content: center">
+                            <canvas id="viewsPieChart"></canvas>
+                        </div>
                     </div>
 
-                    <div
-                        ng-if="!rows || rows.length === 0"
-                        style="padding: 14px; color: #6b7280"
-                    >
-                        데이터가 없습니다.
+                    <!-- 3) (레이더 캔버스 유지) -->
+                    <div class="stats-card">
+                        <div class="stats-card-title">조회수 분포 패턴(Top 10 비교)</div>
+                        <div style="height: 300px">
+                            <canvas id="viewsRadarChart"></canvas>
+                        </div>
+                        <div style="margin-top: 6px; font-size: 12px; color: #6b7280">상위 게시물들의 “쏠림/편차”가 잘 보입니다.</div>
+                    </div>
+
+                    <!-- 4) 버블 -->
+                    <div class="stats-card">
+                        <div class="stats-card-title">조회수 vs 순위(규모 + 분포)</div>
+                        <div style="height: 300px">
+                            <canvas id="viewsBubbleChart"></canvas>
+                        </div>
+                        <div style="margin-top: 6px; font-size: 12px; color: #6b7280">Y축=조회수, 버블 크기=조회수(루트 스케일)로 “규모감”을 강조합니다.</div>
+                    </div>
+                </div>
+
+                <!-- Top10 목록 (views) -->
+                <div style="margin-top: 18px">
+                    <div class="stats-card-title">Top10 목록 (조회수 순위)</div>
+
+                    <div class="stats-table">
+                        <div class="stats-table-head">
+                            <div>순위</div>
+                            <div>항목</div>
+                            <div style="text-align: right">조회수</div>
+                        </div>
+
+                        <div
+                            class="stats-table-row"
+                            ng-repeat="r in rowsViews track by $index"
+                        >
+                            <div>{{ $index + 1 }}위</div>
+                            <div class="user">{{ r.name }}</div>
+                            <div style="text-align: right">{{ (r.value || 0) | number }}</div>
+                        </div>
+
+                        <div
+                            ng-if="!rowsViews || rowsViews.length === 0"
+                            style="padding: 14px; color: #6b7280"
+                        >
+                            데이터가 없습니다.
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- 통계 전용 스타일 (버튼 스타일 제거 가능하지만 남겨도 영향 없음) -->
+    <!-- 통계 전용 스타일 (그대로 유지) -->
     <style>
         .stats-select {
             padding: 6px 10px;

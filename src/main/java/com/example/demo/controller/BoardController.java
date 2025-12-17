@@ -1,51 +1,50 @@
 // src/main/java/com/example/demo/controller/BoardController.java
+package com.example.demo.controller; // 이 클래스가 포함된 패키지 이름 선언
 
-package com.example.demo.controller;                                  // 이 클래스가 포함된 패키지 이름 선언
+import java.io.IOException; // 파일 입출력 시 발생하는 예외 타입
+import java.nio.file.Files; // 파일/디렉터리 생성·삭제 등 유틸 메서드 모음
+import java.nio.file.Path; // 파일/디렉터리 경로를 표현하는 클래스
+import java.nio.file.Paths; // 문자열로부터 Path 객체를 만드는 유틸 클래스
+import java.util.ArrayList; // 가변 길이 리스트 구현체(ArrayList) 사용
+import java.util.HashMap; // 키-값 쌍을 저장하는 HashMap 구현체
+import java.util.List; // List 인터페이스 (메서드 파라미터/리턴 타입용)
+import java.util.Map; // Map 인터페이스 (메타데이터 저장용)
+import java.util.UUID; // 고유 식별자(UUID) 생성용 클래스
 
-import java.io.IOException;                                           // 파일 입출력 시 발생하는 예외 타입
-import java.nio.file.Files;                                           // 파일/디렉터리 생성·삭제 등 유틸 메서드 모음
-import java.nio.file.Path;                                            // 파일/디렉터리 경로를 표현하는 클래스
-import java.nio.file.Paths;                                           // 문자열로부터 Path 객체를 만드는 유틸 클래스
-import java.util.ArrayList;                                           // 가변 길이 리스트 구현체(ArrayList) 사용
-import java.util.HashMap;                                             // 키-값 쌍을 저장하는 HashMap 구현체
-import java.util.List;                                                // List 인터페이스 (메서드 파라미터/리턴 타입용)
-import java.util.Map;                                                 // Map 인터페이스 (메타데이터 저장용)
-import java.util.UUID;                                                // 고유 식별자(UUID) 생성용 클래스
+import org.springframework.beans.factory.annotation.Value; // 설정값(application.properties)을 주입하기 위한 애노테이션
+import org.springframework.http.HttpStatus; // HTTP 상태 코드 상수 정의(200,403,404 등)
+import org.springframework.http.MediaType; // Content-Type 상수 정의(JSON, multipart 등)
+import org.springframework.http.ResponseEntity; // 응답 본문 + 상태코드를 함께 반환할 때 사용하는 래퍼
+import org.springframework.security.core.Authentication; // 현재 로그인 사용자/권한 정보를 나타내는 인터페이스
+import org.springframework.security.core.GrantedAuthority; // 개별 권한(ROLE_ADMIN 등)을 나타내는 인터페이스
+import org.springframework.web.bind.annotation.DeleteMapping; // HTTP DELETE 요청을 메서드에 매핑하는 애노테이션
+import org.springframework.web.bind.annotation.GetMapping; // HTTP GET 요청을 메서드에 매핑하는 애노테이션
+import org.springframework.web.bind.annotation.PathVariable; // URL 경로의 일부를 메서드 파라미터로 바인딩하는 애노테이션
+import org.springframework.web.bind.annotation.PostMapping; // HTTP POST 요청 매핑 애노테이션
+import org.springframework.web.bind.annotation.PutMapping; // HTTP PUT 요청 매핑 애노테이션
+import org.springframework.web.bind.annotation.RequestBody; // 요청의 JSON 본문을 객체로 바인딩하는 애노테이션
+import org.springframework.web.bind.annotation.RequestMapping; // 클래스/메서드에 공통 URL prefix를 붙이는 애노테이션
+import org.springframework.web.bind.annotation.RequestParam; // 쿼리스트링/폼 필드 값을 메서드 파라미터로 바인딩하는 애노테이션
+import org.springframework.web.bind.annotation.RestController; // @Controller + @ResponseBody 조합(리턴값을 JSON으로 응답)
+import org.springframework.web.multipart.MultipartFile; // 업로드된 파일을 나타내는 타입
 
-import org.springframework.beans.factory.annotation.Value;            // 설정값(application.properties)을 주입하기 위한 애노테이션
-import org.springframework.http.HttpStatus;                           // HTTP 상태 코드 상수 정의(200,403,404 등)
-import org.springframework.http.MediaType;                            // Content-Type 상수 정의(JSON, multipart 등)
-import org.springframework.http.ResponseEntity;                       // 응답 본문 + 상태코드를 함께 반환할 때 사용하는 래퍼
-import org.springframework.security.core.Authentication;              // 현재 로그인 사용자/권한 정보를 나타내는 인터페이스
-import org.springframework.security.core.GrantedAuthority;            // 개별 권한(ROLE_ADMIN 등)을 나타내는 인터페이스
-import org.springframework.web.bind.annotation.DeleteMapping;         // HTTP DELETE 요청을 메서드에 매핑하는 애노테이션
-import org.springframework.web.bind.annotation.GetMapping;            // HTTP GET 요청을 메서드에 매핑하는 애노테이션
-import org.springframework.web.bind.annotation.PathVariable;          // URL 경로의 일부를 메서드 파라미터로 바인딩하는 애노테이션
-import org.springframework.web.bind.annotation.PostMapping;           // HTTP POST 요청 매핑 애노테이션
-import org.springframework.web.bind.annotation.PutMapping;            // HTTP PUT 요청 매핑 애노테이션
-import org.springframework.web.bind.annotation.RequestBody;           // 요청의 JSON 본문을 객체로 바인딩하는 애노테이션
-import org.springframework.web.bind.annotation.RequestMapping;        // 클래스/메서드에 공통 URL prefix를 붙이는 애노테이션
-import org.springframework.web.bind.annotation.RequestParam;          // 쿼리스트링/폼 필드 값을 메서드 파라미터로 바인딩하는 애노테이션
-import org.springframework.web.bind.annotation.RestController;        // @Controller + @ResponseBody 조합(리턴값을 JSON으로 응답)
-import org.springframework.web.multipart.MultipartFile;               // 업로드된 파일을 나타내는 타입
+import com.example.demo.dao.PostDao; // 게시글 DB 접근을 담당하는 DAO 클래스
+import com.example.demo.dto.PageDTO; // 페이징 응답(목록, 전체건수, 페이지, 사이즈)을 담는 DTO
+import com.example.demo.dto.PostDto; // 게시글 정보를 담는 DTO
+import com.fasterxml.jackson.databind.ObjectMapper; // 자바 객체 <-> JSON 문자열 변환을 위한 라이브러리
 
-import com.example.demo.dao.PostDao;                                  // 게시글 DB 접근을 담당하는 DAO 클래스
-import com.example.demo.dto.PageDTO;                                  // 페이징 응답(목록, 전체건수, 페이지, 사이즈)을 담는 DTO
-import com.example.demo.dto.PostDto;                                  // 게시글 정보를 담는 DTO
-import com.fasterxml.jackson.databind.ObjectMapper;                   // 자바 객체 <-> JSON 문자열 변환을 위한 라이브러리
-
-@RestController                                                       // 이 클래스가 REST API 컨트롤러임을 선언(JSON 반환)
-@RequestMapping("/api")                                               // 이 클래스의 모든 메서드는 "/api" 경로 하위에서 동작
+@RestController // 이 클래스가 REST API 컨트롤러임을 선언(JSON 반환)
+@RequestMapping("/api") // 이 클래스의 모든 메서드는 "/api" 경로 하위에서 동작
 public class BoardController {
 
-    private final PostDao postDao;                                    // 게시글 CRUD를 담당하는 DAO를 필드로 보관
+    private final PostDao postDao; // 게시글 CRUD를 담당하는 DAO를 필드로 보관
 
     // 🔥 업로드 디렉터리 경로 설정: properties에 file.upload-dir가 있으면 그 값을, 없으면 기본값 C:/upload 사용
     @Value("${file.upload-dir:C:/upload}")
-    private String uploadDir;                                         // 실제 파일이 저장될 기본 디렉터리 경로
+    private String uploadDir; // 실제 파일이 저장될 기본 디렉터리 경로
 
-    public BoardController(PostDao postDao) {                         // 생성자: 스프링이 PostDao 빈을 주입해줌
-        this.postDao = postDao;                                       // 주입받은 DAO를 필드에 저장
+    public BoardController(PostDao postDao) { // 생성자: 스프링이 PostDao 빈을 주입해줌
+        this.postDao = postDao; // 주입받은 DAO를 필드에 저장
     }
 
     /* =========================
@@ -54,8 +53,8 @@ public class BoardController {
 
     // 현재 요청의 사용자가 관리자(ROLE_ADMIN)인지 여부를 확인하는 정적 메서드
     private static boolean isAdmin(Authentication auth) {
-        return auth != null &&
-                auth.getAuthorities().stream()
+        return auth != null
+                && auth.getAuthorities().stream()
                         .map(GrantedAuthority::getAuthority)
                         .anyMatch(a -> "ROLE_ADMIN".equalsIgnoreCase(a));
     }
@@ -80,7 +79,6 @@ public class BoardController {
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to
     ) {
-
         if (page < 0) page = 0;
         if (size <= 0) size = 10;
 
@@ -109,8 +107,8 @@ public class BoardController {
     @GetMapping("/posts/{id}")
     public ResponseEntity<?> getOneById(
             @PathVariable String id,
-            Authentication auth) {
-
+            Authentication auth
+    ) {
         PostDto p = loadOneByIdOrKey(id);
         if (p == null) return ResponseEntity.notFound().build();
 
@@ -124,8 +122,8 @@ public class BoardController {
     @GetMapping("/posts/key/{key}")
     public ResponseEntity<?> getOneByKey(
             @PathVariable String key,
-            Authentication auth) {
-
+            Authentication auth
+    ) {
         PostDto p = loadOneByIdOrKey(key);
         if (p == null) return ResponseEntity.notFound().build();
 
@@ -149,11 +147,12 @@ public class BoardController {
             @RequestParam("title") String title,
             @RequestParam("content") String content,
             // 👇 file / files 둘 다 허용 → 합쳐서 사용
-            @RequestParam(name = "file",  required = false) List<MultipartFile> fileParam,
+            @RequestParam(name = "file", required = false) List<MultipartFile> fileParam,
             @RequestParam(name = "files", required = false) List<MultipartFile> filesParam,
-            @RequestParam(name = "isFolder",   required = false) Boolean isFolder,
+            @RequestParam(name = "isFolder", required = false) Boolean isFolder,
             @RequestParam(name = "folderName", required = false) String folderName,
-            Authentication auth) throws IOException {
+            Authentication auth
+    ) throws IOException {
 
         PostDto req = new PostDto();
         req.setBoardCode(code);
@@ -167,17 +166,14 @@ public class BoardController {
 
         // file / files 병합
         List<MultipartFile> allFiles = new ArrayList<>();
-        if (fileParam  != null) allFiles.addAll(fileParam);
+        if (fileParam != null) allFiles.addAll(fileParam);
         if (filesParam != null) allFiles.addAll(filesParam);
 
         boolean folderFlag = Boolean.TRUE.equals(isFolder);
 
         if (folderFlag) {
             // 📁 폴더 글
-            String name = (folderName == null || folderName.isBlank())
-                    ? title
-                    : folderName.trim();
-
+            String name = (folderName == null || folderName.isBlank()) ? title : folderName.trim();
             req.setFileUrl(null);
             req.setFileType("FOLDER");
             req.setFileName(name);
@@ -194,7 +190,6 @@ public class BoardController {
 
             if (!effective.isEmpty()) {
                 List<Map<String, Object>> metaList = new ArrayList<>();
-
                 Path uploadPath = Paths.get(uploadDir).toAbsolutePath();
                 Files.createDirectories(uploadPath);
 
@@ -213,6 +208,7 @@ public class BoardController {
 
                     String fileType;
                     boolean isImage = (contentType != null && contentType.toLowerCase().startsWith("image/"));
+
                     if (isImage) fileType = "IMAGE";
                     else if (originalName != null && !originalName.contains(".")) fileType = "FOLDER";
                     else fileType = "FILE";
@@ -232,7 +228,6 @@ public class BoardController {
                     meta.put("contentType", contentType);
                     meta.put("size", size);
                     meta.put("fileType", fileType);
-
                     metaList.add(meta);
                 }
 
@@ -246,6 +241,7 @@ public class BoardController {
 
         Long id = postDao.insert(req);
         req.setPostId(id);
+
         return ResponseEntity.ok(req);
     }
 
@@ -265,17 +261,18 @@ public class BoardController {
 
         String originalName = file.getOriginalFilename();
         String contentType = file.getContentType();
-
         String safeName = (originalName == null) ? "" : originalName.replaceAll("\\s+", "_");
         String savedName = UUID.randomUUID().toString() + "_" + safeName;
 
         Path uploadPath = Paths.get(uploadDir).toAbsolutePath();
         Files.createDirectories(uploadPath);
+
         Path targetPath = uploadPath.resolve(savedName);
         file.transferTo(targetPath.toFile());
 
         String fileType;
         boolean isImage = (contentType != null && contentType.toLowerCase().startsWith("image/"));
+
         if (isImage) fileType = "IMAGE";
         else if (originalName != null && !originalName.contains(".")) fileType = "FOLDER";
         else fileType = "FILE";
@@ -298,8 +295,8 @@ public class BoardController {
     public ResponseEntity<Void> updateById(
             @PathVariable String id,
             @RequestBody PostDto req,
-            Authentication auth) {
-
+            Authentication auth
+    ) {
         PostDto existing = loadOneByIdOrKey(id);
         if (existing == null) {
             return ResponseEntity.notFound().build();
@@ -330,8 +327,8 @@ public class BoardController {
     public ResponseEntity<Void> updateByKey(
             @PathVariable String key,
             @RequestBody PostDto req,
-            Authentication auth) {
-
+            Authentication auth
+    ) {
         PostDto existing = loadOneByIdOrKey(key);
         if (existing == null) {
             return ResponseEntity.notFound().build();
@@ -368,11 +365,12 @@ public class BoardController {
             @RequestParam("title") String title,
             @RequestParam("content") String content,
             // 👇 file / files 둘 다 허용
-            @RequestParam(name = "file",  required = false) List<MultipartFile> fileParam,
+            @RequestParam(name = "file", required = false) List<MultipartFile> fileParam,
             @RequestParam(name = "files", required = false) List<MultipartFile> filesParam,
-            @RequestParam(name = "isFolder",   required = false) Boolean isFolder,
+            @RequestParam(name = "isFolder", required = false) Boolean isFolder,
             @RequestParam(name = "folderName", required = false) String folderName,
-            Authentication auth) throws IOException {
+            Authentication auth
+    ) throws IOException {
 
         PostDto existing = loadOneByIdOrKey(id);
         if (existing == null) {
@@ -389,7 +387,7 @@ public class BoardController {
 
         // 병합
         List<MultipartFile> allFiles = new ArrayList<>();
-        if (fileParam  != null) allFiles.addAll(fileParam);
+        if (fileParam != null) allFiles.addAll(fileParam);
         if (filesParam != null) allFiles.addAll(filesParam);
 
         boolean folderFlag = Boolean.TRUE.equals(isFolder);
@@ -401,10 +399,8 @@ public class BoardController {
                 Path oldPath = uploadPath.resolve(oldUrl.substring("/uploads/".length()));
                 Files.deleteIfExists(oldPath);
             }
-            String name = (folderName == null || folderName.isBlank())
-                    ? title
-                    : folderName.trim();
 
+            String name = (folderName == null || folderName.isBlank()) ? title : folderName.trim();
             existing.setFileUrl(null);
             existing.setFileType("FOLDER");
             existing.setFileName(name);
@@ -443,6 +439,7 @@ public class BoardController {
 
                     String fileType;
                     boolean isImage = (contentType != null && contentType.toLowerCase().startsWith("image/"));
+
                     if (isImage) fileType = "IMAGE";
                     else if (originalName != null && !originalName.contains(".")) fileType = "FOLDER";
                     else fileType = "FILE";
@@ -462,7 +459,6 @@ public class BoardController {
                     meta.put("contentType", contentType);
                     meta.put("size", size);
                     meta.put("fileType", fileType);
-
                     metaList.add(meta);
                 }
 
@@ -490,11 +486,12 @@ public class BoardController {
             @PathVariable String key,
             @RequestParam("title") String title,
             @RequestParam("content") String content,
-            @RequestParam(name = "file",  required = false) List<MultipartFile> fileParam,
+            @RequestParam(name = "file", required = false) List<MultipartFile> fileParam,
             @RequestParam(name = "files", required = false) List<MultipartFile> filesParam,
-            @RequestParam(name = "isFolder",   required = false) Boolean isFolder,
+            @RequestParam(name = "isFolder", required = false) Boolean isFolder,
             @RequestParam(name = "folderName", required = false) String folderName,
-            Authentication auth) throws IOException {
+            Authentication auth
+    ) throws IOException {
 
         PostDto existing = loadOneByIdOrKey(key);
         if (existing == null) {
@@ -510,7 +507,7 @@ public class BoardController {
         existing.setContent(content);
 
         List<MultipartFile> allFiles = new ArrayList<>();
-        if (fileParam  != null) allFiles.addAll(fileParam);
+        if (fileParam != null) allFiles.addAll(fileParam);
         if (filesParam != null) allFiles.addAll(filesParam);
 
         boolean folderFlag = Boolean.TRUE.equals(isFolder);
@@ -522,10 +519,8 @@ public class BoardController {
                 Path oldPath = uploadPath.resolve(oldUrl.substring("/uploads/".length()));
                 Files.deleteIfExists(oldPath);
             }
-            String name = (folderName == null || folderName.isBlank())
-                    ? title
-                    : folderName.trim();
 
+            String name = (folderName == null || folderName.isBlank()) ? title : folderName.trim();
             existing.setFileUrl(null);
             existing.setFileType("FOLDER");
             existing.setFileName(name);
@@ -564,6 +559,7 @@ public class BoardController {
 
                     String fileType;
                     boolean isImage = (contentType != null && contentType.toLowerCase().startsWith("image/"));
+
                     if (isImage) fileType = "IMAGE";
                     else if (originalName != null && !originalName.contains(".")) fileType = "FOLDER";
                     else fileType = "FILE";
@@ -583,7 +579,6 @@ public class BoardController {
                     meta.put("contentType", contentType);
                     meta.put("size", size);
                     meta.put("fileType", fileType);
-
                     metaList.add(meta);
                 }
 
@@ -610,8 +605,8 @@ public class BoardController {
     @DeleteMapping("/posts/{id}")
     public ResponseEntity<Void> delete(
             @PathVariable String id,
-            Authentication auth) {
-
+            Authentication auth
+    ) {
         int affected = isAdmin(auth)
                 ? postDao.deleteAny(id)
                 : postDao.deleteIfOwner(id, username(auth));
@@ -626,8 +621,8 @@ public class BoardController {
     @DeleteMapping("/posts/key/{key}")
     public ResponseEntity<Void> deleteByKey(
             @PathVariable String key,
-            Authentication auth) {
-
+            Authentication auth
+    ) {
         int affected = isAdmin(auth)
                 ? postDao.deleteAny(key)
                 : postDao.deleteIfOwner(key, username(auth));

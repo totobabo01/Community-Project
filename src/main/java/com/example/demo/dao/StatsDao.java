@@ -1,23 +1,23 @@
 // src/main/java/com/example/demo/dao/StatsDao.java
-package com.example.demo.dao;
+package com.example.demo.dao; // ✅ DAO 패키지
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.List;
+import java.sql.ResultSet; // ✅ SELECT 결과 한 행
+import java.sql.SQLException; // ✅ JDBC 예외
+import java.util.List; // ✅ 결과 리스트
 
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
-import org.springframework.stereotype.Repository;
+import org.springframework.jdbc.core.JdbcTemplate; // ✅ SQL 실행 도구
+import org.springframework.jdbc.core.RowMapper; // ✅ ResultSet -> DTO 매핑
+import org.springframework.stereotype.Repository; // ✅ 스프링 Repository 빈 등록
 
-import com.example.demo.dto.StatsDto;
+import com.example.demo.dto.StatsDto; // ✅ (name, value) DTO
 
-@Repository
+@Repository // ✅ DAO 빈
 public class StatsDao {
 
-    private final JdbcTemplate jdbc;
+    private final JdbcTemplate jdbc; // ✅ DB 쿼리 실행용
 
-    public StatsDao(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
+    public StatsDao(JdbcTemplate jdbc) { // ✅ 생성자 주입
+        this.jdbc = jdbc; // ✅ 필드에 저장
     }
 
     /**
@@ -28,10 +28,10 @@ public class StatsDao {
     private static final RowMapper<StatsDto> ROW_MAPPER = new RowMapper<>() {
         @Override
         public StatsDto mapRow(ResultSet rs, int rowNum) throws SQLException {
-            StatsDto dto = new StatsDto();
-            dto.setName(rs.getString("name"));
-            dto.setValue(rs.getLong("value"));
-            return dto;
+            StatsDto dto = new StatsDto();          // ✅ DTO 생성
+            dto.setName(rs.getString("name"));      // ✅ SQL alias "name" 컬럼 매핑
+            dto.setValue(rs.getLong("value"));      // ✅ SQL alias "value" 컬럼 매핑
+            return dto;                             // ✅ 변환된 DTO 반환
         }
     };
 
@@ -40,15 +40,14 @@ public class StatsDao {
     // metric = posts | views | views_sum
     // - posts     : 사용자별 게시글 수
     // - views_sum : 사용자별 조회수 합(SUM(view_cnt))
-    // - views     : "게시글 view_cnt Top10" (SUM 아님, 개별 글의 view_cnt 그대로)
+    // - views     : 게시글 view_cnt Top10 (SUM 아님, 개별 글 기준)
     // ─────────────────────────────────────────────
     public List<StatsDto> top10Norm(String metric) {
-        final String m = (metric == null) ? "posts" : metric.trim().toLowerCase();
-        final String sql;
+        final String m = (metric == null) ? "posts" : metric.trim().toLowerCase(); // ✅ metric 정규화
+        final String sql; // ✅ 실행 SQL
 
         if ("views".equals(m)) {
-            // ✅ 게시글 조회수(view_cnt) Top10 (개별 글 기준, SUM 아님)
-            // name을 "작성자(글id)" 형태로 보여주고 싶으면 CONCAT 부분을 바꾸면 됨
+            // ✅ (개별 글 기준) view_cnt Top10
             sql = """
                 SELECT
                     COALESCE(author_id, '(unknown)') AS name,
@@ -60,7 +59,7 @@ public class StatsDao {
                 LIMIT 10
             """;
         } else if ("views_sum".equals(m)) {
-            // ✅ 사용자별 조회수 합
+            // ✅ 사용자별 조회수 합 Top10
             sql = """
                 SELECT author_id AS name,
                        COALESCE(SUM(view_cnt), 0) AS value
@@ -72,7 +71,7 @@ public class StatsDao {
                 LIMIT 10
             """;
         } else {
-            // ✅ 사용자별 게시글 수
+            // ✅ 사용자별 게시글 수 Top10
             sql = """
                 SELECT author_id AS name,
                        COUNT(*) AS value
@@ -85,7 +84,7 @@ public class StatsDao {
             """;
         }
 
-        return jdbc.query(sql, ROW_MAPPER);
+        return jdbc.query(sql, ROW_MAPPER); // ✅ 실행 + 매핑 + 반환
     }
 
     // ─────────────────────────────────────────────
@@ -93,19 +92,16 @@ public class StatsDao {
     // metric = posts | views | views_sum
     // - posts     : 사용자별 게시글 수(요약테이블)
     // - views_sum : 사용자별 조회수 합(요약테이블)
-    // - views     : "게시글 view_cnt Top10" (SUM 아님, 개별 글의 view_cnt 그대로)
-    //
-    // ⚠️ big_posts 전체 GROUP BY는 느리므로 views_sum/posts는 요약테이블 사용
-    // ✅ views(Top10 개별 글)은 LIMIT 10 + ORDER BY로 비교적 현실적으로 가능(인덱스 있으면 더 좋음)
+    // - views     : 게시글 view_cnt Top10 (SUM 아님, 개별 글 기준)
     // ─────────────────────────────────────────────
     public List<StatsDto> top10Big(String metric) {
-        final String m = (metric == null) ? "posts" : metric.trim().toLowerCase();
-        final String sql;
+        final String m = (metric == null) ? "posts" : metric.trim().toLowerCase(); // ✅ metric 정규화
+        final String sql; // ✅ 실행 SQL
 
         if ("views".equals(m)) {
-            // ✅ 게시글 조회수(view_cnt) Top10 (개별 글 기준)
-            // name은 writer_id만 보여주거나, 원하면 글 id를 함께 보여줄 수 있음
-            // (예: CONCAT(writer_id, ' (#', id, ')') AS name)
+            // ✅ (개별 글 기준) view_cnt Top10
+            // COALESCE : “여러 값 중에서 NULL이 아닌 ‘첫 번째 값’을 고르라는 뜻”
+            // LIMIT : “결과를 몇 개까지만 가져올지” 정하는 명령어
             sql = """
                 SELECT
                     COALESCE(writer_id, '(unknown)') AS name,
@@ -117,7 +113,7 @@ public class StatsDao {
                 LIMIT 10
             """;
         } else if ("views_sum".equals(m)) {
-            // ✅ 사용자별 조회수 합 (사전 집계)
+            // ✅ 게시물 조회수(사전 집계 테이블) Top10
             sql = """
                 SELECT writer_id AS name,
                        views_sum AS value
@@ -128,7 +124,7 @@ public class StatsDao {
                 LIMIT 10
             """;
         } else {
-            // ✅ 사용자별 게시글 수 (사전 집계)
+            // ✅ 사용자별 게시글 수(사전 집계 테이블) Top10
             sql = """
                 SELECT writer_id AS name,
                        posts_cnt AS value
@@ -140,6 +136,6 @@ public class StatsDao {
             """;
         }
 
-        return jdbc.query(sql, ROW_MAPPER);
+        return jdbc.query(sql, ROW_MAPPER); // ✅ 실행 + 매핑 + 반환
     }
 }

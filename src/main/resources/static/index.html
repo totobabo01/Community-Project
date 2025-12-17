@@ -431,6 +431,62 @@
                 flex: 1;
                 text-align: right; /* 🔥 도착 문구를 오른쪽 정렬 */
             }
+
+            /* =======================================================
+         ✅✅✅ 공구(1~14) 버튼 그리드 UI
+         ======================================================= */
+            .tool-grid {
+                border: 1px solid #e5e7eb;
+                border-radius: 12px;
+                background: #ffffff;
+                overflow: hidden;
+                margin: 0 0 14px;
+            }
+            .tool-grid .row {
+                display: grid;
+                grid-template-columns: repeat(7, 1fr);
+            }
+            .tool-grid .cell {
+                padding: 10px 8px;
+                font-size: 13px;
+                color: #111827;
+                text-align: center;
+                border-right: 1px solid #e5e7eb;
+                border-bottom: 1px solid #e5e7eb;
+                cursor: pointer;
+                user-select: none;
+                background: #fff;
+            }
+            .tool-grid .row .cell:last-child {
+                border-right: 0;
+            }
+            .tool-grid .row:last-child .cell {
+                border-bottom: 0;
+            }
+            .tool-grid .cell:hover {
+                background: #f5f7fb;
+            }
+            .tool-grid .cell.active {
+                outline: 2px solid rgba(52, 120, 246, 0.35);
+                outline-offset: -2px;
+                background: rgba(52, 120, 246, 0.06);
+                font-weight: 700;
+            }
+            .tool-grid-title {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 10px;
+                margin: 6px 0 8px;
+                color: #111827;
+            }
+            .tool-grid-title b {
+                font-size: 14px;
+            }
+            .tool-grid-title .hint {
+                font-size: 12px;
+                color: #6b7280;
+            }
         </style>
     </head>
 
@@ -588,15 +644,140 @@
                                 검색
                             </button>
 
-                            <!-- ✅ (추가) 화면 새로고침/리셋 버튼: app.js에서 resetBusView() 만들어 연결하면 됨 -->
+                            <!-- ✅ (수정) 기존 resetBusView는 scope에 없어서 동작 안 함 → resetBus()로 연결 -->
                             <button
                                 type="button"
                                 class="btn-aux"
-                                ng-click="resetBusView && resetBusView()"
+                                ng-click="resetBus && resetBus()"
                                 title="지도/선택/도착정보 초기화"
                             >
                                 새로고침
                             </button>
+
+                            <!-- ✅ (추가) 수동 새로고침(폴링 즉시 실행) 버튼: BusController에 refreshNow 있음 -->
+                            <button
+                                type="button"
+                                class="btn-aux"
+                                ng-click="refreshNow && refreshNow()"
+                                title="도착정보/버스위치 즉시 갱신"
+                            >
+                                수동갱신
+                            </button>
+                        </div>
+
+                        <!-- =======================================================
+                 ✅✅ FIX: 공구 active 표시를 tramActive 토글이 아니라
+                 컨트롤러의 activeTramSection 하나로만 표시하도록 변경
+                 - (BusController 수정 버전과 정확히 맞음)
+               ======================================================= -->
+                        <div class="tool-grid-title">
+                            <b>🚋 공구 선택 (1 ~ 14)</b>
+                            <span class="hint">클릭하면 해당 공구 노선 경로를 지도에 표시/해제</span>
+                        </div>
+
+                        <div class="tool-grid">
+                            <div class="row">
+                                <div
+                                    class="cell"
+                                    ng-class="{active: activeTramSection===1}"
+                                    ng-click="toggleTram && toggleTram(1)"
+                                >
+                                    1공구
+                                </div>
+                                <div
+                                    class="cell"
+                                    ng-class="{active: activeTramSection===2}"
+                                    ng-click="toggleTram && toggleTram(2)"
+                                >
+                                    2공구
+                                </div>
+                                <div
+                                    class="cell"
+                                    ng-class="{active: activeTramSection===3}"
+                                    ng-click="toggleTram && toggleTram(3)"
+                                >
+                                    3공구
+                                </div>
+                                <div
+                                    class="cell"
+                                    ng-class="{active: activeTramSection===4}"
+                                    ng-click="toggleTram && toggleTram(4)"
+                                >
+                                    4공구
+                                </div>
+                                <div
+                                    class="cell"
+                                    ng-class="{active: activeTramSection===5}"
+                                    ng-click="toggleTram && toggleTram(5)"
+                                >
+                                    5공구
+                                </div>
+                                <div
+                                    class="cell"
+                                    ng-class="{active: activeTramSection===6}"
+                                    ng-click="toggleTram && toggleTram(6)"
+                                >
+                                    6공구
+                                </div>
+                                <div
+                                    class="cell"
+                                    ng-class="{active: activeTramSection===7}"
+                                    ng-click="toggleTram && toggleTram(7)"
+                                >
+                                    7공구
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div
+                                    class="cell"
+                                    ng-class="{active: activeTramSection===8}"
+                                    ng-click="toggleTram && toggleTram(8)"
+                                >
+                                    8공구
+                                </div>
+                                <div
+                                    class="cell"
+                                    ng-class="{active: activeTramSection===9}"
+                                    ng-click="toggleTram && toggleTram(9)"
+                                >
+                                    9공구
+                                </div>
+                                <div
+                                    class="cell"
+                                    ng-class="{active: activeTramSection===10}"
+                                    ng-click="toggleTram && toggleTram(10)"
+                                >
+                                    10공구
+                                </div>
+                                <div
+                                    class="cell"
+                                    ng-class="{active: activeTramSection===11}"
+                                    ng-click="toggleTram && toggleTram(11)"
+                                >
+                                    11공구
+                                </div>
+                                <div
+                                    class="cell"
+                                    ng-class="{active: activeTramSection===12}"
+                                    ng-click="toggleTram && toggleTram(12)"
+                                >
+                                    12공구
+                                </div>
+                                <div
+                                    class="cell"
+                                    ng-class="{active: activeTramSection===13}"
+                                    ng-click="toggleTram && toggleTram(13)"
+                                >
+                                    13공구
+                                </div>
+                                <div
+                                    class="cell"
+                                    ng-class="{active: activeTramSection===14}"
+                                    ng-click="toggleTram && toggleTram(14)"
+                                >
+                                    14공구
+                                </div>
+                            </div>
                         </div>
 
                         <!-- 상태 메시지 -->
@@ -604,10 +785,10 @@
                             class="status-box"
                             ng-if="statusMessage"
                             ng-class="{
-                                'status-success':statusType==='success',
-                                'status-error'  :statusType==='error',
-                                'status-info'   :statusType==='info'
-                            }"
+                'status-success':statusType==='success',
+                'status-error'  :statusType==='error',
+                'status-info'   :statusType==='info'
+              }"
                         >
                             {{ statusMessage }}
                         </div>
@@ -748,7 +929,6 @@
                                         ng-repeat="a in arrivals"
                                         ng-click="focusBus(a)"
                                     >
-                                        <!-- 🔥 앞의 '>' 없이 깔끔하게 번호만 -->
                                         <span class="arrival-route">{{ a.routeNo }}번</span>
                                         <span class="arrival-msg">{{ a.remainMsg }}</span>
                                     </li>
@@ -861,7 +1041,7 @@
                                 var $rootScope = injector.get('$rootScope');
                                 if (!$rootScope) return;
 
-                                // BusController 쪽 resetBusView() 실행되도록 이벤트 전파
+                                // ✅ BusController에서 $scope.$on('reset-bus-view', ...) 로 받고 리셋하도록 브로드캐스트
                                 $rootScope.$applyAsync(function () {
                                     $rootScope.$broadcast('reset-bus-view');
                                 });

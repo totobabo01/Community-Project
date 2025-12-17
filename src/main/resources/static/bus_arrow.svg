@@ -1,0 +1,6 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- 몸통 -->
+  <rect x="6" y="22" width="36" height="20" rx="6" fill="#007bff"></rect>
+  <!-- 화살촉 -->
+  <polygon points="42,12 62,32 42,52" fill="#007bff"></polygon>
+</svg>

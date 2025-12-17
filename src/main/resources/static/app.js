@@ -460,6 +460,61 @@
         const CITY_CODE = 25; // 대전 TAGO 도시 코드
         const POLL_MS = 10000; // 도착정보 + 버스 위치 폴링 주기(ms)
 
+        /* ================== 🚋 트램 공구 정의 ================== */
+        const TRAM_ROUTES = {
+            1: {
+                color: '#111827',
+                coords: [
+                    [127.428975, 36.372575],
+                    [127.420549, 36.393947],
+                ],
+            },
+
+            2: {
+                color: '#111827',
+                lines: [
+                    // (1) 세로 라인
+                    [
+                        [127.428918, 36.372464],
+                        [127.433642, 36.358172],
+                    ],
+                    // (2) 가지(가로/분기) 라인
+                    [
+                        [127.433642, 36.358172],
+                        [127.4266315, 36.3588555],
+                    ],
+                ],
+            },
+
+            3: {
+                color: '#111827',
+                coords: [
+                    [127.426351, 36.359154],
+                    [127.399657, 36.357764],
+                ],
+            },
+
+            4: {
+                color: '#111827',
+                coords: [
+                    [127.3970879, 36.357738],
+                    [127.3794764, 36.3606325],
+                ],
+            },
+
+            5: { color: '#6b7280', routeIds: ['205'] },
+            6: { color: '#9ca3af', routeIds: ['206'] },
+            7: { color: '#d1d5db', routeIds: ['207'] },
+            8: { color: '#991b1b', routeIds: ['208'] },
+            9: { color: '#b91c1c', routeIds: ['209'] },
+            10: { color: '#dc2626', routeIds: ['236', '237'] },
+            11: { color: '#7c2d12', routeIds: ['238'] },
+            12: { color: '#78350f', routeIds: ['239', '240', '201', '202', '203', '204'] },
+            13: { color: '#92400e', routeIds: ['205', '206', '207', '208', '209'] },
+            14: { color: '#1f2937', routeIds: ['210', '211'] },
+        };
+        /* ====================================================== */
+
         // ✅ FIX: "10초마다만 툭" 내려가게 만들기 위한 step(초)
         const POLL_STEP_SEC = Math.max(1, Math.round(POLL_MS / 1000));
 
@@ -512,8 +567,12 @@
         // 🔹 버스의 이전 위치 기억용 (기존 유지)
         const busLastPos = new Map(); // vehicleKey -> { lon, lat }
 
-        // 🔹 노선 경로 좌표 캐시: routeId -> { coords: [[x,y],...], proj }
+        // 🔹 노선 경로 좌표 캐시
+        // ✅ CHANGED: routeId -> { dirs: {UP: [[x,y]...], DOWN: [[x,y]...], ALL: ...}, proj }
         const routePathIndex = {};
+
+        // ✅✅✅ FIX 핵심: 경로 로딩 Promise 캐시 (동일 routeId 중복요청/타이밍 문제 해결)
+        const routePathPromise = {}; // routeId -> Promise
 
         // ✅ (추가) 마지막으로 클릭한 마커(토글용)
         let lastPickedKey = null; // "stop:DB123" / "bus:대전75자9207"
@@ -532,16 +591,20 @@
         // (2) 이전 각도(라디안)
         const busLastHeading = new Map(); // vehicleKey -> rad
 
-        // (3) 삼각형 아이콘 기본 방향 보정값
-        //    ⭐ 여기 값이 틀리면 화살표가 전체적으로 90/180도 돌아가 보임
-        //    -Math.PI/2 가 흔히 맞지만, 환경에 따라 0 또는 +Math.PI/2 가 맞을 수도 있음.
-        const BUS_ICON_ROT_OFFSET = -Math.PI / 2;
+        // ✅ FIX: 대부분 SVG 화살표 기본 방향이 "위(북)"이라 -90도 보정이 필요함
+        // 만약 네 bus_arrow.svg가 기본이 "오른쪽(동)"이면 0으로 되돌리면 됨.
+        const BUS_ICON_ROT_OFFSET = 0; // ✅ FIX
 
         // (4) 너무 조금 움직이면 방향 갱신 안 함(노이즈 방지)
         const HEADING_MIN_MOVE_M = 8; // 5~15 추천
 
         // (5) 이동방향 기반 자동보정에서 허용할 최소 이동(너무 작으면 heading 판단 불가)
-        const HEADING_MATCH_MIN_MOVE_M = 5;
+        const HEADING_MATCH_MIN_MOVE_M = 5; // (원하면 1로 낮춰도 됨)
+
+        // ✅ FIX: 폴링 때 마커 사라짐 방지용 "feature 재사용" 캐시
+        const busFeatureMap = new Map(); // vehicleKey -> ol.Feature
+        const busLastSeen = new Map(); // vehicleKey -> timestamp(ms)
+        const BUS_TTL_MS = Math.max(30000, POLL_MS * 3); // 30초 or 3회 폴링
 
         function normalizeAngle(rad) {
             while (rad > Math.PI) rad -= 2 * Math.PI;
@@ -580,7 +643,6 @@
 
             const d = deg;
 
-            // 후보들 (여기서 “무조건 정답”은 없어서 자동 선택 방식이 필요함)
             // A) bearing(0=북, 시계방향) -> OL(+X=동): (90 - d)
             const candA = normalizeAngle(((90 - d) * Math.PI) / 180);
 
@@ -593,7 +655,6 @@
             // D) 0=북, 반시계(+) -> OL(+X=동): (d - 90)
             const candD = normalizeAngle(((d - 90) * Math.PI) / 180);
 
-            // moveRad가 있으면 가장 가까운 후보 선택
             if (moveRad != null && isFinite(moveRad)) {
                 const scored = [
                     { name: 'A(bearing)', rad: candA, diff: angleDiff(candA, moveRad) },
@@ -605,8 +666,32 @@
                 return scored[0].rad;
             }
 
-            // moveRad가 없으면 기본으로 bearing 변환(A) 사용
             return candA;
+        }
+
+        // =========================================================
+        // ✅✅✅ (추가) 경로 방향 선택을 위한 헬퍼
+        // =========================================================
+
+        function normDirKey(k) {
+            const s = String(k || '').toUpperCase();
+            if (s === '1' || s === 'U' || s.includes('UP') || s.includes('상')) return 'UP';
+            if (s === '2' || s === 'D' || s.includes('DOWN') || s.includes('하')) return 'DOWN';
+            return 'ALL';
+        }
+
+        function getBusDirKey(bus) {
+            if (!bus) return null;
+
+            const updown = String(bus.updowncd || bus.upDownCd || bus.updown || bus.upDown || '').toUpperCase();
+            if (updown === '1' || updown === 'U' || updown.includes('UP')) return 'UP';
+            if (updown === '2' || updown === 'D' || updown.includes('DOWN')) return 'DOWN';
+
+            const txt = String(bus.directionType || bus.routeTp || bus.adirection || '').toUpperCase();
+            if (txt.includes('상')) return 'UP';
+            if (txt.includes('하')) return 'DOWN';
+
+            return null;
         }
 
         // ================== 공통 상태 메시지 ==================
@@ -661,9 +746,9 @@
             showPopupAtPixel(
                 pixel,
                 `<strong>정류장</strong>
-             <div>${name}</div>
-             <div style="opacity:.8">ID: ${nodeId}</div>
-             <div style="opacity:.8">좌표: ${lat}, ${lon}</div>`
+<div>${name}</div>
+<div style="opacity:.8">ID: ${nodeId}</div>
+<div style="opacity:.8">좌표: ${lat}, ${lon}</div>`
             );
         }
 
@@ -675,9 +760,9 @@
             showPopupAtPixel(
                 pixel,
                 `<strong>버스</strong>
-             <div>노선: ${routeNo || '-'}</div>
-             <div style="opacity:.8">차량: ${plate || '-'}</div>
-             <div style="opacity:.8">좌표: ${lat}, ${lon}</div>`
+<div>노선: ${routeNo || '-'}</div>
+<div style="opacity:.8">차량: ${plate || '-'}</div>
+<div style="opacity:.8">좌표: ${lat}, ${lon}</div>`
             );
         }
 
@@ -766,10 +851,111 @@
                         stroke: new ol.style.Stroke({ color: '#ffffff', width: 2 }),
                     }),
                 }),
+                zIndex: 20,
             });
 
             map.addLayer(vectorLayer);
             console.log('[BusController] 정류장(빨간) 마커 레이어 추가 완료');
+        }
+
+        // ================== 🚋 트램 경로 레이어 ==================
+        let tramVectorSource = null;
+        let tramVectorLayer = null;
+
+        function ensureTramLayer(color) {
+            // ✅ 지도 먼저 준비 시도
+            initMap();
+
+            const map = getInnerOlMap();
+            if (!map || !window.ol) {
+                console.warn('[TRAM] 지도(OpenLayers) 준비 안됨');
+                return false;
+            }
+
+            // ✅ source가 없으면 생성
+            if (!tramVectorSource) tramVectorSource = new ol.source.Vector();
+
+            if (!tramVectorLayer) {
+                tramVectorLayer = new ol.layer.Vector({
+                    source: tramVectorSource,
+                    style: new ol.style.Style({
+                        stroke: new ol.style.Stroke({
+                            color: color || '#ff0000',
+                            width: 6,
+                            lineCap: 'round',
+                            lineJoin: 'round',
+                        }),
+                    }),
+                    zIndex: 60, // ✅ 위로 올림(안 보이는 문제 방지)
+                });
+
+                map.addLayer(tramVectorLayer);
+                console.log('[TRAM] 트램 레이어 추가 완료');
+            } else {
+                // ✅ 색 변경만 적용
+                tramVectorLayer.setStyle(
+                    new ol.style.Style({
+                        stroke: new ol.style.Stroke({
+                            color: color || '#ff0000',
+                            width: 6,
+                            lineCap: 'round',
+                            lineJoin: 'round',
+                        }),
+                    })
+                );
+            }
+
+            return true;
+        }
+
+        // ✅ (추가) 트램(공구) 라인들이 있는 범위로 화면 자동 이동
+        function fitToTramExtent() {
+            try {
+                const map = getInnerOlMap();
+                if (!map || !tramVectorSource) return;
+
+                const extent = tramVectorSource.getExtent && tramVectorSource.getExtent();
+                if (!extent || !isFinite(extent[0]) || !isFinite(extent[1])) return; // 비어있으면 무시
+
+                const view = map.getView && map.getView();
+                if (!view || !view.fit) return;
+
+                view.fit(extent, {
+                    padding: [40, 40, 40, 40],
+                    duration: 450,
+                    maxZoom: 16,
+                });
+            } catch (e) {
+                console.warn('[TRAM] fitToTramExtent 실패:', e);
+            }
+        }
+
+        // =========================================================
+        // ✅ CHANGED: 버스 스타일을 "확실한 방향 화살표 SVG"로 변경
+        // =========================================================
+        function busArrowStyle(feature) {
+            const routeNo = String(feature.get('routeNo') || '');
+            const headingRad = feature.get('headingRad') || 0;
+
+            return new ol.style.Style({
+                image: new ol.style.Icon({
+                    src: '/bus_arrow.svg',
+                    scale: 0.45,
+
+                    // ✅✅✅ 핵심 FIX: 부호 반전(-heading)으로 경로와 같은 방향으로 보이게 고정
+                    rotation: normalizeAngle(-(headingRad || 0) + BUS_ICON_ROT_OFFSET),
+
+                    rotateWithView: true,
+                    anchor: [0.5, 0.5],
+                }),
+                text: new ol.style.Text({
+                    text: routeNo,
+                    font: 'bold 11px Arial',
+                    offsetY: -22,
+                    fill: new ol.style.Fill({ color: '#003366' }),
+                    stroke: new ol.style.Stroke({ color: '#ffffff', width: 3 }),
+                }),
+            });
         }
 
         // ================== 버스 파란 화살표 마커 레이어 ==================
@@ -788,28 +974,8 @@
 
             busVectorLayer = new ol.layer.Vector({
                 source: busVectorSource,
-                style: function (feature) {
-                    const routeNo = String(feature.get('routeNo') || '');
-                    const headingRad = feature.get('headingRad') || 0;
-
-                    return new ol.style.Style({
-                        image: new ol.style.RegularShape({
-                            points: 3,
-                            radius: 9,
-                            // ✅ 회전 + 아이콘 기본 방향 보정
-                            rotation: normalizeAngle((headingRad || 0) + BUS_ICON_ROT_OFFSET),
-                            fill: new ol.style.Fill({ color: 'rgba(0,123,255,0.95)' }),
-                            stroke: new ol.style.Stroke({ color: '#ffffff', width: 1.5 }),
-                        }),
-                        text: new ol.style.Text({
-                            text: routeNo,
-                            font: 'bold 11px Arial',
-                            offsetY: -18,
-                            fill: new ol.style.Fill({ color: '#003366' }),
-                            stroke: new ol.style.Stroke({ color: '#ffffff', width: 3 }),
-                        }),
-                    });
-                },
+                style: busArrowStyle,
+                zIndex: 30,
             });
 
             map.addLayer(busVectorLayer);
@@ -825,95 +991,155 @@
 
             routeVectorSource = new ol.source.Vector();
 
-            // ✅ "한 줄" 느낌 나게: Stroke 하나만 + 폭 얇게 + round cap/join
             routeVectorLayer = new ol.layer.Vector({
                 source: routeVectorSource,
                 style: new ol.style.Style({
                     stroke: new ol.style.Stroke({
                         color: 'rgba(0, 123, 255, 0.75)',
-                        width: 2, // ✅ 이전 2.5 -> 2 로 더 얇게
-                        lineCap: 'round', // ✅ 끝 둥글게
-                        lineJoin: 'round', // ✅ 꺾이는 곳 둥글게
+                        width: 2,
+                        lineCap: 'round',
+                        lineJoin: 'round',
                     }),
                 }),
+                zIndex: 10,
             });
 
             map.addLayer(routeVectorLayer);
             console.log('[BusController] 노선 경로 레이어 추가 완료');
         }
 
-        // ================== (A) 노선 경로 기반 진행방향 계산 ==================
-        function computeHeadingFromRoute(projCoord, routeId) {
+        // ================== ✅ FIX: 점-선분 거리^2 (투영좌표 기준) ==================
+        function distPointToSegSq(P, A, B) {
+            const px = P[0],
+                py = P[1];
+            const ax = A[0],
+                ay = A[1];
+            const bx = B[0],
+                by = B[1];
+
+            const abx = bx - ax,
+                aby = by - ay;
+            const apx = px - ax,
+                apy = py - ay;
+
+            const abLen2 = abx * abx + aby * aby;
+            if (abLen2 < 1e-9) {
+                const dx = px - ax,
+                    dy = py - ay;
+                return dx * dx + dy * dy;
+            }
+
+            let t = (apx * abx + apy * aby) / abLen2;
+            if (t < 0) t = 0;
+            if (t > 1) t = 1;
+
+            const cx = ax + t * abx;
+            const cy = ay + t * aby;
+
+            const dx = px - cx;
+            const dy = py - cy;
+            return dx * dx + dy * dy;
+        }
+
+        // =========================================================
+        // ✅✅✅ (A) 노선 경로 기반 진행방향 계산(가장 가까운 "선분")
+        // ✅ CHANGED: bus(up/down) 기준으로 올바른 경로를 선택
+        // =========================================================
+        function computeHeadingFromRoute(projCoord, routeId, moveRad, bus) {
             if (!projCoord || !routeId) return null;
 
             const info = routePathIndex[routeId];
-            if (!info || !info.coords || info.coords.length < 2) return null;
+            if (!info || !info.dirs) return null;
 
-            const coords = info.coords;
+            const wantDir = getBusDirKey(bus);
+            let coords = (wantDir && info.dirs[wantDir]) || info.dirs.ALL || null;
 
-            let bestIdx = -1;
-            let bestDist2 = Infinity;
-            for (let i = 0; i < coords.length; i++) {
-                const c = coords[i];
-                const dx = projCoord[0] - c[0];
-                const dy = projCoord[1] - c[1];
-                const d2 = dx * dx + dy * dy;
-                if (d2 < bestDist2) {
-                    bestDist2 = d2;
-                    bestIdx = i;
+            if (!coords) {
+                const keys = Object.keys(info.dirs || {});
+                if (!keys.length) return null;
+                coords = info.dirs[keys[0]];
+            }
+
+            if (!coords || coords.length < 2) return null;
+
+            let bestI = -1;
+            let bestD2 = Infinity;
+
+            for (let i = 0; i < coords.length - 1; i++) {
+                const a = coords[i];
+                const b = coords[i + 1];
+                const d2 = distPointToSegSq(projCoord, a, b);
+                if (d2 < bestD2) {
+                    bestD2 = d2;
+                    bestI = i;
                 }
             }
-            if (bestIdx < 0) return null;
 
-            let p1, p2;
-            if (bestIdx === coords.length - 1) {
-                p1 = coords[bestIdx - 1];
-                p2 = coords[bestIdx];
-            } else if (bestIdx === 0) {
-                p1 = coords[0];
-                p2 = coords[1];
-            } else {
-                p1 = coords[bestIdx];
-                p2 = coords[bestIdx + 1];
-            }
+            if (bestI < 0) return null;
+
+            const p1 = coords[bestI];
+            const p2 = coords[bestI + 1];
 
             const dx = p2[0] - p1[0];
             const dy = p2[1] - p1[1];
             const len2 = dx * dx + dy * dy;
             if (len2 < 1e-6) return null;
 
-            return normalizeAngle(Math.atan2(dy, dx)); // +X(동) 기준
+            let segRad = normalizeAngle(Math.atan2(dy, dx)); // +X(동) 기준
+
+            // ✅ moveRad(실제 이동방향)와 90도 이상 차이나면 "반대 진행"으로 보고 180도 뒤집음
+            if (moveRad != null && isFinite(moveRad)) {
+                const diff = angleDiff(segRad, moveRad);
+                if (diff > Math.PI / 2) {
+                    segRad = normalizeAngle(segRad + Math.PI);
+                }
+            }
+
+            return segRad;
         }
 
         // ================== ✅✅ 버스 진행 방향 계산(자동보정 버전) ==================
         function computeHeadingRad(bus, lon, lat, vehicleKey, projCoord, routeId) {
-            // 0) 이동방향(이전좌표 기반)
             const moveRad = getMoveHeadingRad(vehicleKey, projCoord);
 
-            // 1) 노선 경로 기반(가장 안정적) — 단, routePathIndex가 있을 때만
-            const routeHeading = computeHeadingFromRoute(projCoord, routeId);
+            // ✅ 0) API heading을 먼저 "라디안"으로 만들어둠(있으면)
+            let apiRad = null;
+            const rawHeading = bus && (bus.heading || bus.direction || bus.dir || bus.vdirection || bus.vDirection || bus.azimuth || bus.bearing);
+            const deg = parseFloat(rawHeading);
+
+            if (isFinite(deg)) {
+                // moveRad가 있으면 그걸 기준으로 best pick, 없으면 candA 기본
+                apiRad = pickBestHeadingFromApi(deg, moveRad);
+            }
+
+            // 1) 노선 경로 기반(가장 안정적)
+            let routeHeading = computeHeadingFromRoute(projCoord, routeId, moveRad, bus);
             if (routeHeading != null && isFinite(routeHeading)) {
+                // ✅✅✅ FIX 핵심:
+                // moveRad가 아직 없어서 "뒤집기 판단"을 못할 때도,
+                // apiRad(있으면)와 비교해서 90도 이상 차이나면 180도 뒤집어준다.
+                if ((moveRad == null || !isFinite(moveRad)) && apiRad != null && isFinite(apiRad)) {
+                    const d = angleDiff(routeHeading, apiRad);
+                    if (d > Math.PI / 2) {
+                        routeHeading = normalizeAngle(routeHeading + Math.PI);
+                    }
+                }
+
                 const prev = busLastHeading.get(vehicleKey);
                 const out = prev != null ? lerpAngle(prev, routeHeading, 0.45) : routeHeading;
                 busLastHeading.set(vehicleKey, out);
                 return out;
             }
 
-            // 2) API heading이 있으면 "moveRad"와 가장 가까운 변환으로 자동 선택
-            const rawHeading = bus && (bus.heading || bus.direction || bus.dir || bus.vdirection || bus.vDirection || bus.azimuth || bus.bearing);
-            let deg = parseFloat(rawHeading);
-
-            if (isFinite(deg)) {
-                const picked = pickBestHeadingFromApi(deg, moveRad);
-                if (picked != null && isFinite(picked)) {
-                    const prev = busLastHeading.get(vehicleKey);
-                    const out = prev != null ? lerpAngle(prev, picked, 0.35) : picked;
-                    busLastHeading.set(vehicleKey, out);
-                    return out;
-                }
+            // 2) API heading 자동 선택
+            if (apiRad != null && isFinite(apiRad)) {
+                const prev = busLastHeading.get(vehicleKey);
+                const out = prev != null ? lerpAngle(prev, apiRad, 0.35) : apiRad;
+                busLastHeading.set(vehicleKey, out);
+                return out;
             }
 
-            // 3) heading 값이 없으면 이동방향 그대로
+            // 3) 없으면 이동방향
             if (moveRad != null && isFinite(moveRad)) {
                 const prev = busLastHeading.get(vehicleKey);
                 const out = prev != null ? lerpAngle(prev, moveRad, 0.4) : moveRad;
@@ -921,7 +1147,7 @@
                 return out;
             }
 
-            // 4) 마지막 fallback: up/down 텍스트
+            // 4) fallback 텍스트
             const updown = ((bus && (bus.updowncd || bus.upDownCd || bus.updown || bus.upDown)) || '').toString().toUpperCase();
             if (updown === '1' || updown === 'U' || updown === 'UP') return normalizeAngle(-Math.PI / 2);
             if (updown === '2' || updown === 'D' || updown === 'DOWN') return normalizeAngle(Math.PI / 2);
@@ -930,7 +1156,7 @@
             if (dirText.includes('상행')) return normalizeAngle(-Math.PI / 2);
             if (dirText.includes('하행')) return normalizeAngle(Math.PI / 2);
 
-            // 5) 진짜 마지막: 이전 각도 유지
+            // 5) 마지막 유지
             const keep = busLastHeading.get(vehicleKey);
             if (keep != null) return keep;
 
@@ -1043,12 +1269,11 @@
 
                     showBusPopup(evt.pixel, bus, routeNo);
 
-                    // 노선 경로 표시
-                    if (routeId) drawRoutePath(routeId);
+                    // ✅ FIX: 화면 표시용 경로는 draw=true
+                    if (routeId) loadRoutePath(routeId, { draw: true });
                     return;
                 }
 
-                // kind 없거나 라인 클릭이면 닫기
                 lastPickedKey = null;
                 lastPickedKind = null;
                 hideMapPopup();
@@ -1219,7 +1444,7 @@
                     const f = new ol.Feature({
                         geometry: new ol.geom.Point(coord),
                         stop: s,
-                        kind: 'stop', // ✅ 클릭 판별용
+                        kind: 'stop',
                     });
                     features.push(f);
                 });
@@ -1231,6 +1456,50 @@
             }, 300);
         }
 
+        // ================== ✅ FIX: 버스 feature "업데이트/재사용" ==================
+        function upsertBusFeature(vehicleKey, coord, b, rid, routeNo, headingRad) {
+            if (!busVectorSource) return;
+
+            let f = busFeatureMap.get(vehicleKey);
+
+            if (!f) {
+                f = new ol.Feature({
+                    geometry: new ol.geom.Point(coord),
+                });
+                // 클릭/표시용 속성
+                f.set('kind', 'bus');
+                busFeatureMap.set(vehicleKey, f);
+                busVectorSource.addFeature(f);
+            } else {
+                const g = f.getGeometry && f.getGeometry();
+                if (g && g.setCoordinates) g.setCoordinates(coord);
+            }
+
+            f.set('bus', b);
+            f.set('routeId', rid);
+            f.set('routeNo', routeNo);
+            f.set('headingRad', headingRad);
+
+            busLastSeen.set(vehicleKey, Date.now());
+        }
+
+        function cleanupStaleBuses() {
+            const now = Date.now();
+            for (const [vehicleKey, f] of busFeatureMap.entries()) {
+                const last = busLastSeen.get(vehicleKey) || 0;
+                if (now - last > BUS_TTL_MS) {
+                    try {
+                        busVectorSource.removeFeature(f);
+                    } catch (e) {}
+                    busFeatureMap.delete(vehicleKey);
+                    busLastSeen.delete(vehicleKey);
+                    busLastPos.delete(vehicleKey);
+                    busLastProjPos.delete(vehicleKey);
+                    busLastHeading.delete(vehicleKey);
+                }
+            }
+        }
+
         // ================== 버스 위치 조회 + 파란 화살표 마커 갱신 ==================
         function fetchAndDrawBusLocations(arrivalList) {
             console.log('[BusController] 도착정보 건수:', arrivalList.length);
@@ -1239,9 +1508,10 @@
             const map = getInnerOlMap();
             if (!map || !busVectorSource || !window.ol || !ol.Feature || !ol.geom) return;
 
-            busVectorSource.clear();
-
-            if (!arrivalList || !arrivalList.length) return;
+            if (!arrivalList || !arrivalList.length) {
+                cleanupStaleBuses();
+                return;
+            }
 
             const routeNoIndex = {};
             arrivalList.forEach(function (x) {
@@ -1258,89 +1528,81 @@
                 if (rid) routeIdSet.add(rid);
             });
 
-            if (!routeIdSet.size) revealsPromises;
+            if (!routeIdSet.size) {
+                cleanupStaleBuses();
+                return;
+            }
 
             const promises = [];
 
             routeIdSet.forEach(function (rid) {
+                // ✅✅✅ FIX: 경로를 "캐시 먼저 확실히" 로드한 뒤 pos를 호출한다 (타이밍 문제 해결)
                 promises.push(
-                    $http
-                        .get('/api/bus/pos', {
-                            params: {
-                                cityCode: CITY_CODE,
-                                routeId: rid,
-                                numOfRows: 100,
-                            },
-                        })
-                        .then(function (res) {
-                            let data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
-                            let body = ((data || {}).response || {}).body || {};
-                            let list = (body.items && body.items.item) || [];
-
-                            if (!Array.isArray(list)) list = list ? [list] : [];
-
-                            const mapObj = getInnerOlMap();
-                            const view = mapObj && mapObj.getView && mapObj.getView();
-                            const proj = view && view.getProjection ? view.getProjection() : mapProjection;
-
-                            const features = [];
-
-                            list.forEach(function (b, idx) {
-                                const rawLat = b.gpslati || b.gpsLati || b.gpsY || b.lat || b.latitude;
-                                const rawLon = b.gpslong || b.gpsLong || b.gpsX || b.lon || b.longitude;
-
-                                const lat = parseFloat(rawLat);
-                                const lon = parseFloat(rawLon);
-
-                                if (!isFinite(lat) || !isFinite(lon)) {
-                                    console.log('[BusController] 버스 좌표가 없어 파란 마커를 그리지 못함');
-                                    return;
-                                }
-
-                                let coord = [lon, lat];
-                                if (ol.proj && ol.proj.transform && proj) {
-                                    coord = ol.proj.transform([lon, lat], 'EPSG:4326', proj);
-                                }
-
-                                const routeNoRaw = routeNoIndex[b.routeid || b.routeId || b.busRouteId || b.route_id || rid] || b.routeno || b.routeNo || b.routenm || b.routeNm || b.lineNo || b.busRouteNm || '';
-                                const routeNo = routeNoRaw != null ? String(routeNoRaw) : '';
-
-                                // ✅ vehicleKey를 최대한 "버스 고유"로
-                                let vehicleKey = b.vehicleno || b.vehicleNo || b.carNo || b.busId || b.plainNo || b.vehId || b.veh_id;
-                                if (!vehicleKey) vehicleKey = rid + ':' + routeNo + ':' + idx;
-                                vehicleKey = String(vehicleKey);
-
-                                // ✅ 핵심: 방향 계산 (자동보정 + 이동방향 + fallback)
-                                const headingRad = computeHeadingRad(b, lon, lat, vehicleKey, coord, rid);
-
-                                const f = new ol.Feature({
-                                    geometry: new ol.geom.Point(coord),
-                                    bus: b,
+                    loadRoutePath(rid, { draw: false }).then(function () {
+                        return $http
+                            .get('/api/bus/pos', {
+                                params: {
+                                    cityCode: CITY_CODE,
                                     routeId: rid,
-                                    routeNo: routeNo,
-                                    headingRad: headingRad,
-                                    kind: 'bus', // ✅ 클릭 판별용
+                                    numOfRows: 100,
+                                },
+                            })
+                            .then(function (res) {
+                                let data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+                                let body = ((data || {}).response || {}).body || {};
+                                let list = (body.items && body.items.item) || [];
+
+                                if (!Array.isArray(list)) list = list ? [list] : [];
+
+                                const mapObj = getInnerOlMap();
+                                const view = mapObj && mapObj.getView && mapObj.getView();
+                                const proj = view && view.getProjection ? view.getProjection() : mapProjection;
+
+                                list.forEach(function (b, idx) {
+                                    const rawLat = b.gpslati || b.gpsLati || b.gpsY || b.lat || b.latitude;
+                                    const rawLon = b.gpslong || b.gpsLong || b.gpsX || b.lon || b.longitude;
+
+                                    const lat = parseFloat(rawLat);
+                                    const lon = parseFloat(rawLon);
+
+                                    if (!isFinite(lat) || !isFinite(lon)) return;
+
+                                    let coord = [lon, lat];
+                                    if (ol.proj && ol.proj.transform && proj) {
+                                        coord = ol.proj.transform([lon, lat], 'EPSG:4326', proj);
+                                    }
+
+                                    const routeNoRaw = routeNoIndex[b.routeid || b.routeId || b.busRouteId || b.route_id || rid] || b.routeno || b.routeNo || b.routenm || b.routeNm || b.lineNo || b.busRouteNm || '';
+                                    const routeNo = routeNoRaw != null ? String(routeNoRaw) : '';
+
+                                    // ✅ vehicleKey를 최대한 "버스 고유"로
+                                    let vehicleKey = b.vehicleno || b.vehicleNo || b.carNo || b.busId || b.plainNo || b.vehId || b.veh_id;
+                                    if (!vehicleKey) vehicleKey = rid + ':' + routeNo + ':' + idx;
+                                    vehicleKey = String(vehicleKey);
+
+                                    // ✅ 핵심: 방향 계산 (경로 기반 -> API -> 이동방향)
+                                    const headingRad = computeHeadingRad(b, lon, lat, vehicleKey, coord, rid);
+
+                                    // ✅ FIX: feature 재사용(업데이트)로 깜빡임 제거
+                                    upsertBusFeature(vehicleKey, coord, b, rid, routeNo, headingRad);
+
+                                    // ✅ 다음 tick을 위한 저장(투영좌표/각도)
+                                    busLastPos.set(vehicleKey, { lon: lon, lat: lat });
+                                    busLastProjPos.set(vehicleKey, coord);
                                 });
-                                features.push(f);
-
-                                // ✅ 다음 tick을 위한 저장(투영좌표/각도)
-                                busLastPos.set(vehicleKey, { lon: lon, lat: lat });
-                                busLastProjPos.set(vehicleKey, coord);
                             });
-
-                            if (features.length) {
-                                busVectorSource.addFeatures(features);
-                            }
-                        })
+                    })
                 );
             });
 
-            $q.all(promises).then(function () {
-                const cnt = busVectorSource.getFeatures().length;
-                console.log('[BusController] 버스(화살표) 마커 갱신 완료, 개수=', cnt);
-            });
+            $q.all(promises)
+                .then(function () {
+                    cleanupStaleBuses(); // ✅ 버스만 정리
+                })
+                .catch(function (err) {
+                    console.error('[BusController] 버스 위치 갱신 실패:', err);
+                });
         }
-
         // ================== 도착 메시지 포맷터 ==================
         function formatArrivalMessage(x, secOverride) {
             let sec;
@@ -1457,7 +1719,7 @@
                 .catch(function (err) {
                     console.error('[BusController] 도착정보 조회 실패:', err);
                     $scope.arrivals = [];
-                    if (busVectorSource) busVectorSource.clear();
+                    cleanupStaleBuses();
                 })
                 .finally(function () {
                     $scope.loadingArrival = false;
@@ -1492,6 +1754,16 @@
         $scope.$on('$destroy', function () {
             stopPolling();
         });
+
+        // ================== ✅ 수동 새로고침 (폴링 확인용 버튼에서 호출) ==================
+        $scope.refreshNow = function () {
+            if (!currentNodeId) {
+                setStatus('error', '먼저 정류장을 선택/검색하세요.', 1500);
+                return;
+            }
+            setStatus('info', '⟳ 수동 새로고침...', 800);
+            loadArrivalAndBus(currentNodeId);
+        };
 
         // ================== 정류장 검색 ==================
         $scope.searchStops = function () {
@@ -1538,7 +1810,12 @@
                         lastPickedKey = null;
                         lastPickedKind = null;
                         hideMapPopup();
-                        if (busVectorSource) busVectorSource.clear();
+
+                        if (busVectorSource) {
+                            busVectorSource.clear();
+                            busFeatureMap.clear();
+                            busLastSeen.clear();
+                        }
                         if (routeVectorSource) routeVectorSource.clear();
                         return;
                     }
@@ -1576,7 +1853,11 @@
                     lastPickedKey = null;
                     lastPickedKind = null;
                     hideMapPopup();
-                    if (busVectorSource) busVectorSource.clear();
+                    if (busVectorSource) {
+                        busVectorSource.clear();
+                        busFeatureMap.clear();
+                        busLastSeen.clear();
+                    }
                     if (routeVectorSource) routeVectorSource.clear();
                 });
         };
@@ -1612,8 +1893,10 @@
 
             const result = [];
             for (let i = 0; i < coords.length - 1; i++) {
-                const [x0, y0] = coords[i];
-                const [x1, y1] = coords[i + 1];
+                const x0 = coords[i][0],
+                    y0 = coords[i][1];
+                const x1 = coords[i + 1][0],
+                    y1 = coords[i + 1][1];
 
                 result.push([x0, y0]);
 
@@ -1634,8 +1917,10 @@
             out.push(coords[0]);
 
             for (let i = 0; i < coords.length - 1; i++) {
-                const [x0, y0] = coords[i];
-                const [x1, y1] = coords[i + 1];
+                const x0 = coords[i][0],
+                    y0 = coords[i][1];
+                const x1 = coords[i + 1][0],
+                    y1 = coords[i + 1][1];
 
                 const Q = [0.75 * x0 + 0.25 * x1, 0.75 * y0 + 0.25 * y1];
                 const R = [0.25 * x0 + 0.75 * x1, 0.25 * y0 + 0.75 * y1];
@@ -1655,15 +1940,40 @@
             return out;
         }
 
-        // ================== 노선 경로 그리기(클릭했을 때) ==================
-        function drawRoutePath(routeId) {
-            if (!routeId) return;
+        // =========================================================
+        // ✅✅✅ FIX: 경로 로딩을 "Promise"로 만들고
+        // - draw:false => 캐시만 채움(화면 경로 유지)
+        // - draw:true  => routeVectorSource.clear() 후 화면에 표시
+        // =========================================================
+        function loadRoutePath(routeId, opts) {
+            opts = opts || {};
+            const draw = !!opts.draw;
+
+            if (!routeId) return $q.resolve(null);
+
+            // 캐시가 있으면: draw만 처리
+            if (routePathIndex[routeId]) {
+                if (draw) {
+                    drawRouteFromCache(routeId);
+                }
+                return $q.resolve(routePathIndex[routeId]);
+            }
+
+            // 이미 로딩중이면 그 Promise 공유
+            if (routePathPromise[routeId]) {
+                return routePathPromise[routeId].then(function (info) {
+                    if (draw) drawRouteFromCache(routeId);
+                    return info;
+                });
+            }
 
             const map = getInnerOlMap();
-            if (!map || !window.ol) return;
+            if (!map || !window.ol) return $q.resolve(null);
 
             ensureRouteLayer();
-            routeVectorSource.clear(); // ✅ 항상 1개만
+
+            const defer = $q.defer();
+            routePathPromise[routeId] = defer.promise;
 
             $http
                 .get('/api/bus/routePath', {
@@ -1680,90 +1990,125 @@
                     let list = (body.items && body.items.item) || [];
 
                     if (!Array.isArray(list)) list = list ? [list] : [];
-                    if (!list.length) return;
+                    if (!list.length) {
+                        defer.resolve(null);
+                        return;
+                    }
 
-                    // ✅ (핵심1) 상/하행 구분 값이 있으면 그룹으로 나누고 "가장 긴 그룹"만 사용
-                    //    (필드명은 데이터에 따라 다를 수 있어서 여러 후보를 봄)
-                    const groups = new Map(); // key -> items[]
+                    // ✅ groups: 방향키별로 분리
+                    const groups = new Map();
                     list.forEach(function (p) {
-                        const key = String(p.updowncd ?? p.upDownCd ?? p.upDown ?? p.updown ?? p.dir ?? p.direction ?? p.directionType ?? 'ALL');
+                        const rawKey = String(p.updowncd ?? p.upDownCd ?? p.upDown ?? p.updown ?? p.dir ?? p.direction ?? p.directionType ?? 'ALL');
+                        const key = normDirKey(rawKey);
                         if (!groups.has(key)) groups.set(key, []);
                         groups.get(key).push(p);
-                    });
-
-                    // 그룹 중 가장 큰 것 선택 (왕복이 같이 오면 보통 둘 중 하나만 뽑히게 됨)
-                    let pickedKey = null;
-                    let picked = null;
-                    groups.forEach(function (arr, k) {
-                        if (!picked || arr.length > picked.length) {
-                            picked = arr;
-                            pickedKey = k;
-                        }
-                    });
-
-                    // ✅ (핵심2) 정렬은 "같은 그룹" 안에서만 nodeord로
-                    picked.sort(function (a, b) {
-                        const aOrd = parseInt(a.nodeord || a.nodeOrd || a.nodeseq || a.nodeSeq || a.seq || a.ord || 0, 10);
-                        const bOrd = parseInt(b.nodeord || b.nodeOrd || b.nodeseq || b.nodeSeq || b.seq || b.ord || 0, 10);
-                        return aOrd - bOrd;
                     });
 
                     const view = map.getView && map.getView();
                     const proj = view && view.getProjection ? view.getProjection() : mapProjection;
 
-                    // ✅ (핵심3) 좌표 만들기 + 연속 중복 제거
-                    const coordsLonLat = [];
-                    let prevLon = null,
-                        prevLat = null;
+                    // ✅ 각 그룹을 projectedCoords로 변환해서 저장
+                    const dirCoordsMap = {}; // {UP: [[x,y]...], DOWN: [[x,y]...], ALL: ...}
 
-                    picked.forEach(function (p) {
-                        const rawLat = p.gpslati || p.gpsLat || p.y || p.lat || p.latitude;
-                        const rawLon = p.gpslong || p.gpsLong || p.x || p.lon || p.longitude;
+                    groups.forEach(function (arr, k) {
+                        if (!arr || arr.length < 2) return;
 
-                        const lat = parseFloat(rawLat);
-                        const lon = parseFloat(rawLon);
-                        if (!isFinite(lat) || !isFinite(lon)) return;
+                        arr.sort(function (a, b) {
+                            const aOrd = parseInt(a.nodeord || a.nodeOrd || a.nodeseq || a.nodeSeq || a.seq || a.ord || 0, 10);
+                            const bOrd = parseInt(b.nodeord || b.nodeOrd || b.nodeseq || b.nodeSeq || b.seq || b.ord || 0, 10);
+                            return aOrd - bOrd;
+                        });
 
-                        // 연속 중복 제거(미세 떨림 방지용 라운딩)
-                        const rLon = Math.round(lon * 1e6) / 1e6;
-                        const rLat = Math.round(lat * 1e6) / 1e6;
-                        if (prevLon === rLon && prevLat === rLat) return;
+                        const coordsLonLat = [];
+                        let prevLon = null,
+                            prevLat = null;
 
-                        coordsLonLat.push([lon, lat]);
-                        prevLon = rLon;
-                        prevLat = rLat;
+                        arr.forEach(function (p) {
+                            const rawLat = p.gpslati || p.gpsLat || p.y || p.lat || p.latitude;
+                            const rawLon = p.gpslong || p.gpsLong || p.x || p.lon || p.longitude;
+
+                            const lat = parseFloat(rawLat);
+                            const lon = parseFloat(rawLon);
+                            if (!isFinite(lat) || !isFinite(lon)) return;
+
+                            const rLon = Math.round(lon * 1e6) / 1e6;
+                            const rLat = Math.round(lat * 1e6) / 1e6;
+                            if (prevLon === rLon && prevLat === rLat) return;
+
+                            coordsLonLat.push([lon, lat]);
+                            prevLon = rLon;
+                            prevLat = rLat;
+                        });
+
+                        if (coordsLonLat.length < 2) return;
+
+                        let dense = densifyCoords(coordsLonLat, 1);
+                        let smooth = chaikinSmooth(dense, 1);
+
+                        const projectedCoords = smooth.map(function (xy) {
+                            const lon = xy[0],
+                                lat = xy[1];
+                            if (proj && ol.proj && ol.proj.transform) {
+                                return ol.proj.transform([lon, lat], 'EPSG:4326', proj);
+                            }
+                            return [lon, lat];
+                        });
+
+                        dirCoordsMap[k] = projectedCoords;
                     });
 
-                    if (coordsLonLat.length < 2) return;
+                    // ✅ 방향 계산용 캐시 저장
+                    routePathIndex[routeId] = { dirs: dirCoordsMap, proj: proj };
 
-                    // ✅ 스무딩은 약하게 (원하면 0으로도 가능)
-                    let dense = densifyCoords(coordsLonLat, 1);
-                    let smooth = chaikinSmooth(dense, 1);
+                    if (draw) {
+                        drawRouteFromCache(routeId);
+                    }
 
-                    const projectedCoords = smooth.map(function (xy) {
-                        const lon = xy[0],
-                            lat = xy[1];
-                        if (proj && ol.proj && ol.proj.transform) {
-                            return ol.proj.transform([lon, lat], 'EPSG:4326', proj);
-                        }
-                        return [lon, lat];
-                    });
-
-                    const line = new ol.geom.LineString(projectedCoords);
-                    const f = new ol.Feature({ geometry: line, routeId: routeId });
-
-                    routeVectorSource.addFeature(f);
-
-                    // ✅ 디버그 로그: "진짜 feature 1개인지", 어떤 그룹을 골랐는지 확인
-                    console.log('[Route] pickedGroup=', pickedKey, 'rawGroups=', Array.from(groups.keys()));
-                    console.log('[Route] features=', routeVectorSource.getFeatures().length, 'points=', projectedCoords.length);
-
-                    // ✅ 방향 계산용 캐시
-                    routePathIndex[routeId] = { coords: projectedCoords, proj: proj };
+                    console.log('[Route] cached dirs=', Object.keys(dirCoordsMap));
+                    defer.resolve(routePathIndex[routeId]);
                 })
                 .catch(function (err) {
                     console.warn('[BusController] 노선 경로 조회 실패:', err);
+                    defer.resolve(null);
+                })
+                .finally(function () {
+                    delete routePathPromise[routeId];
                 });
+
+            return defer.promise;
+        }
+
+        function drawRouteFromCache(routeId) {
+            if (!routeId) return;
+            const info = routePathIndex[routeId];
+            if (!info || !info.dirs) return;
+
+            ensureRouteLayer();
+            if (!routeVectorSource) return;
+
+            // ✅ 화면에는 항상 1개만
+            routeVectorSource.clear();
+
+            const dirCoordsMap = info.dirs;
+
+            // ✅ 화면에는 일단 하나만(가장 긴 것) 보여주기
+            let bestKey = null;
+            let bestLen = 0;
+            Object.keys(dirCoordsMap).forEach(function (k) {
+                const len = (dirCoordsMap[k] || []).length;
+                if (len > bestLen) {
+                    bestLen = len;
+                    bestKey = k;
+                }
+            });
+
+            if (bestKey && dirCoordsMap[bestKey] && dirCoordsMap[bestKey].length >= 2) {
+                const line = new ol.geom.LineString(dirCoordsMap[bestKey]);
+                const f = new ol.Feature({ geometry: line, routeId: routeId, dirKey: bestKey });
+                routeVectorSource.addFeature(f);
+            }
+
+            console.log('[Route] draw=', bestKey, 'routeId=', routeId);
         }
 
         // ================== 도착정보 목록에서 버스 클릭 → 해당 버스 위치로 이동 ==================
@@ -1829,7 +2174,7 @@
                 if (!currentZoom || currentZoom < 15) view.setZoom(15);
 
                 const routeId = targetFeature.get('routeId');
-                if (routeId) drawRoutePath(routeId);
+                if (routeId) loadRoutePath(routeId, { draw: true }); // ✅ FIX
             } catch (e) {
                 console.warn('[BusController] focusBus 지도 이동 실패:', e);
             }
@@ -1846,7 +2191,6 @@
             $scope.arrivals = [];
             $scope.loadingArrival = false;
 
-            // ✅ 선택/팝업 초기화
             $scope.selectedStop = null;
             $scope.selectedBus = null;
             lastPickedKey = null;
@@ -1866,6 +2210,14 @@
             busLastProjPos.clear();
             busLastHeading.clear();
 
+            // ✅ FIX: 재사용 캐시도 리셋
+            busFeatureMap.clear();
+            busLastSeen.clear();
+
+            // ✅ FIX: 경로 캐시/Promise도 리셋
+            Object.keys(routePathIndex).forEach((k) => delete routePathIndex[k]);
+            Object.keys(routePathPromise).forEach((k) => delete routePathPromise[k]);
+
             $timeout(function () {
                 const map = getInnerOlMap();
                 if (map && map.getView) {
@@ -1881,9 +2233,114 @@
             }, 0);
         }
 
+        $scope.resetBus = function () {
+            resetBusView();
+            setStatus('success', '초기화 완료', 1200);
+        };
+
         $scope.$on('reset-bus-view', function () {
             resetBusView();
         });
+
+        $scope.activeTramSection = null;
+
+        $scope.toggleTram = function (sectionNo) {
+            const cfg = TRAM_ROUTES[sectionNo];
+            console.log('[TRAM] toggleTram clicked:', sectionNo, cfg);
+
+            if (!cfg) {
+                console.warn('[TRAM] 정의되지 않은 공구:', sectionNo);
+                return;
+            }
+
+            const ok = ensureTramLayer(cfg.color);
+            if (!ok || !tramVectorSource) {
+                setStatus('error', '지도가 아직 준비되지 않았습니다. 잠시 후 다시 눌러주세요.', 1500);
+                return;
+            }
+
+            // ✅ 같은 공구 다시 누르면 끄기
+            if ($scope.activeTramSection === sectionNo && tramVectorSource.getFeatures().length > 0) {
+                tramVectorSource.clear();
+                $scope.activeTramSection = null;
+                console.log('[TRAM] OFF section=', sectionNo);
+                return;
+            }
+
+            // ✅ 다른 공구 켜기
+            tramVectorSource.clear();
+            $scope.activeTramSection = sectionNo;
+
+            // ✅ 현재 지도 projection 가져오기
+            const map = getInnerOlMap();
+            const view = map && map.getView && map.getView();
+            const proj = view && view.getProjection ? view.getProjection() : mapProjection;
+
+            // ✅ [lon,lat] -> projected [x,y]
+            function toProjected(xy) {
+                const lon = parseFloat(xy && xy[0]);
+                const lat = parseFloat(xy && xy[1]);
+                if (!isFinite(lon) || !isFinite(lat)) return null;
+
+                if (proj && window.ol && ol.proj && ol.proj.transform) {
+                    return ol.proj.transform([lon, lat], 'EPSG:4326', proj);
+                }
+                return [lon, lat];
+            }
+
+            // ✅ 1) lines 우선 지원 (여러 LineString)
+            const lines = Array.isArray(cfg.lines) ? cfg.lines : null;
+
+            // ✅ 2) lines가 없으면 coords(단일 LineString) 지원
+            const coords = Array.isArray(cfg.coords) ? cfg.coords : null;
+
+            let added = 0;
+
+            if (lines && lines.length) {
+                lines.forEach(function (oneLine, idx) {
+                    if (!Array.isArray(oneLine) || oneLine.length < 2) return;
+
+                    const projected = oneLine.map(toProjected).filter(Boolean);
+                    if (projected.length < 2) return;
+
+                    tramVectorSource.addFeature(
+                        new ol.Feature({
+                            geometry: new ol.geom.LineString(projected),
+                            tramSection: sectionNo,
+                            lineIndex: idx,
+                        })
+                    );
+                    added++;
+                });
+            } else if (coords && coords.length >= 2) {
+                const projected = coords.map(toProjected).filter(Boolean);
+
+                if (projected.length >= 2) {
+                    tramVectorSource.addFeature(
+                        new ol.Feature({
+                            geometry: new ol.geom.LineString(projected),
+                            tramSection: sectionNo,
+                            lineIndex: 0,
+                        })
+                    );
+                    added++;
+                }
+            } else {
+                console.warn('[TRAM] coords/lines 없음 또는 부족:', sectionNo, cfg);
+                setStatus('error', '이 공구의 좌표(coords/lines)가 아직 없습니다.', 1500);
+                return;
+            }
+
+            console.log('[TRAM] 공구 표시 완료:', sectionNo, 'addedLines=', added, 'features=', tramVectorSource.getFeatures().length);
+
+            if (!added) {
+                setStatus('error', '좌표 변환 후 라인을 그릴 수 없습니다.', 1500);
+                return;
+            }
+
+            // ✅ 라인 범위로 화면 이동
+            fitToTramExtent();
+        };
 
         // ================== (아래는 사용자 미니 관리 기존 코드 그대로) ==================
         function buildKeySet(obj) {
@@ -1940,7 +2397,7 @@
             const email = ($scope.newUser.email || '').trim();
 
             if (!name || !email) return setUserStatus('error', '이름과 이메일을 모두 입력하세요.', 2000);
-            if (!/^[^@\s]+@[^\s@]+\.[^\s@]+$/.test(email)) return setUserStatus('error', '이메일 형식이 올바르지 않습니다.', 2000);
+            if (!/^[^@\s]+@[^\s@]+\.[^@\s]+$/.test(email)) return setUserStatus('error', '이메일 형식이 올바르지 않습니다.', 2000);
 
             setUserStatus('info', '⏳ 사용자 추가 중...');
 
@@ -1990,7 +2447,7 @@
             if (name && name !== u.name) payload.name = name;
             if (phone && phone !== (u.phone || u.tel || u.phoneNumber)) payload.phone = phone;
             if (email && email !== u.email) {
-                if (!/^[^@\s]+@[^\s@]+\.[^\s@]+$/.test(email)) return setUserStatus('error', '이메일 형식이 올바르지 않습니다.', 2000);
+                if (!/^[^@\s]+@[^\s@]+\.[^@\s]+$/.test(email)) return setUserStatus('error', '이메일 형식이 올바르지 않습니다.', 2000);
                 payload.email = email;
             }
 
@@ -2038,53 +2495,50 @@
     });
 
     // ────────────────────────────────────────────────────────────────
-    // 게시판 공통 (페이지네이션 + 서버 검색 + 첨부/댓글 공통)
-    // src/main/resources/static/app.js
-    // ────────────────────────────────────────────────────────────────
+    // ───────────────── 게시판 공통 (페이지네이션 + 서버 검색) ─────────────────
+    // src/main/resources/static/app.js 중 일부
+
     app.controller('BoardBaseCtrl', function ($scope, $http, AuthService, $location, $routeParams) {
-        // ==========================================================
-        // 0) 기본 상태값
-        // ==========================================================
         $scope.posts = [];
         $scope.loading = false;
 
-        // 글쓰기(기본)
-        $scope.newPost = { title: '', content: '', files: null };
+        $scope.newPost = { title: '', content: '', files: null }; // ← 파일 필드 추가
         $scope.showComposer = false;
 
-        // 페이지네이션(기본)
         $scope.pageSizes = [5, 10, 15, 20];
         $scope.pageSize = 10;
         $scope.page = 0;
         $scope.total = 0;
         $scope.pages = 0;
 
-        // BIG 전용(서버에서 1000개 받아오고 화면은 100개씩 lazy)
+        // 대용량 게시판 전용: 서버에서 받아온 전체 1000개
         $scope._allBigPosts = [];
+        // 화면에 지금 보여주고 있는 개수
         $scope.lazyLoaded = 0;
+        // 한 번에 추가로 보여줄 개수(100개씩)
         $scope.lazyChunkSize = 100;
 
-        // ==========================================================
-        // 1) 검색 상태 + 유틸
-        // ==========================================================
+        // ──────── [ADD] 검색 상태 ────────
         $scope.q = { type: 'author', keyword: '', from: null, to: null };
 
         const isNum = (v) => typeof v === 'number' && isFinite(v);
         const isNonEmptyStr = (s) => typeof s === 'string' && s.trim().length > 0;
 
-        // 파일 확장자 구하기 (File 객체 또는 파일 이름 문자열 지원)
+        // 파일 확장자 구하기 (File 객체 또는 파일 이름 문자열 둘 다 지원)
         $scope.getFileExt = function (fileOrName) {
             if (!fileOrName) return '확장자 없음';
 
             var name = fileOrName;
-            if (fileOrName.name) name = fileOrName.name; // File 객체
-
+            if (fileOrName.name) {
+                // File 객체인 경우
+                name = fileOrName.name;
+            }
             var idx = name.lastIndexOf('.');
             if (idx < 0) return '확장자 없음';
             return name.substring(idx + 1).toLowerCase();
         };
 
-        // 파일 크기 포맷
+        // 파일 크기를 사람이 보기 좋게 포맷
         $scope.formatFileSize = function (size) {
             if (!angular.isNumber(size)) return '알 수 없음';
             if (size < 1024) return size + ' B';
@@ -2099,15 +2553,19 @@
             return gb.toFixed(2) + ' GB';
         };
 
-        // ==========================================================
-        // 2) 본문에 파일 토큰 넣기 (bus.html "본문에 넣기" 버튼에서 사용)
-        // ==========================================================
+        // ================== ✨ 본문에 파일 토큰 넣기 ==================
+        // bus.html에서 "본문에 넣기" 버튼 클릭 시 호출
+        // index: newPost.files 배열의 인덱스
         $scope.insertAttachmentToken = function (index) {
+            // 토큰 형식은 자유롭게 변경 가능: [[att:1]], {{img1}} 등
+            // 여기선 간단히 [[file:번호]] 로 사용
             var token = '[[file:' + (index + 1) + ']]';
+
             var textarea = document.getElementById('newPostContent');
             var content = $scope.newPost.content || '';
 
             if (textarea && typeof textarea.selectionStart === 'number') {
+                // 커서 위치/선택 영역 기준으로 토큰 삽입
                 var start = textarea.selectionStart;
                 var end = textarea.selectionEnd;
 
@@ -2116,28 +2574,33 @@
 
                 $scope.newPost.content = before + token + after;
 
-                // digest 이후 커서 복원
+                // Angular digest 에서 값 반영 후 커서 위치 재설정
                 setTimeout(function () {
                     textarea.focus();
                     var pos = start + token.length;
                     textarea.selectionStart = textarea.selectionEnd = pos;
                 }, 0);
             } else {
-                // textarea 못 찾으면 맨 뒤에 붙이기
+                // textarea를 못 찾으면 그냥 뒤에 붙이기
                 $scope.newPost.content = content + (content ? '\n' : '') + token;
             }
         };
 
         // ==========================================================
-        // 3) 검색 패널 토글/닫기/적용/초기화
-        // ==========================================================
-        $scope.searchOpen = false;
+        // ──────── [ADD] 검색 창 토글/닫기 ────────
+        $scope.searchOpen = false; // 검색 패널(툴바) 열림/닫힘 상태를 보관하는 플래그. 초깃값은 닫힘(false).
 
         $scope.toggleSearch = function (open) {
-            $scope.searchOpen = typeof open === 'boolean' ? open : !$scope.searchOpen;
+            // 검색 패널을 토글(또는 지정한 상태로) 여닫는 함수.
+            $scope.searchOpen =
+                typeof open === 'boolean'
+                    ? open // 인자로 불린이 왔으면 그 값 그대로 쓰고,
+                    : !$scope.searchOpen; // 아니면 현재 상태를 반전시킴(토글).
 
             if ($scope.searchOpen) {
+                // 패널이 이제 열렸다면,
                 setTimeout(function () {
+                    // DOM 렌더링이 완료된 다음에 실행
                     var el = document.getElementById('board-search-input');
                     if (el) el.focus();
                 }, 0);
@@ -2145,68 +2608,46 @@
         };
 
         $scope.closeSearch = function (resetAlso) {
-            if (resetAlso) $scope.resetSearch();
+            if (resetAlso) $scope.resetSearch(); // 필요하면 검색 조건까지 초기화
             $scope.searchOpen = false;
         };
 
         $scope.onSearchKey = function ($event) {
-            if ($event && $event.which === 13) $scope.applySearch();
+            if ($event && $event.which === 13) $scope.applySearch(); // Enter 키
         };
 
         $scope.searchActive = function () {
             const kw = String($scope.q.keyword || '').trim();
-            return $scope.q.type === 'time' ? !!($scope.q.from || $scope.q.to) : !!kw;
+            return $scope.q.type === 'time' ? $scope.q.from || $scope.q.to : !!kw;
         };
 
+        // 🔍 검색 적용
         $scope.applySearch = function () {
             $scope.page = 0;
             $scope.loadPosts();
         };
 
+        // 🔄 검색 초기화
         $scope.resetSearch = function () {
             $scope.q = { type: 'author', keyword: '', from: null, to: null };
             $scope.page = 0;
             $scope.loadPosts();
         };
 
-        // ==========================================================
-        // ✅ (추가) 템플릿(big.html/normal.html)과 함수명 맞추기
-        // ==========================================================
-        $scope.toggleComposer = function () {
-            $scope.showComposer = !$scope.showComposer;
-        };
-
-        // big.html에서 form ng-submit="submit()"
-        $scope.submit = function () {
-            // 네가 만든 실제 등록 함수(createPost)로 연결
-            return $scope.createPost();
-        };
-
-        // ==========================================================
-        // 4) 로그인 사용자(me) + 권한 체크
-        // ==========================================================
+        // 👤 로그인 사용자 정보 불러오기
         AuthService.loadMe().finally(() => {
             $scope.me = AuthService.getMe();
         });
 
         function canEditPost(p) {
-            // ✅ writerId 말고 writerName만 오는 경우도 대비(최소 안전장치)
-            var wid = p && (p.writerId || p.writerName || p.userId || p.author || null);
-            return $scope.me && ($scope.me.isAdmin || ($scope.me.username && wid && $scope.me.username === wid));
+            return $scope.me && ($scope.me.isAdmin || $scope.me.username === p.writerId);
         }
 
         function canEditComment(c) {
             return $scope.me && ($scope.me.isAdmin || $scope.me.username === c.writerId);
         }
 
-        // ✅ 템플릿에서 canEdit(p)로 쓰니까 공개
-        $scope.canEdit = function (p) {
-            return canEditPost(p);
-        };
-
-        // ==========================================================
-        // 5) 게시글 키/UID 처리
-        // ==========================================================
+        // 🧩 게시글의 고유 키(숫자 또는 문자열) 판별 함수
         function resolvePostKey(p) {
             if (isNum(p.postId)) return { type: 'num', key: p.postId };
 
@@ -2216,6 +2657,7 @@
             return { type: 'none', key: null };
         }
 
+        // 🪪 게시글 고유 UID 생성 함수
         function makePostUid(p, idx) {
             const cand = [isNum(p.postId) ? String(p.postId) : null, isNum(p.id) ? String(p.id) : null, p.post_uuid, p.postUuid, p.uuid, p.idStr, p.postIdStr, p.key, p._key != null ? String(p._key) : null].filter(isNonEmptyStr);
 
@@ -2223,25 +2665,28 @@
             return 'tmp-' + Date.now() + '-' + (idx == null ? Math.random().toString(36).slice(2) : idx);
         }
 
+        // ───── 게시판 코드 계산 ─────
         function getBoardCode() {
+            // 컨트롤러에서 넣어준 boardCode 우선, 없으면 URL 파라미터 code 사용
             return String($scope.boardCode || $routeParams.code || 'BUS').toLowerCase();
         }
 
-        // 상세 보기 이동
+        // ───── 글 상세 보기 이동 ─────
         $scope.goView = function (p) {
             if (!p) return;
 
             var keyInfo = resolvePostKey(p);
             if (!keyInfo.key) return;
 
-            var code = getBoardCode();
-            var type = keyInfo.type;
+            var code = getBoardCode(); // bus, normal, big ...
+            var type = keyInfo.type; // 'num' 또는 'str'
             var key = keyInfo.key;
 
+            // 라우팅 규칙: /#/board/:code/view/:type/:key
             $location.path('/board/' + code + '/view/' + type + '/' + encodeURIComponent(key)).search({});
         };
 
-        // 수정 화면 이동
+        // ───── 글 수정 화면 이동 ─────
         $scope.goEdit = function (p) {
             if (!p) return;
 
@@ -2257,67 +2702,28 @@
             var type = keyInfo.type;
             var key = keyInfo.key;
 
+            // 라우팅 규칙: /#/board/:code/edit/:type/:key
             $location.path('/board/' + code + '/edit/' + type + '/' + encodeURIComponent(key)).search({});
         };
 
-        // ==========================================================
-        // ✅ (추가) 삭제: 템플릿에서 remove(p)로 호출하니까 구현
-        // ==========================================================
-        $scope.remove = function (p) {
-            if (!p) return;
-
-            if (!canEditPost(p)) {
-                alert('본인이 쓴 글만 삭제할 수 있습니다.');
-                return;
-            }
-
-            if (!confirm('게시글을 삭제할까요?')) return;
-
-            var keyInfo = resolvePostKey(p);
-            if (!keyInfo.key) return alert('삭제 키를 알 수 없습니다.');
-
-            // 서버 URL 규칙에 맞춰 삭제 API 호출
-            // 1) 숫자키: /api/posts/{id}
-            // 2) 문자열키(uuid): /api/posts/key/{uuid}
-            var url = keyInfo.type === 'num' ? '/api/posts/' + encodeURIComponent(keyInfo.key) : keyInfo.type === 'str' ? '/api/posts/key/' + encodeURIComponent(keyInfo.key) : null;
-
-            if (!url) return alert('삭제 URL을 만들 수 없습니다.');
-
-            $scope.loading = true;
-            $http
-                .delete(url)
-                .then(function () {
-                    // 화면에서 즉시 제거
-                    $scope.posts = ($scope.posts || []).filter(function (x) {
-                        return x._uid !== p._uid;
-                    });
-                    alert('삭제되었습니다.');
-                    // 필요하면 전체 reload
-                    if ($scope.loadPosts) $scope.loadPosts();
-                })
-                .catch(function (err) {
-                    if (err && err.status === 403) alert('본인이 쓴 글만 삭제할 수 있습니다.');
-                    else alert('삭제 실패');
-                })
-                .finally(function () {
-                    $scope.loading = false;
-                });
-        };
-
-        // ==========================================================
-        // 6) 게시글 목록 로드
-        // ==========================================================
+        // 📥 게시글 목록(리스트)을 서버에서 불러오는 함수
         $scope.loadPosts = function () {
+            // boardCode가 없으면(어느 게시판인지 모르면) 그냥 종료
             if (!$scope.boardCode) return;
 
+            // 로딩 상태 ON (스피너 등 표시 용도)
             $scope.loading = true;
 
+            // 서버에 보낼 쿼리 파라미터 기본 값 설정
             const params = {
+                // 현재 페이지 번호 (0부터 시작인지 1부터 시작인지는 서버 설계에 따라)
                 page: $scope.page,
+
+                // 페이지당 게시글 개수. 문자열일 수 있으니 toInt로 정수 변환, 기본값 10
                 size: toInt($scope.pageSize, 10),
             };
 
-            // 검색 조건
+            // ────────── 검색 조건 처리 ──────────
             if ($scope.q.type === 'time') {
                 params.type = 'time';
                 if ($scope.q.from) params.from = $scope.q.from;
@@ -2330,31 +2736,30 @@
                 }
             }
 
-            // URL 분기
+            // ────────── URL 결정 (일반 게시판 vs 대용량 게시판) ──────────
             let url;
-            if ($scope.boardCode === 'BIG') url = '/api/big-board/posts';
-            else url = '/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts';
+            if ($scope.boardCode === 'BIG') {
+                url = '/api/big-board/posts';
+            } else {
+                url = '/api/boards/' + encodeURIComponent($scope.boardCode) + '/posts';
+            }
 
+            // ────────── 실제 HTTP GET 요청 ──────────
             $http
                 .get(url, { params })
                 .then((res) => {
                     const data = res.data || {};
-
                     const list = Array.isArray(data.content) ? data.content : Array.isArray(data.rows) ? data.rows : Array.isArray(data.list) ? data.list : Array.isArray(data) ? data : [];
 
                     const src = Array.isArray(list) ? list : [];
 
-                    // ---- 첨부/썸네일 정규화(로컬) ----
+                    // ────────── 첨부파일/썸네일 정규화용 로컬 함수 ──────────
                     function normalizeFileMetaLocal(raw) {
                         if (!raw) return null;
-
                         const url = raw.url || raw.fileUrl || raw.downloadUrl || raw.path || raw.link || null;
                         const fileName = raw.originalFilename || raw.fileName || raw.filename || raw.name || raw.originName || null;
-
                         const fileType = raw.fileType || raw.type || raw.contentType || raw.fileContentType || null;
-
                         const size = raw.fileSize || raw.size || null;
-
                         return { url, fileName, fileType, size };
                     }
 
@@ -2362,7 +2767,6 @@
                         if (!json) return [];
                         try {
                             const v = JSON.parse(json);
-
                             let arr = [];
                             if (Array.isArray(v)) arr = v;
                             else if (v && Array.isArray(v.files)) arr = v.files;
@@ -2390,17 +2794,18 @@
                         return /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif)$/i.test(name);
                     }
 
-                    // ---- 게시글 매핑: key/uid/attachments ----
+                    // ────────── key / 첨부 / 썸네일 세팅 ──────────
                     const mapped = src.map((p, i) => {
+                        // 기본 키 세팅
                         const r = resolvePostKey(p);
                         p._keyType = r.type;
                         p._key = r.key;
                         p._uid = makePostUid(p, i);
 
-                        // 첨부파일 목록
+                        // 첨부파일 정리
                         let fileList = safeParseFileListLocal(p.fileListJson || p.file_list_json);
 
-                        // 구버전 단일 파일 컬럼
+                        // 구버전: 단일 파일 컬럼만 있는 경우
                         if ((!fileList || fileList.length === 0) && p.fileUrl) {
                             fileList = [
                                 normalizeFileMetaLocal({
@@ -2414,12 +2819,12 @@
 
                         if (fileList && fileList.length > 0) {
                             p.attachments = fileList;
-
                             const first = fileList[0];
+
+                            // 목록 썸네일/아이콘용 필드 채우기
                             if (!p.fileUrl) p.fileUrl = first.url;
                             if (!p.fileName) p.fileName = first.fileName;
                             if (!p.fileSize && first.size != null) p.fileSize = first.size;
-
                             if (!p.fileType) {
                                 p.fileType = isImageMeta(first) ? 'IMAGE' : 'FILE';
                             }
@@ -2430,7 +2835,7 @@
                         return p;
                     });
 
-                    // ---- BIG vs 일반 ----
+                    // ────────── 대용량 게시판 vs 일반 게시판 ──────────
                     if ($scope.boardCode === 'BIG') {
                         $scope._allBigPosts = mapped || [];
                         $scope.lazyLoaded = Math.min($scope.lazyChunkSize, $scope._allBigPosts.length);
@@ -2439,13 +2844,13 @@
                         $scope.posts = mapped;
                     }
 
-                    // ---- 페이지 값 세팅 ----
+                    // ────────── 페이지 관련 값 세팅 ──────────
                     $scope.page = typeof data.page === 'number' ? data.page : typeof data.number === 'number' ? data.number : $scope.page;
+
                     $scope.pageSize = toInt(typeof data.size === 'number' ? data.size : $scope.pageSize, 10);
 
                     const hasTotal = typeof data.total === 'number' || typeof data.totalElements === 'number';
                     const serverTotal = typeof data.total === 'number' ? data.total : data.totalElements;
-
                     const serverTotalPages = typeof data.totalPages === 'number' ? data.totalPages : typeof data.pages === 'number' ? data.pages : undefined;
 
                     if (hasTotal) {
@@ -2474,21 +2879,21 @@
             $scope.loadPosts();
         };
 
-        // BIG 전용: 100개씩 더 표시
+        // ✅ BIG 전용: 아래로 더 스크롤하거나 버튼 눌렀을 때 100개씩 더 보이게
         $scope.loadMore = function () {
             if ($scope.boardCode !== 'BIG') return;
             if (!$scope._allBigPosts || !$scope._allBigPosts.length) return;
 
             var next = $scope.lazyLoaded + $scope.lazyChunkSize;
-            if (next > $scope._allBigPosts.length) next = $scope._allBigPosts.length;
+            if (next > $scope._allBigPosts.length) {
+                next = $scope._allBigPosts.length;
+            }
 
             $scope.lazyLoaded = next;
             $scope.posts = $scope._allBigPosts.slice(0, $scope.lazyLoaded);
         };
 
-        // ==========================================================
-        // 7) 페이지 이동/사이즈 변경
-        // ==========================================================
+        // 페이지 이동/사이즈 변경 ------------------------------
         $scope.first = function () {
             if ($scope.page > 0) {
                 $scope.page = 0;
@@ -2551,9 +2956,7 @@
             return arr;
         };
 
-        // ==========================================================
-        // 8) 댓글 관련
-        // ==========================================================
+        // ====== 댓글 관련 ======
         $scope.toggleComments = function (p) {
             p._showComments = !p._showComments;
             if (p._showComments && !p._commentsLoaded) $scope.loadComments(p);
@@ -2656,7 +3059,9 @@
             if (!c.uuid) return alert('이 댓글은 수정용 키를 알 수 없어 수정할 수 없습니다.');
 
             $http
-                .put('/api/comments/key/' + encodeURIComponent(c.uuid), { content: newText })
+                .put('/api/comments/key/' + encodeURIComponent(c.uuid), {
+                    content: newText,
+                })
                 .then(function (res) {
                     c.content = newText;
                     if (res && res.data && res.data.updatedAt) c.updatedAt = res.data.updatedAt;
@@ -2673,7 +3078,6 @@
             if (!canEditComment(c)) return alert('본인이 쓴 댓글만 삭제할 수 있습니다.');
             if (!confirm('댓글을 삭제할까요?')) return;
 
-            // uuid 기반 삭제
             if (c && c.uuid) {
                 $http
                     .delete('/api/comments/key/' + encodeURIComponent(c.uuid))
@@ -2689,7 +3093,6 @@
                 return;
             }
 
-            // 숫자 id 기반 삭제
             const id = c && c.commentId;
             if (typeof id === 'number' && isFinite(id)) {
                 $http
@@ -2708,26 +3111,25 @@
             alert('이 댓글은 삭제용 키를 알 수 없어 삭제할 수 없습니다.');
         };
 
-        // ==========================================================
-        // 9) 게시글 생성 (업로드/폴더 포함) — 저장 후 새로고침
-        // ==========================================================
+        // ====== ★ 게시글 CRUD(추가) — 저장 후 항상 새로고침 ======
+        // 새 게시글(폴더/파일/일반글) 생성
+        // ====== ★ 게시글 CRUD(추가) — 저장 후 항상 새로고침 ======
         $scope.createPost = function () {
             if (!$scope.newPost) $scope.newPost = {};
 
-            // TinyMCE 이미지 -> [[file:n]] 토큰 변환
+            // 🔁 TinyMCE 내용에서 data-file-index 가진 <img>를 [[file:n]] 토큰으로 변환
             if (window.tinymce) {
                 var editor = window.tinymce.get('busEditor');
                 if (editor) {
                     var html = editor.getContent() || '';
-
                     html = html.replace(/<img[^>]*data-file-index="(\d+)"[^>]*>/gi, function (full, idxStr) {
                         var idx = parseInt(idxStr, 10);
                         if (!isFinite(idx)) idx = 0;
-
                         var n = idx + 1; // 0-base → 1-base
+
+                        // 필요하면 width 옵션은 나중에 커스터마이징 가능
                         return '[[file:' + n + ' width=100%]]';
                     });
-
                     $scope.newPost.content = html;
                 }
             }
@@ -2742,7 +3144,6 @@
 
             const isFolder = !!$scope.newPost.isFolder;
             const folderName = ($scope.newPost.folderName || '').trim();
-
             const files = $scope.newPost.files || [];
             const fileInput = document.getElementById('postFile');
 
@@ -2773,8 +3174,7 @@
                     $scope.newPost = {};
                     $scope.newPost.files = null;
                     if (fileInput) fileInput.value = '';
-
-                    if ($scope.loadPosts) $scope.loadPosts();
+                    $scope.loadPosts && $scope.loadPosts();
                 })
                 .catch(function (err) {
                     console.error('게시글 등록 실패', err);
@@ -2784,20 +3184,7 @@
                     $scope.loading = false;
                 });
         };
-
-        // ==========================================================
-        // (선택) 초기 로드: 컨트롤러 붙자마자 목록 자동 로드하고 싶으면 주석 해제
-        // ==========================================================
-        // $scope.loadPosts();
     });
-
-    // ────────────────────────────────────────────────────────────────
-    // (필요시) toInt 유틸: app.js 어딘가에 이미 있으면 중복 추가하지 말 것!
-    // ────────────────────────────────────────────────────────────────
-    function toInt(v, def) {
-        var n = parseInt(v, 10);
-        return isFinite(n) ? n : def == null ? 0 : def;
-    }
 
     // ───────────────── 게시글 편집 전용 컨트롤러 ─────────────────
     // AngularJS 모듈(app)에 "BoardEditCtrl" 이라는 이름의 컨트롤러를 등록한다.
@@ -3307,16 +3694,23 @@
     // ───────────────── 게시글 상세 보기 컨트롤러 ─────────────────
     // src/main/resources/static/app.js 안의 BoardViewCtrl 부분
     // ───────────────── 게시글 상세 보기 컨트롤러 ─────────────────
-    // src/main/resources/static/app.js 안의 BoardViewCtrl
+    // src/main/resources/static/app.js 안의 BoardViewCtrl (전체 교체)
     app.controller('BoardViewCtrl', function ($scope, $http, $routeParams, $location, AuthService, $sce) {
         $scope.loading = true;
         $scope.post = null;
         $scope.renderedContent = null;
         $scope.files = []; // ⬅ 첨부 목록(하단 리스트용)
+        $scope.me = null;
 
+        // ✅ code / type / key 읽기 (라우트 + 쿼리 둘 다 지원)
         const rawCode = String($routeParams.code || '').toLowerCase(); // 'bus' | 'norm' | 'normal' | 'big'
         const key = $routeParams.key;
-        const type = String($location.search().type || 'str').toLowerCase(); // 'num' | 'str'
+
+        // ⚠️ 기존 코드는 type을 쿼리스트링에서만 읽어서
+        // /view/num/:key 형태(라우트 param)일 때 type이 'str'로 떨어질 수 있었음.
+        const routeType = String($routeParams.type || '').toLowerCase(); // 'num' | 'str' (라우트)
+        const queryType = String($location.search().type || '').toLowerCase(); // 'num' | 'str' (쿼리)
+        const type = (routeType || queryType || 'str').toLowerCase();
 
         // ───────── 목록 경로 계산 ─────────
         function getListPath(code) {
@@ -3332,6 +3726,7 @@
                     return '/board/bus';
             }
         }
+
         function backToList() {
             $location.path(getListPath(rawCode)).search({});
         }
@@ -3416,9 +3811,7 @@
             let html = content || '';
 
             // 예전에 남아 있던 "[파일 2]", "파일 3", "첨부 파일" 같은 텍스트 제거
-            html = html
-                .replace(/\[?\s*파일\s*\d+\s*\]?/gi, '') // [파일 2], 파일 3 등
-                .replace(/첨부\s*파일/gi, '');
+            html = html.replace(/\[?\s*파일\s*\d+\s*\]?/gi, '').replace(/첨부\s*파일/gi, '');
 
             const tokenRe = /\[\[file:(\d+)([^\]]*)\]\]/gi;
 
@@ -3447,20 +3840,16 @@
                     url = f.url || f.fileUrl || f.downloadUrl || f.path || null;
                     fileName = f.fileName || f.originalFilename || f.filename || f.name || '파일 ' + n;
                 } else if ((!m.fileList || m.fileList.length === 0) && n === 1) {
-                    // 예전 단일 파일 방식
                     url = m.fileUrl || m.url || null;
                     fileName = m.fileName || '첨부 파일';
                 }
 
-                // url 이 없으면 토큰 자체 제거
                 if (!url) return '';
 
-                // style 조립
                 const styleParts = [];
 
                 if (widthRaw) {
                     if (/^\d+$/.test(widthRaw)) {
-                        // 숫자만 오면 %로 간주
                         styleParts.push('width:' + parseInt(widthRaw, 10) + '%');
                     } else {
                         styleParts.push('width:' + widthRaw);
@@ -3480,7 +3869,6 @@
                     styleParts.push('float:right');
                     styleParts.push('margin:8px 0 8px 12px');
                 } else {
-                    // center
                     styleParts.push('display:block');
                     styleParts.push('margin:16px auto');
                 }
@@ -3498,13 +3886,18 @@
             $scope.loading = true;
             let url = null;
 
+            // ✅ BIG 상세는 목록과 맞춰서 /api/big-board/posts/{id} 로 통일
             if (rawCode === 'big' && type === 'num') {
-                url = '/api/big-board/' + encodeURIComponent(key);
+                url = '/api/big-board/posts/' + encodeURIComponent(key);
             } else if (type === 'num') {
+                // (BUS/NORM) 숫자 PK로 조회
                 url = '/api/posts/' + encodeURIComponent(key);
             } else {
+                // (BUS/NORM) 문자열 key(uuid 등)로 조회
                 url = '/api/posts/key/' + encodeURIComponent(key);
             }
+
+            console.log('[VIEW] loadOne url=', url, 'code=', rawCode, 'type=', type, 'key=', key);
 
             $http
                 .get(url)
@@ -3538,7 +3931,7 @@
                         };
                     });
 
-                    // 토큰 변환에 쓸 meta 구조 (편집쪽 normalizeMeta와 비슷하게)
+                    // 토큰 변환에 쓸 meta 구조
                     const meta = {
                         fileList: p.attachments || [],
                         fileUrl: p.fileUrl || null,
@@ -3551,8 +3944,15 @@
                     };
 
                     $scope.post = p;
+
                     const html = tokensToHtml(p.content || '', meta);
                     $scope.renderedContent = $sce.trustAsHtml(html);
+                })
+                .catch(function (err) {
+                    console.error('[VIEW] loadOne fail', err);
+                    $scope.post = null;
+                    $scope.renderedContent = $sce.trustAsHtml('<div style="opacity:.7">게시글을 불러오지 못했습니다.</div>');
+                    $scope.files = [];
                 })
                 .finally(function () {
                     $scope.loading = false;
@@ -3787,9 +4187,9 @@
     // src/main/resources/static/app.js (일부)
     // 대용량 게시판 컨트롤러 등록
     app.controller('BoardBigCtrl', function ($scope, $controller, $http, $location, AuthService, $window, $timeout) {
-        'use strict'; // JS 엄격 모드 활성화 (실수 줄이기용)
+        'use strict';
 
-        console.log('[BIG] BoardBigCtrl 초기화'); // 콘솔에 컨트롤러 초기화 로그 출력
+        console.log('[BIG] BoardBigCtrl 초기화');
 
         // 공통 Base 기능 상속 (검색 토글, 검색 폼, 공통 페이지네이션 등)
         angular.extend(this, $controller('BoardBaseCtrl', { $scope: $scope }));
@@ -3804,7 +4204,22 @@
         var CHUNK_SIZE = 100; // 스크롤 한 번에 화면에 추가로 보여줄 개수
         var MAX_PER_PAGE = 1000; // 한 화면에서 최대로 보여줄 개수
         var APPROX_TOTAL = 100000000; // totalElements를 못 받을 때 대략 총 개수(1억)
-        var CHUNKS_PER_DB_PAGE = MAX_PER_PAGE / CHUNK_SIZE; // 한 DB 페이지(1000개)를 몇 chunk로 나누는지
+        var CHUNKS_PER_DB_PAGE = MAX_PER_PAGE / CHUNK_SIZE;
+
+        // ─────────────────────────────────────
+        // ✅ BIG 데이터 호환 유틸 (중요!)
+        // ─────────────────────────────────────
+        function getPostId(p) {
+            if (!p) return null;
+            // BIG는 post_id로 내려올 가능성이 큼
+            return p.post_id || p.id || p.postId || p.postID || p.postIdStr || null;
+        }
+
+        function getWriterId(p) {
+            if (!p) return '';
+            // BIG는 user_id / writer_id로 내려올 수 있음
+            return (p.writerId || p.writer_id || p.writer || p.user_id || p.userId || p.username || p.writerName || '').toString();
+        }
 
         // ─────────────────────────────────────
         // 페이지 / 카운트 상태
@@ -3812,6 +4227,7 @@
         $scope.pageSize = PAGE_SIZE;
         $scope.pageSizes = [PAGE_SIZE];
         $scope.page = 0;
+
         $scope.pages = Math.ceil(APPROX_TOTAL / PAGE_SIZE);
         $scope.total = APPROX_TOTAL;
         $scope.totalCount = APPROX_TOTAL;
@@ -3844,10 +4260,7 @@
 
         // 글쓰기 폼 & composer 표시 상태
         $scope.showComposer = false;
-        $scope.form = {
-            title: '',
-            content: '',
-        };
+        $scope.form = { title: '', content: '' };
         $scope.saving = false;
 
         // ─────────────────────────────────────
@@ -3860,16 +4273,17 @@
         });
 
         // ─────────────────────────────────────
-        // BIG 전용 canEdit : 무조건 '내 글만' 수정/삭제
+        // ✅ BIG 전용 canEdit : 무조건 '내 글만' 수정/삭제
+        //    (작성자 필드가 writerId가 아닐 수도 있어서 getWriterId 사용)
         // ─────────────────────────────────────
         $scope.canEdit = function (p) {
             var me = $scope.me;
             if (!me || !p) return false;
 
             var myId = (me.username || me.userId || me.id || '').toString();
-            var writer = (p.writerId || p.writer || p.writerName || '').toString();
-            if (!myId || !writer) return false;
+            var writer = getWriterId(p);
 
+            if (!myId || !writer) return false;
             return myId === writer;
         };
 
@@ -4045,7 +4459,6 @@
             var next = $scope.displayCount + CHUNK_SIZE;
             if (next > limit) next = limit;
 
-            // ✅ 어떤 상황에서도 loadingMore가 풀리도록 보강
             withRenderLoading(function () {
                 try {
                     $scope.displayCount = next;
@@ -4061,35 +4474,27 @@
         // 스크롤 이벤트
         // ─────────────────────────────────────
         var lastLoadScrollY = 0;
-
-        // ✅ 스크롤 이벤트 과다 호출 방지 (1프레임 1회)
         var ticking = false;
 
         function onScroll() {
             if ($scope.loading || $scope.loadingMore) return;
-
             if (ticking) return;
             ticking = true;
 
             $window.requestAnimationFrame(function () {
                 try {
-                    // ✅ 문서 높이 계산 더 정확하게
                     var docHeight = document.documentElement.scrollHeight || document.body.scrollHeight || document.body.offsetHeight;
                     var scrollBottom = window.innerHeight + window.scrollY;
 
                     var nearBottom = docHeight - scrollBottom <= 80;
                     if (!nearBottom) return;
 
-                    if ($scope.displayCount > 0 && window.scrollY <= lastLoadScrollY + 40) {
-                        return;
-                    }
+                    if ($scope.displayCount > 0 && window.scrollY <= lastLoadScrollY + 40) return;
 
                     $scope.$applyAsync(function () {
                         var before = $scope.displayCount;
                         $scope.loadMoreInPage();
-                        if ($scope.displayCount !== before) {
-                            lastLoadScrollY = window.scrollY;
-                        }
+                        if ($scope.displayCount !== before) lastLoadScrollY = window.scrollY;
                     });
                 } finally {
                     ticking = false;
@@ -4098,7 +4503,6 @@
         }
 
         $window.addEventListener('scroll', onScroll);
-
         $scope.$on('$destroy', function () {
             $window.removeEventListener('scroll', onScroll);
         });
@@ -4114,7 +4518,7 @@
             var morePage = ($scope.page + 1) * $scope.pageSize < $scope.total;
             if (!morePage) return false;
 
-            // ✅ "다음 페이지"는 현재 페이지에서 1000개까지 다 본 다음에만 허용(너의 정책 유지)
+            // "다음 페이지"는 현재 페이지에서 1000개까지 다 본 다음에만 허용
             var pageLimit = Math.min(MAX_PER_PAGE, ($scope._pagePosts || []).length);
             return $scope.displayCount >= pageLimit && pageLimit >= MAX_PER_PAGE;
         };
@@ -4150,31 +4554,36 @@
         };
 
         // ─────────────────────────────────────
-        // 상세 보기 / 수정 / 삭제
+        // ✅ 상세 보기 / 수정 / 삭제 (id 필드 호환 처리)
         // ─────────────────────────────────────
         $scope.goView = function (p) {
-            if (!p || !p.id) return;
+            var id = getPostId(p);
+            if (!id) return;
 
-            // ⚠️ 조회수 증가(view_cnt)는 "상세보기 화면 컨트롤러"에서
-            // GET /api/big-board/{id} 를 호출해야 1번만 정확히 올라감.
-            // (여기서 미리 호출하면 상세에서도 호출해서 2번 증가할 수 있음)
-
-            var path = '/board/big/view/' + encodeURIComponent(p.id);
-            $location.path(path).search({ type: 'num' });
+            // ✅ 라우트: /board/:code/view/:type/:key
+            $location.path('/board/big/view/num/' + encodeURIComponent(id));
         };
 
         $scope.goEdit = function (p) {
-            if (!p || !p.id) return;
-            var path = '/board/big/edit/num/' + encodeURIComponent(p.id);
-            $location.path(path).search({});
+            var id = getPostId(p);
+            if (!id) return;
+
+            // ✅ 라우트: /board/:code/edit/:type/:key
+            $location.path('/board/big/edit/num/' + encodeURIComponent(id));
         };
 
         $scope.remove = function (p) {
-            if (!p || !p.id) return;
+            var id = getPostId(p);
+            if (!id) return;
+
             if (!confirm('정말 삭제하시겠습니까?')) return;
 
+            // ✅ 백엔드가 이 URL을 쓰는지 확인 필요
+            // - 현재 코드 유지: DELETE /api/big-board/{id}
+            // - 만약 404면 아래처럼 바꾸면 됨:
+            //   .delete('/api/big-board/posts/' + encodeURIComponent(id))
             $http
-                .delete('/api/big-board/' + encodeURIComponent(p.id))
+                .delete('/api/big-board/' + encodeURIComponent(id))
                 .then(function () {
                     alert('삭제되었습니다.');
                     $scope.loadPosts();
@@ -4398,55 +4807,66 @@
         });
     });
 
-    // 게시판 통계 컨트롤러 (DB 연동)
+    // 게시판 통계 컨트롤러 (DB 연동)                           // ✅ "통계 화면"에서 API 호출 + Chart.js로 그래프 그리는 AngularJS 컨트롤러
     app.controller('BoardStatsCtrl', function ($scope, $http, $timeout) {
-        let bar = null;
-        let pie = null;
+        // ✅ 컨트롤러 등록(스코프/HTTP/타이머 서비스 주입)
+
+        // ✅ posts용 4개 + views용 4개 차트 인스턴스
+        let postsBar = null;
+        let postsPie = null;
+        let postsRadar = null; // ✅ (변경) '레이더' 자리 canvas에 "라인 차트"를 그릴 거라 변수명은 유지
+        let postsBubble = null;
+
+        let viewsBar = null;
+        let viewsPie = null;
+        let viewsRadar = null; // ✅ (변경) 동일
+        let viewsBubble = null;
 
         $scope.boardType = 'NORM'; // 'NORM' | 'BIG'
-        $scope.metric = 'posts'; // ✅ 'posts' | 'views'
-        $scope.rows = [];
+        $scope.metric = 'posts'; // 'posts' | 'views'
+
+        $scope.rowsPosts = []; // ✅ 사용자 게시물 수 Top10
+        $scope.rowsViews = []; // ✅ 게시물 조회수 순위 Top10
+
         $scope.loading = false;
 
-        // ✅ 최초 진입 시 호출
+        // ✅ 최초 진입
         $scope.init = function () {
             $scope.reload();
         };
 
-        // ✅ 드롭다운 변경 시 자동 reload
-        // (HTML에서 ng-change로 reload() 호출해도 되지만, 이게 더 안전)
+        // ✅ boardType / metric 변경 시 reload
         $scope.$watchGroup(['boardType', 'metric'], function () {
-            // init 이전에 watch가 먼저 타는 경우 방지
             if (typeof $scope.reload === 'function') $scope.reload();
         });
 
-        // ✅ API 호출해서 rows 갱신 + 차트 다시 그림
+        // ✅ API 호출 (선택된 metric만 호출해서 "따로따로" 나오게)
         $scope.reload = function () {
             $scope.loading = true;
 
+            const board = String($scope.boardType || 'NORM');
+            const metric = String($scope.metric || 'posts');
+
             $http
                 .get('/api/stats/top10', {
-                    params: {
-                        board: String($scope.boardType || 'NORM'),
-                        metric: String($scope.metric || 'posts'),
-                    },
+                    params: { board: board, metric: metric },
                 })
                 .then(function (res) {
-                    // res.data = [{name:'user02', value:123}, ...]
                     const list = Array.isArray(res.data) ? res.data : [];
-                    // ✅ name/value 정리 (혹시 null/문자 섞여도 안전)
-                    $scope.rows = list
-                        .filter((r) => r && r.name != null)
-                        .map((r) => ({
-                            name: String(r.name),
-                            value: Number(r.value || 0),
-                        }));
+                    const normalized = normalizeRows(list);
+
+                    // ✅ metric별로 저장 (분리)
+                    if (metric === 'posts') $scope.rowsPosts = normalized;
+                    else $scope.rowsViews = normalized;
 
                     $timeout(drawCharts, 0);
                 })
                 .catch(function (err) {
                     console.error('[STATS] top10 API 실패:', err);
-                    $scope.rows = [];
+
+                    if (metric === 'posts') $scope.rowsPosts = [];
+                    else $scope.rowsViews = [];
+
                     $timeout(drawCharts, 0);
                 })
                 .finally(function () {
@@ -4454,101 +4874,291 @@
                 });
         };
 
+        function normalizeRows(list) {
+            return (list || [])
+                .filter((r) => r && r.name != null)
+                .map((r) => ({
+                    name: String(r.name),
+                    value: Number(r.value || 0),
+                }));
+        }
+
+        function destroyChart(ch) {
+            if (ch) {
+                try {
+                    ch.destroy();
+                } catch (e) {}
+            }
+            return null;
+        }
+
         function drawCharts() {
-            const labels = ($scope.rows || []).map((r) => r.name);
-            const values = ($scope.rows || []).map((r) => Number(r.value || 0));
+            // ✅ metric에 따라 "해당 4개만" 그리고, 반대쪽은 완전히 제거
+            if ($scope.metric === 'posts') {
+                drawGroup('posts', $scope.rowsPosts || []);
 
-            // 기존 차트 제거
-            if (bar) {
-                bar.destroy();
-                bar = null;
+                // 반대쪽(views) 차트는 제거
+                viewsBar = destroyChart(viewsBar);
+                viewsPie = destroyChart(viewsPie);
+                viewsRadar = destroyChart(viewsRadar);
+                viewsBubble = destroyChart(viewsBubble);
+            } else {
+                drawGroup('views', $scope.rowsViews || []);
+
+                // 반대쪽(posts) 차트는 제거
+                postsBar = destroyChart(postsBar);
+                postsPie = destroyChart(postsPie);
+                postsRadar = destroyChart(postsRadar);
+                postsBubble = destroyChart(postsBubble);
             }
-            if (pie) {
-                pie.destroy();
-                pie = null;
-            }
+        }
 
-            const barEl = document.getElementById('barChart');
-            const pieEl = document.getElementById('pieChart');
+        function drawGroup(prefix, rows) {
+            const labels = (rows || []).map((r) => r.name);
+            const values = (rows || []).map((r) => Number(r.value || 0));
 
-            if (!barEl || !pieEl || !window.Chart) {
-                console.warn('[STATS] canvas 또는 Chart.js 로드 실패');
+            if (!window.Chart) {
+                console.warn('[STATS] Chart.js 로드 실패');
                 return;
             }
+            if (!labels.length) return;
 
-            // ✅ 데이터 없으면 "빈 차트" 만들지 말고 끝 (깨짐 방지)
-            if (!labels.length) {
-                console.warn('[STATS] 데이터 없음');
-                return;
+            // ✅ stats.html 캔버스 id 매칭
+            const barEl = document.getElementById(prefix === 'posts' ? 'postsBarChart' : 'viewsBarChart');
+            const pieEl = document.getElementById(prefix === 'posts' ? 'postsPieChart' : 'viewsPieChart');
+
+            // ✅ (변경) 레이더 캔버스 id 그대로 사용하지만, "라인 차트"를 그릴 예정
+            const radarEl = document.getElementById(prefix === 'posts' ? 'postsRadarChart' : 'viewsRadarChart');
+
+            const bubbleEl = document.getElementById(prefix === 'posts' ? 'postsBubbleChart' : 'viewsBubbleChart');
+
+            // ✅ 해당 그룹의 기존 차트만 제거
+            if (prefix === 'posts') {
+                postsBar = destroyChart(postsBar);
+                postsPie = destroyChart(postsPie);
+                postsRadar = destroyChart(postsRadar); // ✅ (변경) 라인 차트도 이 변수로 관리
+                postsBubble = destroyChart(postsBubble);
+            } else {
+                viewsBar = destroyChart(viewsBar);
+                viewsPie = destroyChart(viewsPie);
+                viewsRadar = destroyChart(viewsRadar); // ✅ (변경)
+                viewsBubble = destroyChart(viewsBubble);
             }
 
-            const barCtx = barEl.getContext('2d');
-            const pieCtx = pieEl.getContext('2d');
+            const yLabel = prefix === 'posts' ? '게시물 수' : '조회수';
+            const titleBar = prefix === 'posts' ? '사용자별 게시물 수 Top 10' : '게시물 조회수 순위 Top 10';
+            const titlePie = prefix === 'posts' ? '게시물 수 비중(Top 10) · 사용자 점유율' : '조회수 비중(Top 10) · 점유율';
 
-            bar = new Chart(barCtx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: 'Top10',
-                            data: values,
-                        },
-                    ],
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            callbacks: {
-                                label: function (ctx) {
-                                    const v = ctx.parsed?.y ?? ctx.parsed ?? 0;
-                                    return ' ' + Number(v).toLocaleString();
-                                },
-                            },
-                        },
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                callback: function (value) {
-                                    return Number(value).toLocaleString();
-                                },
-                            },
-                        },
-                    },
-                },
-            });
+            // ✅ (변경) 레이더 대신 라인 차트 제목
+            const titleLine = prefix === 'posts' ? '순위별 게시물 수 변화(Top 10)' : '순위별 조회수 변화(Top 10)';
 
-            pie = new Chart(pieCtx, {
-                type: 'pie',
-                data: {
-                    labels: labels,
-                    datasets: [{ data: values }],
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: { boxWidth: 12 },
+            const titleBubble = prefix === 'posts' ? '게시물 수 vs 순위(규모 + 분포)' : '조회수 vs 순위(규모 + 분포)';
+
+            // ===== 1) 막대 =====
+            if (barEl) {
+                const ch = new Chart(barEl.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{ label: yLabel, data: values }],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: { display: true, text: titleBar, font: { size: 14 } },
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: function (ctx) {
+                                        const v = ctx.parsed?.y ?? ctx.parsed ?? 0;
+                                        return ' ' + Number(v).toLocaleString();
+                                    },
+                                },
+                            },
                         },
-                        tooltip: {
-                            callbacks: {
-                                label: function (ctx) {
-                                    const label = ctx.label || '';
-                                    const v = ctx.parsed || 0;
-                                    return label + ': ' + Number(v).toLocaleString();
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: yLabel },
+                                ticks: {
+                                    callback: function (v) {
+                                        return Number(v).toLocaleString();
+                                    },
                                 },
                             },
                         },
                     },
-                },
-            });
+                });
+
+                if (prefix === 'posts') postsBar = ch;
+                else viewsBar = ch;
+            }
+
+            // ===== 2) 원형 =====
+            if (pieEl) {
+                const ch = new Chart(pieEl.getContext('2d'), {
+                    type: 'pie',
+                    data: {
+                        labels: labels,
+                        datasets: [{ data: values }],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: { display: true, text: titlePie, font: { size: 14 } },
+                            legend: { position: 'bottom', labels: { boxWidth: 12 } },
+                            tooltip: {
+                                callbacks: {
+                                    label: function (ctx) {
+                                        const label = ctx.label || '';
+                                        const v = ctx.parsed || 0;
+                                        return label + ': ' + Number(v).toLocaleString();
+                                    },
+                                },
+                            },
+                        },
+                    },
+                });
+
+                if (prefix === 'posts') postsPie = ch;
+                else viewsPie = ch;
+            }
+
+            // ===== 3) ✅ (변경) 라인 차트 (레이더 자리 대체) =====
+            // - x축: 순위(1~N)
+            // - y축: 값(게시물 수/조회수)
+            // - tooltip title에서 해당 순위의 "이름"을 보여줘서 비교가 더 직관적
+            if (radarEl) {
+                const rankLabels = values.map(function (_, i) {
+                    return String(i + 1);
+                }); // '1','2',...,'10'
+
+                const ch = new Chart(radarEl.getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: rankLabels,
+                        datasets: [
+                            {
+                                label: yLabel,
+                                data: values,
+                                tension: 0.25,
+                                fill: false,
+                                pointRadius: 3,
+                                pointHoverRadius: 5,
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: { display: true, text: titleLine, font: { size: 14 } },
+                            legend: { position: 'top' },
+                            tooltip: {
+                                callbacks: {
+                                    title: function (items) {
+                                        const it = items && items[0];
+                                        if (!it) return '';
+                                        const idx = Number(it.label || '1') - 1; // 순위 -> index
+                                        const name = labels[idx] || 'rank ' + (idx + 1);
+                                        return idx + 1 + '위 · ' + name;
+                                    },
+                                    label: function (ctx) {
+                                        const v = ctx.parsed?.y ?? ctx.parsed ?? 0;
+                                        return yLabel + ': ' + Number(v).toLocaleString();
+                                    },
+                                },
+                            },
+                        },
+                        scales: {
+                            x: {
+                                title: { display: true, text: '순위' },
+                            },
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: yLabel },
+                                ticks: {
+                                    callback: function (v) {
+                                        return Number(v).toLocaleString();
+                                    },
+                                },
+                            },
+                        },
+                    },
+                });
+
+                if (prefix === 'posts') postsRadar = ch; // ✅ 변수명 유지
+                else viewsRadar = ch;
+            }
+
+            // ===== 4) 버블 =====
+            if (bubbleEl) {
+                const points = values.map(function (v, i) {
+                    const r = 6 + Math.sqrt(Math.max(0, v)) * 0.6;
+                    return { x: i + 1, y: v, r: Math.max(6, Math.min(30, r)) };
+                });
+
+                const ch = new Chart(bubbleEl.getContext('2d'), {
+                    type: 'bubble',
+                    data: {
+                        datasets: [
+                            {
+                                label: titleBubble,
+                                data: points,
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: { display: true, text: titleBubble, font: { size: 14 } },
+                            legend: { position: 'top' },
+                            tooltip: {
+                                callbacks: {
+                                    title: function (items) {
+                                        const it = items && items[0];
+                                        if (!it) return '';
+                                        const idx = (it.raw && it.raw.x ? it.raw.x : 1) - 1;
+                                        const name = labels[idx] || 'rank ' + (idx + 1);
+                                        return idx + 1 + '위 · ' + name;
+                                    },
+                                    label: function (ctx) {
+                                        const y = ctx.raw?.y ?? 0;
+                                        return yLabel + ': ' + Number(y).toLocaleString();
+                                    },
+                                },
+                            },
+                        },
+                        scales: {
+                            x: {
+                                title: { display: true, text: '순위' },
+                                ticks: {
+                                    callback: function (v) {
+                                        return v;
+                                    },
+                                },
+                                min: 0,
+                                max: labels.length + 1,
+                            },
+                            y: {
+                                title: { display: true, text: yLabel },
+                                beginAtZero: true,
+                                ticks: {
+                                    callback: function (v) {
+                                        return Number(v).toLocaleString();
+                                    },
+                                },
+                            },
+                        },
+                    },
+                });
+
+                if (prefix === 'posts') postsBubble = ch;
+                else viewsBubble = ch;
+            }
         }
     });
 

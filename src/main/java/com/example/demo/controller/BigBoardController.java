@@ -123,18 +123,35 @@ public class BigBoardController {
     }
 
     // ─────────────────────────────────────────
-    // ④ 단건 조회 (✅ 조회수 +1)
-    //    GET /api/big-board/{id}
-    //
-    //    ✔ 여기서 조회수 증가가 일어나야 통계(조회수 Top10)가 DB랑 맞음
+    // ✅ 공통 단건 조회 로직(조회수 +1 포함)
     // ─────────────────────────────────────────
-    @GetMapping("/{id}")
-    public BigPostDto getOne(@PathVariable Long id) {
+    private BigPostDto loadOneWithViewCount(Long id) {
+        if (id == null) return null;
+
         // ✅ 조회수 1 증가
         bigPostDao.increaseViewCnt(id);
 
         // ✅ 증가된 view_cnt까지 포함해서 다시 조회 후 반환
         return bigPostDao.findById(id);
+    }
+
+    // ─────────────────────────────────────────
+    // ④-1 단건 조회 (기존)
+    //    GET /api/big-board/{id}
+    // ─────────────────────────────────────────
+    @GetMapping("/{id}")
+    public BigPostDto getOne(@PathVariable Long id) {
+        return loadOneWithViewCount(id);
+    }
+
+    // ─────────────────────────────────────────
+    // ④-2 단건 조회 (✅ 프론트 호환용 alias)
+    //    GET /api/big-board/posts/{id}
+    //    - 프론트(BoardViewCtrl)가 이 주소를 호출 중이라 404 해결용
+    // ─────────────────────────────────────────
+    @GetMapping("/posts/{id}")
+    public BigPostDto getOneByPostsPath(@PathVariable Long id) {
+        return loadOneWithViewCount(id);
     }
 
     // ─────────────────────────────────────────
@@ -153,15 +170,11 @@ public class BigBoardController {
             d.setWriterId("anonymous");
         }
 
-        // ✅ viewCnt는 DB DEFAULT 0 이므로 굳이 안 넣어도 되지만,
-        // 혹시 프론트에서 쓰레기 값이 들어오는 걸 막고 싶으면 0으로 고정해도 됨.
+        // ✅ viewCnt는 DB DEFAULT 0 이므로 안전하게 0으로 고정
         d.setViewCnt(0);
 
         Long id = bigPostDao.insert(d);
         d.setId(id);
-
-        // 생성 직후 DB에서 다시 읽어서(view_cnt 포함) 반환하고 싶으면 아래로 교체 가능:
-        // return bigPostDao.findById(id);
 
         return d;
     }
@@ -174,7 +187,6 @@ public class BigBoardController {
     public BigPostDto update(@PathVariable Long id, @RequestBody BigPostDto d) {
         d.setId(id);
 
-        // ✅ 제목 최소 검증(원하면 제거 가능)
         if (d.getTitle() == null || d.getTitle().isBlank()) {
             throw new IllegalArgumentException("제목은 필수입니다.");
         }
@@ -182,13 +194,8 @@ public class BigBoardController {
             d.setContent("");
         }
         if (d.getWriterId() == null || d.getWriterId().isBlank()) {
-            // 수정 시 writerId를 안 보내는 프론트면 기존값 유지가 더 안전하지만,
-            // 일단 정책상 비면 anonymous로 보정
             d.setWriterId("anonymous");
         }
-
-        // ✅ 조회수는 수정 요청에서 건드리지 않도록(프론트가 viewCnt 보내도 무시하고 싶으면)
-        // 여기서는 update SQL이 view_cnt를 건드리지 않으므로 괜찮음.
 
         bigPostDao.update(d);
         return bigPostDao.findById(id);
