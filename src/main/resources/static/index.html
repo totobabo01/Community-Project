@@ -433,8 +433,8 @@
             }
 
             /* =======================================================
-         ✅✅✅ 공구(1~14) 버튼 그리드 UI
-         ======================================================= */
+               ✅✅✅ 공구(1~14) 버튼 그리드 UI
+               ======================================================= */
             .tool-grid {
                 border: 1px solid #e5e7eb;
                 border-radius: 12px;
@@ -456,6 +456,7 @@
                 cursor: pointer;
                 user-select: none;
                 background: #fff;
+                transition: 0.15s;
             }
             .tool-grid .row .cell:last-child {
                 border-right: 0;
@@ -466,12 +467,19 @@
             .tool-grid .cell:hover {
                 background: #f5f7fb;
             }
+
+            /* ✅✅✅ 변경: ON 상태를 "어둡게" 표시 (사용자 시인성 ↑) */
             .tool-grid .cell.active {
-                outline: 2px solid rgba(52, 120, 246, 0.35);
+                background: #111827; /* 어두운 배경 */
+                color: #ffffff; /* 흰 글씨 */
+                font-weight: 800;
+                outline: 2px solid rgba(17, 24, 39, 0.25);
                 outline-offset: -2px;
-                background: rgba(52, 120, 246, 0.06);
-                font-weight: 700;
             }
+            .tool-grid .cell.active:hover {
+                filter: brightness(1.07);
+            }
+
             .tool-grid-title {
                 display: flex;
                 align-items: center;
@@ -665,63 +673,59 @@
                             </button>
                         </div>
 
-                        <!-- =======================================================
-                 ✅✅ FIX: 공구 active 표시를 tramActive 토글이 아니라
-                 컨트롤러의 activeTramSection 하나로만 표시하도록 변경
-                 - (BusController 수정 버전과 정확히 맞음)
-               ======================================================= -->
                         <div class="tool-grid-title">
                             <b>🚋 공구 선택 (1 ~ 14)</b>
                             <span class="hint">클릭하면 해당 공구 노선 경로를 지도에 표시/해제</span>
                         </div>
 
+                        <!-- ✅✅✅ 변경: activeTramSections 로 ON/OFF 표시 -->
                         <div class="tool-grid">
                             <div class="row">
                                 <div
                                     class="cell"
-                                    ng-class="{active: activeTramSection===1}"
+                                    ng-class="{active: !!(activeTramSections && activeTramSections['1'])}"
                                     ng-click="toggleTram && toggleTram(1)"
                                 >
                                     1공구
                                 </div>
                                 <div
                                     class="cell"
-                                    ng-class="{active: activeTramSection===2}"
+                                    ng-class="{active: !!(activeTramSections && activeTramSections['2'])}"
                                     ng-click="toggleTram && toggleTram(2)"
                                 >
                                     2공구
                                 </div>
                                 <div
                                     class="cell"
-                                    ng-class="{active: activeTramSection===3}"
+                                    ng-class="{active: !!(activeTramSections && activeTramSections['3'])}"
                                     ng-click="toggleTram && toggleTram(3)"
                                 >
                                     3공구
                                 </div>
                                 <div
                                     class="cell"
-                                    ng-class="{active: activeTramSection===4}"
+                                    ng-class="{active: !!(activeTramSections && activeTramSections['4'])}"
                                     ng-click="toggleTram && toggleTram(4)"
                                 >
                                     4공구
                                 </div>
                                 <div
                                     class="cell"
-                                    ng-class="{active: activeTramSection===5}"
+                                    ng-class="{active: !!(activeTramSections && activeTramSections['5'])}"
                                     ng-click="toggleTram && toggleTram(5)"
                                 >
                                     5공구
                                 </div>
                                 <div
                                     class="cell"
-                                    ng-class="{active: activeTramSection===6}"
+                                    ng-class="{active: !!(activeTramSections && activeTramSections['6'])}"
                                     ng-click="toggleTram && toggleTram(6)"
                                 >
                                     6공구
                                 </div>
                                 <div
                                     class="cell"
-                                    ng-class="{active: activeTramSection===7}"
+                                    ng-class="{active: !!(activeTramSections && activeTramSections['7'])}"
                                     ng-click="toggleTram && toggleTram(7)"
                                 >
                                     7공구
@@ -730,49 +734,49 @@
                             <div class="row">
                                 <div
                                     class="cell"
-                                    ng-class="{active: activeTramSection===8}"
+                                    ng-class="{active: !!(activeTramSections && activeTramSections['8'])}"
                                     ng-click="toggleTram && toggleTram(8)"
                                 >
                                     8공구
                                 </div>
                                 <div
                                     class="cell"
-                                    ng-class="{active: activeTramSection===9}"
+                                    ng-class="{active: !!(activeTramSections && activeTramSections['9'])}"
                                     ng-click="toggleTram && toggleTram(9)"
                                 >
                                     9공구
                                 </div>
                                 <div
                                     class="cell"
-                                    ng-class="{active: activeTramSection===10}"
+                                    ng-class="{active: !!(activeTramSections && activeTramSections['10'])}"
                                     ng-click="toggleTram && toggleTram(10)"
                                 >
                                     10공구
                                 </div>
                                 <div
                                     class="cell"
-                                    ng-class="{active: activeTramSection===11}"
+                                    ng-class="{active: !!(activeTramSections && activeTramSections['11'])}"
                                     ng-click="toggleTram && toggleTram(11)"
                                 >
                                     11공구
                                 </div>
                                 <div
                                     class="cell"
-                                    ng-class="{active: activeTramSection===12}"
+                                    ng-class="{active: !!(activeTramSections && activeTramSections['12'])}"
                                     ng-click="toggleTram && toggleTram(12)"
                                 >
                                     12공구
                                 </div>
                                 <div
                                     class="cell"
-                                    ng-class="{active: activeTramSection===13}"
+                                    ng-class="{active: !!(activeTramSections && activeTramSections['13'])}"
                                     ng-click="toggleTram && toggleTram(13)"
                                 >
                                     13공구
                                 </div>
                                 <div
                                     class="cell"
-                                    ng-class="{active: activeTramSection===14}"
+                                    ng-class="{active: !!(activeTramSections && activeTramSections['14'])}"
                                     ng-click="toggleTram && toggleTram(14)"
                                 >
                                     14공구
@@ -785,10 +789,10 @@
                             class="status-box"
                             ng-if="statusMessage"
                             ng-class="{
-                'status-success':statusType==='success',
-                'status-error'  :statusType==='error',
-                'status-info'   :statusType==='info'
-              }"
+                                'status-success':statusType==='success',
+                                'status-error'  :statusType==='error',
+                                'status-info'   :statusType==='info'
+                            }"
                         >
                             {{ statusMessage }}
                         </div>
@@ -834,7 +838,8 @@
                                     class="selected-row"
                                     ng-if="!selectedStop && !selectedBus"
                                 >
-                                    지도에서 <b>빨간(정류장)</b> / <b>파란(버스)</b> 마킹을 클릭해보세요.
+                                    지도에서 <b>빨간(정류장)</b> / <b>파란(버스)</b>
+                                    마킹을 클릭해보세요.
                                 </div>
 
                                 <!-- 정류장 선택됨 -->

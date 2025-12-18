@@ -475,7 +475,7 @@
                 lines: [
                     // (1) 세로 라인
                     [
-                        [127.428918, 36.372464],
+                        [127.428975, 36.372575],
                         [127.433642, 36.358172],
                     ],
                     // (2) 가지(가로/분기) 라인
@@ -496,22 +496,177 @@
 
             4: {
                 color: '#111827',
-                coords: [
-                    [127.3970879, 36.357738],
-                    [127.3794764, 36.3606325],
+                lines: [
+                    // (1) 세로 라인
+                    [
+                        [127.379436, 36.360782],
+                        [127.379481, 36.357932],
+                    ],
+                    // (2) 가지(가로/분기) 라인
+                    [
+                        [127.379481, 36.357932],
+                        [127.397032, 36.357796],
+                    ],
                 ],
             },
 
-            5: { color: '#6b7280', routeIds: ['205'] },
-            6: { color: '#9ca3af', routeIds: ['206'] },
-            7: { color: '#d1d5db', routeIds: ['207'] },
-            8: { color: '#991b1b', routeIds: ['208'] },
-            9: { color: '#b91c1c', routeIds: ['209'] },
-            10: { color: '#dc2626', routeIds: ['236', '237'] },
-            11: { color: '#7c2d12', routeIds: ['238'] },
-            12: { color: '#78350f', routeIds: ['239', '240', '201', '202', '203', '204'] },
-            13: { color: '#92400e', routeIds: ['205', '206', '207', '208', '209'] },
-            14: { color: '#1f2937', routeIds: ['210', '211'] },
+            5: {
+                color: '#111827',
+                lines: [
+                    // (1) 세로 라인
+                    [
+                        [127.379492, 36.359859],
+                        [127.37947, 36.376078],
+                    ],
+                    // (2) 가지(가로/분기) 라인
+                    [
+                        [127.37947, 36.376078],
+                        [127.377962, 36.373937],
+                    ],
+                ],
+            },
+
+            6: {
+                color: '#111827',
+                lines: [
+                    // (1) 세로 라인
+                    [
+                        [127.346084, 36.361667],
+                        [127.35225, 36.360385],
+                    ],
+                    // (2) 가지(가로/분기) 라인
+                    [
+                        [127.35225, 36.360385],
+                        [127.377962, 36.373937],
+                    ],
+                ],
+            },
+
+            7: {
+                color: '#111827',
+                lines: [
+                    // (1) 세로 라인
+                    [
+                        [127.337618, 36.340806],
+                        [127.344695, 36.362143],
+                    ],
+                    // (2) 가지(가로/분기) 라인
+                    [
+                        [127.344695, 36.362143],
+                        [127.346084, 36.361667],
+                    ],
+                ],
+            },
+
+            8: {
+                color: '#111827',
+                coords: [
+                    [127.337618, 36.340806],
+                    [127.334901, 36.303332],
+                ],
+            },
+
+            9: {
+                color: '#111827',
+                lines: [
+                    // (1) 세로 라인
+                    [
+                        [127.334901, 36.303332],
+                        [127.334837, 36.301583],
+                    ],
+                    // (2) 가지(가로/분기) 라인
+                    [
+                        [127.323955, 36.299154],
+                        [127.35462, 36.305542],
+                    ],
+                ],
+            },
+
+            10: {
+                color: '#111827',
+                coords: [
+                    [127.35462, 36.305542],
+                    [127.379177, 36.312729],
+                ],
+            },
+
+            11: {
+                color: '#111827',
+                coords: [
+                    [127.379177, 36.312729],
+                    [127.388394, 36.316138],
+                ],
+            },
+
+            12: {
+                color: '#111827',
+                lines: [
+                    [
+                        [127.388394, 36.316138],
+                        [127.412536, 36.322487],
+                    ],
+
+                    [
+                        [127.412536, 36.322487],
+                        [127.417761, 36.318249],
+                    ],
+
+                    [
+                        [127.417761, 36.318249],
+                        [127.43435, 36.320516],
+                    ],
+                ],
+            },
+
+            13: {
+                color: '#111827',
+                lines: [
+                    [
+                        [127.43435, 36.320516],
+                        [127.437863, 36.321764],
+                    ],
+
+                    [
+                        [127.437863, 36.321764],
+                        [127.432647, 36.331287],
+                    ],
+
+                    [
+                        [127.432647, 36.331287],
+                        [127.43769, 36.333109],
+                    ],
+
+                    [
+                        [127.43769, 36.333109],
+                        [127.439895, 36.328407],
+                    ],
+
+                    [
+                        [127.439895, 36.328407],
+                        [127.442972, 36.329544],
+                    ],
+
+                    [
+                        [127.442972, 36.329544],
+                        [127.449616, 36.340203],
+                    ],
+                ],
+            },
+
+            14: {
+                color: '#111827',
+                lines: [
+                    [
+                        [127.449616, 36.340203],
+                        [127.441916, 36.351265],
+                    ],
+
+                    [
+                        [127.441916, 36.351265],
+                        [127.433642, 36.358172],
+                    ],
+                ],
+            },
         };
         /* ====================================================== */
 
@@ -2242,10 +2397,12 @@
             resetBusView();
         });
 
-        $scope.activeTramSection = null;
+        $scope.activeTramSections = {}; // 멀티 ON 상태 저장
 
         $scope.toggleTram = function (sectionNo) {
             const cfg = TRAM_ROUTES[sectionNo];
+            const key = String(sectionNo);
+
             console.log('[TRAM] toggleTram clicked:', sectionNo, cfg);
 
             if (!cfg) {
@@ -2253,23 +2410,19 @@
                 return;
             }
 
+            // ✅ 레이어/지도 준비
             const ok = ensureTramLayer(cfg.color);
-            if (!ok || !tramVectorSource) {
+            if (!ok || !tramVectorLayer) {
                 setStatus('error', '지도가 아직 준비되지 않았습니다. 잠시 후 다시 눌러주세요.', 1500);
                 return;
             }
 
-            // ✅ 같은 공구 다시 누르면 끄기
-            if ($scope.activeTramSection === sectionNo && tramVectorSource.getFeatures().length > 0) {
-                tramVectorSource.clear();
-                $scope.activeTramSection = null;
-                console.log('[TRAM] OFF section=', sectionNo);
+            // ✅ source는 레이어에서 확실히 가져오기 (null 방지)
+            const src = tramVectorLayer.getSource && tramVectorLayer.getSource();
+            if (!src) {
+                setStatus('error', '트램 소스가 아직 준비되지 않았습니다. 잠시 후 다시 눌러주세요.', 1500);
                 return;
             }
-
-            // ✅ 다른 공구 켜기
-            tramVectorSource.clear();
-            $scope.activeTramSection = sectionNo;
 
             // ✅ 현재 지도 projection 가져오기
             const map = getInnerOlMap();
@@ -2288,6 +2441,33 @@
                 return [lon, lat];
             }
 
+            // ✅ 현재 ON 상태
+            const isOn = !!$scope.activeTramSections[key];
+
+            // =====================================================
+            // ✅ OFF: 해당 공구(sectionNo) feature만 제거
+            // =====================================================
+            if (isOn) {
+                const features = (src.getFeatures && src.getFeatures()) || [];
+                features.forEach(function (f) {
+                    if (String(f.get('tramSection')) === key) {
+                        src.removeFeature(f);
+                    }
+                });
+
+                delete $scope.activeTramSections[key];
+                console.log('[TRAM] OFF section=', sectionNo);
+
+                // 남은 라인 범위로 화면 이동(없으면 그냥 무시됨)
+                fitToTramExtent();
+                return;
+            }
+
+            // =====================================================
+            // ✅ ON: 기존 라인은 유지하고 "추가"만 한다 (멀티 ON)
+            // =====================================================
+            $scope.activeTramSections[key] = true;
+
             // ✅ 1) lines 우선 지원 (여러 LineString)
             const lines = Array.isArray(cfg.lines) ? cfg.lines : null;
 
@@ -2303,10 +2483,10 @@
                     const projected = oneLine.map(toProjected).filter(Boolean);
                     if (projected.length < 2) return;
 
-                    tramVectorSource.addFeature(
+                    src.addFeature(
                         new ol.Feature({
                             geometry: new ol.geom.LineString(projected),
-                            tramSection: sectionNo,
+                            tramSection: key, // ✅ 문자열로 통일
                             lineIndex: idx,
                         })
                     );
@@ -2316,10 +2496,10 @@
                 const projected = coords.map(toProjected).filter(Boolean);
 
                 if (projected.length >= 2) {
-                    tramVectorSource.addFeature(
+                    src.addFeature(
                         new ol.Feature({
                             geometry: new ol.geom.LineString(projected),
-                            tramSection: sectionNo,
+                            tramSection: key, // ✅ 문자열로 통일
                             lineIndex: 0,
                         })
                     );
@@ -2328,13 +2508,15 @@
             } else {
                 console.warn('[TRAM] coords/lines 없음 또는 부족:', sectionNo, cfg);
                 setStatus('error', '이 공구의 좌표(coords/lines)가 아직 없습니다.', 1500);
+                delete $scope.activeTramSections[key]; // ✅ 실패했으면 ON 상태도 되돌림
                 return;
             }
 
-            console.log('[TRAM] 공구 표시 완료:', sectionNo, 'addedLines=', added, 'features=', tramVectorSource.getFeatures().length);
+            console.log('[TRAM] ON section=', sectionNo, 'addedLines=', added, 'totalFeatures=', (src.getFeatures && src.getFeatures().length) || 0);
 
             if (!added) {
                 setStatus('error', '좌표 변환 후 라인을 그릴 수 없습니다.', 1500);
+                delete $scope.activeTramSections[key];
                 return;
             }
 
