@@ -46,6 +46,7 @@
         <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
         <!-- App -->
+        <script src="/tram-data.js"></script>
         <script src="/app.js"></script>
 
         <style>
@@ -495,6 +496,197 @@
                 font-size: 12px;
                 color: #6b7280;
             }
+
+            /* =======================================================
+               ✅✅✅ (추가) 기능 패널: 소요시간 수집 + 최단경로 UI
+               ======================================================= */
+            .feature-panels {
+                display: flex;
+                gap: 16px;
+                margin: 12px 0 14px;
+                flex-wrap: wrap;
+            }
+            .panel-card {
+                flex: 1 1 480px;
+                background: #fff;
+                border: 1px solid #e8eef6;
+                border-radius: 14px;
+                padding: 14px 14px 12px;
+                box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+            }
+            .panel-title {
+                display: flex;
+                gap: 10px;
+                align-items: flex-start;
+                margin-bottom: 10px;
+            }
+            .panel-title .dot {
+                width: 10px;
+                height: 10px;
+                background: #3b82f6;
+                border-radius: 999px;
+                margin-top: 6px;
+            }
+            .panel-title .title {
+                font-weight: 800;
+                font-size: 15px;
+                color: #111827;
+            }
+            .panel-title .desc {
+                font-size: 12px;
+                color: #64748b;
+                margin-top: 2px;
+            }
+            .panel-body .frow {
+                display: flex;
+                gap: 10px;
+                align-items: center;
+                margin-bottom: 10px;
+                flex-wrap: wrap;
+            }
+            .flbl {
+                width: 120px;
+                font-size: 12px;
+                color: #334155;
+                font-weight: 700;
+            }
+            .finp {
+                flex: 1 1 220px;
+                height: 36px;
+                border: 1px solid #dbe7f5;
+                border-radius: 10px;
+                padding: 0 10px;
+                background: #fff;
+            }
+            .finp.small {
+                flex: 0 0 110px;
+            }
+            .factions {
+                display: flex;
+                gap: 10px;
+                flex-wrap: wrap;
+                margin-top: 6px;
+            }
+            .fbtn {
+                height: 36px;
+                padding: 0 12px;
+                border-radius: 10px;
+                border: 1px solid #dbe7f5;
+                background: #fff;
+                cursor: pointer;
+            }
+            .fbtn.primary {
+                background: #22c55e;
+                border-color: #22c55e;
+                color: #fff;
+                font-weight: 800;
+            }
+            .fbtn:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+            .fstatus {
+                display: flex;
+                gap: 8px;
+                align-items: center;
+                margin-top: 10px;
+                font-size: 12px;
+                color: #334155;
+            }
+            .fbadge {
+                padding: 3px 8px;
+                border-radius: 999px;
+                font-weight: 800;
+                background: #e0f2fe;
+                color: #075985;
+            }
+            .fbadge.error {
+                background: #fee2e2;
+                color: #991b1b;
+            }
+            .fbadge.ok {
+                background: #dcfce7;
+                color: #166534;
+            }
+
+            .pick-row {
+                display: flex;
+                gap: 12px;
+                margin: 6px 0 10px;
+                flex-wrap: wrap;
+            }
+            .pick-col {
+                flex: 1 1 300px;
+                border: 1px dashed #dbe7f5;
+                border-radius: 12px;
+                padding: 10px;
+                background: #fbfdff;
+            }
+            .pick-title {
+                font-size: 12px;
+                font-weight: 900;
+                color: #334155;
+                margin-bottom: 8px;
+            }
+            .pick-list {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                max-height: 160px;
+                overflow: auto;
+            }
+            .pick-item {
+                text-align: left;
+                border: 1px solid #e5eef9;
+                background: #fff;
+                border-radius: 10px;
+                padding: 8px 10px;
+                cursor: pointer;
+            }
+            .pick-item.active {
+                border-color: #22c55e;
+                box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
+            }
+            .pick-item .nm {
+                font-weight: 800;
+                font-size: 13px;
+                color: #111827;
+            }
+            .pick-item .meta {
+                font-size: 11px;
+                color: #64748b;
+                margin-top: 2px;
+            }
+            .empty {
+                font-size: 12px;
+                color: #94a3b8;
+                padding: 10px 6px;
+            }
+
+            .result-box {
+                margin-top: 10px;
+                border: 1px solid #e5eef9;
+                border-radius: 12px;
+                padding: 10px;
+                background: #f8fafc;
+            }
+            .result-title {
+                font-weight: 900;
+                margin-bottom: 6px;
+                color: #111827;
+            }
+            .result-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 6px 10px;
+                font-size: 12px;
+                color: #334155;
+            }
+            .hint2 {
+                margin-top: 6px;
+                font-size: 11px;
+                color: #64748b;
+            }
         </style>
     </head>
 
@@ -671,6 +863,254 @@
                             >
                                 수동갱신
                             </button>
+                        </div>
+
+                        <!-- ✅✅✅ (추가) 기능 UI 패널 2개 -->
+                        <div class="feature-panels">
+                            <!-- A) 소요시간 수집 -->
+                            <div class="panel-card">
+                                <div class="panel-title">
+                                    <span class="dot"></span>
+                                    <div>
+                                        <div class="title">⏱ 정류장 간 소요시간 수집</div>
+                                        <div class="desc">도착정보(남은 시간)를 주기적으로 모아서 DB 저장용</div>
+                                    </div>
+                                </div>
+
+                                <div class="panel-body">
+                                    <div class="frow">
+                                        <label class="flbl">노선 routeId</label>
+                                        <input
+                                            class="finp"
+                                            type="text"
+                                            ng-model="collect.routeId"
+                                            placeholder="예) DJB303000001"
+                                        />
+                                        <label
+                                            class="flbl"
+                                            style="width: auto"
+                                            >주기(초)</label
+                                        >
+                                        <input
+                                            class="finp small"
+                                            type="number"
+                                            ng-model="collect.periodSec"
+                                            placeholder="10"
+                                            min="5"
+                                        />
+                                    </div>
+
+                                    <div class="frow">
+                                        <label class="flbl">도시코드</label>
+                                        <input
+                                            class="finp small"
+                                            type="text"
+                                            ng-model="collect.cityCode"
+                                            placeholder="25"
+                                        />
+                                        <label
+                                            class="flbl"
+                                            style="width: auto"
+                                            >저장 방식</label
+                                        >
+                                        <select
+                                            class="finp"
+                                            ng-model="collect.mode"
+                                        >
+                                            <option value="ARRIVAL_TO_EDGE">도착정보 → 정류장간 추정시간</option>
+                                            <option value="RAW_ARRIVAL">도착정보 원본 저장</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="factions">
+                                        <button
+                                            class="fbtn primary"
+                                            ng-click="startCollect()"
+                                            ng-disabled="collecting"
+                                        >
+                                            ▶ 수집 시작
+                                        </button>
+                                        <button
+                                            class="fbtn"
+                                            ng-click="stopCollect()"
+                                            ng-disabled="!collecting"
+                                        >
+                                            ■ 수집 중지
+                                        </button>
+                                        <button
+                                            class="fbtn"
+                                            ng-click="collectOnce()"
+                                        >
+                                            ⟳ 1회 수집 테스트
+                                        </button>
+                                    </div>
+
+                                    <div
+                                        class="fstatus"
+                                        ng-if="collectStatusMsg"
+                                    >
+                                        <span
+                                            class="fbadge"
+                                            ng-class="collectStatusType"
+                                            >{{collectStatusType || 'info'}}</span
+                                        >
+                                        <span>{{collectStatusMsg}}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- B) 최단경로 -->
+                            <div class="panel-card">
+                                <div class="panel-title">
+                                    <span class="dot"></span>
+                                    <div>
+                                        <div class="title">🧭 최단경로 찾기</div>
+                                        <div class="desc">출발/도착 선택 → 최단경로 계산 → polyline 표시</div>
+                                    </div>
+                                </div>
+
+                                <div class="panel-body">
+                                    <div class="frow">
+                                        <label class="flbl">출발</label>
+                                        <input
+                                            class="finp"
+                                            type="text"
+                                            ng-model="path.fromKeyword"
+                                            placeholder="정류장 이름 (예: 신성동)"
+                                        />
+                                        <button
+                                            class="fbtn"
+                                            ng-click="searchFrom()"
+                                        >
+                                            검색
+                                        </button>
+
+                                        <label class="flbl">도착</label>
+                                        <input
+                                            class="finp"
+                                            type="text"
+                                            ng-model="path.toKeyword"
+                                            placeholder="정류장 이름 (예: 유성복합터미널)"
+                                        />
+                                        <button
+                                            class="fbtn"
+                                            ng-click="searchTo()"
+                                        >
+                                            검색
+                                        </button>
+                                    </div>
+
+                                    <div class="pick-row">
+                                        <div class="pick-col">
+                                            <div class="pick-title">출발 후보</div>
+                                            <div class="pick-list">
+                                                <button
+                                                    class="pick-item"
+                                                    ng-repeat="s in path.fromCandidates"
+                                                    ng-click="selectFrom(s)"
+                                                    ng-class="{active: path.from && (path.from.stopId===s.stopId)}"
+                                                >
+                                                    <div class="nm">{{s.name}}</div>
+                                                    <div class="meta">{{s.stopId}}</div>
+                                                </button>
+                                                <div
+                                                    class="empty"
+                                                    ng-if="!path.fromCandidates || path.fromCandidates.length===0"
+                                                >
+                                                    검색 결과 없음
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="pick-col">
+                                            <div class="pick-title">도착 후보</div>
+                                            <div class="pick-list">
+                                                <button
+                                                    class="pick-item"
+                                                    ng-repeat="s in path.toCandidates"
+                                                    ng-click="selectTo(s)"
+                                                    ng-class="{active: path.to && (path.to.stopId===s.stopId)}"
+                                                >
+                                                    <div class="nm">{{s.name}}</div>
+                                                    <div class="meta">{{s.stopId}}</div>
+                                                </button>
+                                                <div
+                                                    class="empty"
+                                                    ng-if="!path.toCandidates || path.toCandidates.length===0"
+                                                >
+                                                    검색 결과 없음
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="frow">
+                                        <label class="flbl">모드</label>
+                                        <select
+                                            class="finp"
+                                            ng-model="path.mode"
+                                        >
+                                            <option value="BUS">버스만</option>
+                                            <option value="TRAM">트램만</option>
+                                            <option value="MIXED">버스+트램(환승 허용)</option>
+                                        </select>
+
+                                        <label
+                                            class="flbl"
+                                            style="width: auto"
+                                            >가중치</label
+                                        >
+                                        <select
+                                            class="finp"
+                                            ng-model="path.weight"
+                                        >
+                                            <option value="DIST">거리(미터) 최단</option>
+                                            <option value="TIME">시간(초) 최단</option>
+                                        </select>
+
+                                        <button
+                                            class="fbtn primary"
+                                            ng-click="findShortestPath()"
+                                            ng-disabled="!path.from || !path.to"
+                                        >
+                                            🚀 최단경로 계산
+                                        </button>
+
+                                        <button
+                                            class="fbtn"
+                                            ng-click="clearPath()"
+                                        >
+                                            🧹 경로 지우기
+                                        </button>
+                                    </div>
+
+                                    <div
+                                        class="fstatus"
+                                        ng-if="pathStatusMsg"
+                                    >
+                                        <span
+                                            class="fbadge"
+                                            ng-class="pathStatusType"
+                                            >{{pathStatusType || 'info'}}</span
+                                        >
+                                        <span>{{pathStatusMsg}}</span>
+                                    </div>
+
+                                    <div
+                                        class="result-box"
+                                        ng-if="pathResult"
+                                    >
+                                        <div class="result-title">결과</div>
+                                        <div class="result-grid">
+                                            <div><b>총 거리</b> {{pathResult.totalDistM}} m</div>
+                                            <div><b>총 시간</b> {{pathResult.totalTimeSec}} sec</div>
+                                            <div><b>정류장 수</b> {{pathResult.nodesCount}}</div>
+                                            <div><b>환승</b> {{pathResult.transfersCount}}</div>
+                                        </div>
+                                        <div class="hint2">※ 지도에 파란 polyline으로 경로를 표시합니다.</div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="tool-grid-title">

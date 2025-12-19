@@ -1063,6 +1063,121 @@
             return true;
         }
 
+        // ================== TRAM: station(숫자) 레이어 ==================
+        let tramStationSource = null;
+        let tramStationLayer = null;
+
+        function ensureTramStationLayer() {
+            const map = getInnerOlMap();
+            if (!map || !window.ol) return;
+
+            if (!tramStationSource) tramStationSource = new ol.source.Vector();
+
+            if (!tramStationLayer) {
+                // ✅ 스타일: 흰 원 + 테두리 + 가운데 숫자
+                const styleFn = function (feature) {
+                    const id = feature.get('stationId');
+                    const txt = id != null ? String(id) : '';
+
+                    return new ol.style.Style({
+                        image: new ol.style.Circle({
+                            radius: 10,
+                            fill: new ol.style.Fill({ color: 'white' }),
+                            stroke: new ol.style.Stroke({ color: '#c0392b', width: 3 }), // 빨강 테두리
+                        }),
+                        text: new ol.style.Text({
+                            text: txt,
+                            font: 'bold 12px sans-serif',
+                            fill: new ol.style.Fill({ color: '#111827' }),
+                            stroke: new ol.style.Stroke({ color: 'white', width: 3 }), // 숫자 테두리(가독성)
+                            offsetY: 0,
+                        }),
+                        zIndex: 9999,
+                    });
+                };
+
+                tramStationLayer = new ol.layer.Vector({
+                    source: tramStationSource,
+                    style: styleFn,
+                    zIndex: 9999,
+                });
+
+                map.addLayer(tramStationLayer);
+            }
+        }
+
+        // ================== TRAM: 공구별 station(숫자) 찍기 ==================
+        function addStationsForSection(sectionNo) {
+            // 1) station 레이어 준비
+            ensureTramStationLayer();
+
+            const map = getInnerOlMap();
+            if (!map || !window.ol || !tramStationSource) return;
+
+            // 2) 데이터 존재 확인 (네가 올린 그대로 window에 있음)
+            const all = window.TRAM_STATIONS || window.TRAM_ROUTE_FULL_HD || [];
+            if (!Array.isArray(all) || !all.length) {
+                console.warn('[TRAM] TRAM_STATIONS 데이터가 없음');
+                return;
+            }
+
+            // 3) 공구 문자열(예: "1구간") 만들기
+            const sectionKey = String(sectionNo) + '구간';
+
+            // 4) 현재 map projection
+            const view = map.getView && map.getView();
+            const proj = view && view.getProjection ? view.getProjection() : mapProjection;
+
+            // 5) 해당 공구의 station만 골라서 feature 추가
+            let added = 0;
+
+            all.forEach(function (p) {
+                if (!p) return;
+                if (p.type !== 'station') return;
+                if (String(p.section || '') !== sectionKey) return;
+
+                const lon = parseFloat(p.lng);
+                const lat = parseFloat(p.lat);
+                if (!isFinite(lon) || !isFinite(lat)) return;
+
+                let coord = [lon, lat];
+                if (proj && ol.proj && ol.proj.transform) {
+                    coord = ol.proj.transform([lon, lat], 'EPSG:4326', proj);
+                }
+
+                const f = new ol.Feature({
+                    geometry: new ol.geom.Point(coord),
+                });
+
+                // ✅ 스타일 함수에서 읽는 값
+                f.set('stationId', p.id); // 숫자 표시
+                f.set('tramSection', String(sectionNo)); // 나중에 OFF할 때 제거용
+                f.set('kind', 'tramStation'); // (선택) 클릭판단/디버그용
+                f.set('station', p); // (선택) 팝업/정보용
+
+                tramStationSource.addFeature(f);
+                added++;
+            });
+
+            console.log('[TRAM] station add section=', sectionNo, 'added=', added);
+        }
+
+        function removeStationsForSection(sectionNo) {
+            ensureTramStationLayer();
+            if (!tramStationSource) return;
+
+            const key = String(sectionNo);
+            const features = (tramStationSource.getFeatures && tramStationSource.getFeatures()) || [];
+
+            features.forEach(function (f) {
+                if (String(f.get('tramSection')) === key) {
+                    tramStationSource.removeFeature(f);
+                }
+            });
+
+            console.log('[TRAM] station remove section=', sectionNo);
+        }
+
         // ✅ (추가) 트램(공구) 라인들이 있는 범위로 화면 자동 이동
         function fitToTramExtent() {
             try {
@@ -1920,18 +2035,96 @@
             loadArrivalAndBus(currentNodeId);
         };
 
-        // ================== 정류장 검색 ==================
+        // ================== 정류장 검색 (✅ 빈 입력이면 "전체 정류장" 조회) ==================
         $scope.searchStops = function () {
             const kw = ($scope.keyword || '').trim();
-            if (!kw) {
-                setStatus('error', '정류장 이름을 입력해주세요.', 1500);
-                return;
-            }
 
             initMap();
+
+            // ✅ 공통: 정류장 객체에서 위경도 추출(필드명이 계속 달라서 통일)
+            function pickLatLon(stop) {
+                const rawLat = stop.gpslati || stop.gpsLat || stop.lat || stop.latitude || stop.gpsLati || stop.gpslAti;
+                const rawLon = stop.gpslong || stop.gpsLong || stop.lon || stop.lng || stop.longitude || stop.gpsLongi || stop.gpsLongt;
+
+                const lat = parseFloat(rawLat);
+                const lon = parseFloat(rawLon);
+
+                if (isFinite(lat) && isFinite(lon)) return { lat: lat, lon: lon };
+                return null;
+            }
+
+            // ✅ 공통: 실패/초기화 루틴(중복 제거)
+            function resetSelectionAndLayers() {
+                $scope.arrivals = [];
+                $scope.selectedStop = null;
+                $scope.selectedBus = null;
+                currentNodeId = null;
+                currentStopCoord = null;
+                lastPickedKey = null;
+                lastPickedKind = null;
+                hideMapPopup();
+
+                if (busVectorSource) {
+                    busVectorSource.clear();
+                    busFeatureMap.clear();
+                    busLastSeen.clear();
+                }
+                if (routeVectorSource) routeVectorSource.clear();
+            }
+
+            // ✅ (1) 검색어가 없으면: 전체 정류장 조회
+            if (!kw) {
+                setStatus('info', '전체 정류장 불러오는 중...', 0);
+
+                return $http
+                    .get('/api/bus/stops/all', {
+                        params: {
+                            cityCode: CITY_CODE,
+                            numOfRows: 1000, // 서버 페이지 합치기 "힌트"
+                        },
+                    })
+                    .then(function (res) {
+                        const list = Array.isArray(res.data) ? res.data : [];
+
+                        // ✅ 스코프 반영 안정화(대용량일 때 가끔 UI 반영 늦는 거 방지)
+                        $scope.$evalAsync(function () {
+                            $scope.stops = list;
+                        });
+
+                        ensureMapSize();
+
+                        if (!list.length) {
+                            setStatus('error', '❗ 전체 정류장을 찾지 못했습니다.', 2000);
+                            resetSelectionAndLayers();
+                            return;
+                        }
+
+                        // ✅ 첫 정류장으로 이동만(전체조회에서 도착정보/폴링 자동 시작은 비추천)
+                        const first = list[0];
+                        const coord = pickLatLon(first);
+                        currentStopCoord = coord;
+
+                        moveMapToStop(first, true);
+
+                        currentNodeId = first.nodeid || first.nodeId || first.nodeno || first.nodeNo;
+
+                        // ✅ (권장) 전체조회에서는 자동 도착정보 호출/폴링 OFF
+                        //    너무 무거워질 수 있음. 필요하면 아래 2줄 주석 해제.
+                        // if (currentNodeId) { loadArrivalAndBus(currentNodeId); startPolling(); }
+
+                        setStatus('success', `✅ 전체 정류장 ${list.length}곳을 불러왔습니다.`, 2500);
+                    })
+                    .catch(function (err) {
+                        console.error('[BusController] 전체 정류장 조회 실패:', err);
+                        setStatus('error', '❌ 전체 정류장 정보를 불러오지 못했습니다.', 2500);
+                        resetSelectionAndLayers();
+                    });
+            }
+
+            // ✅ (2) 검색어가 있으면: 기존처럼 키워드 검색
             setStatus('info', '정류장 검색 중...', 0);
 
-            $http
+            return $http
                 .get('/api/bus/stops', {
                     params: {
                         cityCode: CITY_CODE,
@@ -1957,34 +2150,13 @@
 
                     if (!filtered.length) {
                         setStatus('error', `❗ "${kw}" 정류장을 찾지 못했습니다.`, 2000);
-                        $scope.arrivals = [];
-                        $scope.selectedStop = null;
-                        $scope.selectedBus = null;
-                        currentNodeId = null;
-                        currentStopCoord = null;
-                        lastPickedKey = null;
-                        lastPickedKind = null;
-                        hideMapPopup();
-
-                        if (busVectorSource) {
-                            busVectorSource.clear();
-                            busFeatureMap.clear();
-                            busLastSeen.clear();
-                        }
-                        if (routeVectorSource) routeVectorSource.clear();
+                        resetSelectionAndLayers();
                         return;
                     }
 
                     const first = filtered[0];
-
-                    (function setCurrentStopFrom(firstStop) {
-                        const rawLat = firstStop.gpslati || firstStop.gpsLat || firstStop.lat || firstStop.latitude;
-                        const rawLon = firstStop.gpslong || firstStop.gpsLong || firstStop.lon || firstStop.lng || firstStop.longitude;
-                        const lat = parseFloat(rawLat);
-                        const lon = parseFloat(rawLon);
-                        if (isFinite(lat) && isFinite(lon)) currentStopCoord = { lat: lat, lon: lon };
-                        else currentStopCoord = null;
-                    })(first);
+                    const coord = pickLatLon(first);
+                    currentStopCoord = coord;
 
                     moveMapToStop(first, true);
 
@@ -2000,20 +2172,7 @@
                 .catch(function (err) {
                     console.error('[BusController] 정류장 조회 실패:', err);
                     setStatus('error', '❌ 정류장 정보를 불러오지 못했습니다.', 2500);
-                    $scope.arrivals = [];
-                    $scope.selectedStop = null;
-                    $scope.selectedBus = null;
-                    currentNodeId = null;
-                    currentStopCoord = null;
-                    lastPickedKey = null;
-                    lastPickedKind = null;
-                    hideMapPopup();
-                    if (busVectorSource) {
-                        busVectorSource.clear();
-                        busFeatureMap.clear();
-                        busLastSeen.clear();
-                    }
-                    if (routeVectorSource) routeVectorSource.clear();
+                    resetSelectionAndLayers();
                 });
         };
 
@@ -2445,15 +2604,19 @@
             const isOn = !!$scope.activeTramSections[key];
 
             // =====================================================
-            // ✅ OFF: 해당 공구(sectionNo) feature만 제거
+            // ✅ OFF: 해당 공구(sectionNo) feature만 제거 (라인 + station)
             // =====================================================
             if (isOn) {
+                // (1) 라인 제거
                 const features = (src.getFeatures && src.getFeatures()) || [];
                 features.forEach(function (f) {
                     if (String(f.get('tramSection')) === key) {
                         src.removeFeature(f);
                     }
                 });
+
+                // ✅✅ (추가) station 숫자 마커도 같이 OFF
+                removeStationsForSection(sectionNo);
 
                 delete $scope.activeTramSections[key];
                 console.log('[TRAM] OFF section=', sectionNo);
@@ -2519,6 +2682,9 @@
                 delete $scope.activeTramSections[key];
                 return;
             }
+
+            // ✅✅ (추가) 라인이 ON 되면 해당 공구의 station 숫자 마커도 같이 ON
+            addStationsForSection(sectionNo);
 
             // ✅ 라인 범위로 화면 이동
             fitToTramExtent();
