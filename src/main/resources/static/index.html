@@ -197,10 +197,15 @@
                 background: #ffffff;
                 color: #263238;
                 border: 1px solid var(--gray-400);
+                transition: 0.15s ease;
             }
             .search-box .btn-aux:hover {
                 box-shadow: 0 3px 10px rgba(0, 0, 0, 0.06);
                 transform: translateY(-1px);
+            }
+            .search-box .btn-aux:active {
+                transform: translateY(0px);
+                box-shadow: none;
             }
 
             .status-box {
@@ -229,22 +234,20 @@
             /* 지도 박스 */
             #output {
                 height: 420px;
-                min-height: 420px; /* 🔥 높이 고정 */
+                min-height: 420px;
                 overflow: hidden;
                 padding: 0;
                 border: 1px solid #edf0f5;
                 border-radius: 12px;
                 background: #fbfdff;
-                position: relative; /* 팝업 위치 기준 */
+                position: relative;
             }
 
-            /* ★ NGII/OpenLayers 지도 컨테이너 (CSS 보조) */
             #busMap {
                 width: 100%;
                 height: 100%;
             }
 
-            /* ★ 지도 팝업 박스 */
             .map-popup {
                 position: absolute;
                 background: #ffffff;
@@ -300,7 +303,6 @@
                 display: none;
             }
 
-            /* 🔹 지도 + 정류장/도착정보 레이아웃 (세로 배치) */
             .bus-layout {
                 display: block;
             }
@@ -308,7 +310,6 @@
                 margin-bottom: 12px;
             }
 
-            /* ✅ 선택된 마커 정보 패널(추가) */
             .selected-panel {
                 border: 1px solid #edf0f5;
                 border-radius: 12px;
@@ -389,7 +390,6 @@
                 margin-top: 2px;
             }
 
-            /* 🔹 도착 정보 리스트 (번호 왼쪽, 메시지 오른쪽) */
             .arrival-list {
                 border: 1px solid #edf0f5;
                 border-radius: 12px;
@@ -411,7 +411,7 @@
                 border-radius: 8px;
                 display: flex;
                 align-items: center;
-                justify-content: space-between; /* 🔥 번호-문구 양 끝 정렬 */
+                justify-content: space-between;
                 font-size: 13px;
                 cursor: pointer;
             }
@@ -424,18 +424,16 @@
             .arrival-route {
                 font-weight: 700;
                 color: #1f2933;
-                min-width: 48px; /* 🔥 번호 칸 고정 폭 */
+                min-width: 48px;
                 text-align: left;
             }
             .arrival-msg {
                 color: #4b5563;
                 flex: 1;
-                text-align: right; /* 🔥 도착 문구를 오른쪽 정렬 */
+                text-align: right;
             }
 
-            /* =======================================================
-               ✅✅✅ 공구(1~14) 버튼 그리드 UI
-               ======================================================= */
+            /* 공구 그리드 */
             .tool-grid {
                 border: 1px solid #e5e7eb;
                 border-radius: 12px;
@@ -468,11 +466,9 @@
             .tool-grid .cell:hover {
                 background: #f5f7fb;
             }
-
-            /* ✅✅✅ 변경: ON 상태를 "어둡게" 표시 (사용자 시인성 ↑) */
             .tool-grid .cell.active {
-                background: #111827; /* 어두운 배경 */
-                color: #ffffff; /* 흰 글씨 */
+                background: #111827;
+                color: #ffffff;
                 font-weight: 800;
                 outline: 2px solid rgba(17, 24, 39, 0.25);
                 outline-offset: -2px;
@@ -497,9 +493,7 @@
                 color: #6b7280;
             }
 
-            /* =======================================================
-               ✅✅✅ (추가) 기능 패널: 소요시간 수집 + 최단경로 UI
-               ======================================================= */
+            /* 기능 패널 */
             .feature-panels {
                 display: flex;
                 gap: 16px;
@@ -574,6 +568,7 @@
                 border: 1px solid #dbe7f5;
                 background: #fff;
                 cursor: pointer;
+                transition: 0.15s ease;
             }
             .fbtn.primary {
                 background: #22c55e;
@@ -581,10 +576,39 @@
                 color: #fff;
                 font-weight: 800;
             }
+
+            /* ✅✅ "1회 수집 테스트(저장)" 버튼을 다른 버튼처럼 보이게 (초록 계열) */
+            .fbtn.test-save {
+                background: #22c55e;
+                border-color: #22c55e;
+                color: #fff;
+                font-weight: 800;
+            }
+            .fbtn.test-save:hover:not(:disabled) {
+                filter: brightness(0.97);
+                box-shadow: 0 4px 14px rgba(34, 197, 94, 0.18);
+                transform: translateY(-1px);
+            }
+            .fbtn.test-save:active:not(:disabled) {
+                transform: translateY(0px);
+                box-shadow: none;
+            }
+
+            .fbtn:hover:not(:disabled) {
+                box-shadow: 0 3px 10px rgba(0, 0, 0, 0.06);
+                transform: translateY(-1px);
+            }
+            .fbtn:active:not(:disabled) {
+                transform: translateY(0px);
+                box-shadow: none;
+            }
             .fbtn:disabled {
                 opacity: 0.5;
                 cursor: not-allowed;
+                transform: none;
+                box-shadow: none;
             }
+
             .fstatus {
                 display: flex;
                 gap: 8px;
@@ -707,8 +731,8 @@
                     ng-init="mBoard={_open:false}; mAdmin={_open:false}"
                 >
                     <div class="item">
-                        <!-- ✅ data-bus-menu 추가: 버스 탭 리셋용 -->
                         <a
+                            id="busMenuLink"
                             href="#/users?tab=bus"
                             data-bus-menu="1"
                             ng-click="$event.preventDefault(); goBusTab()"
@@ -744,8 +768,6 @@
                                 ng-click="navTo('#/board/big', $event)"
                                 >대용량 게시판 테스트</a
                             >
-
-                            <!-- ✅ (추가) 게시판 통계 -->
                             <a
                                 href="#/board/stats"
                                 ng-click="navTo('#/board/stats', $event)"
@@ -844,7 +866,6 @@
                                 검색
                             </button>
 
-                            <!-- ✅ (수정) 기존 resetBusView는 scope에 없어서 동작 안 함 → resetBus()로 연결 -->
                             <button
                                 type="button"
                                 class="btn-aux"
@@ -854,7 +875,6 @@
                                 새로고침
                             </button>
 
-                            <!-- ✅ (추가) 수동 새로고침(폴링 즉시 실행) 버튼: BusController에 refreshNow 있음 -->
                             <button
                                 type="button"
                                 class="btn-aux"
@@ -865,7 +885,7 @@
                             </button>
                         </div>
 
-                        <!-- ✅✅✅ (추가) 기능 UI 패널 2개 -->
+                        <!-- ✅✅✅ 기능 UI 패널 2개 -->
                         <div class="feature-panels">
                             <!-- A) 소요시간 수집 -->
                             <div class="panel-card">
@@ -873,19 +893,60 @@
                                     <span class="dot"></span>
                                     <div>
                                         <div class="title">⏱ 정류장 간 소요시간 수집</div>
-                                        <div class="desc">도착정보(남은 시간)를 주기적으로 모아서 DB 저장용</div>
+                                        <div class="desc">출발/도착 선택 → (출발 정류장 도착정보로) 노선 선택(routeId 자동) → 주기 수집</div>
                                     </div>
                                 </div>
 
                                 <div class="panel-body">
-                                    <div class="frow">
-                                        <label class="flbl">노선 routeId</label>
+                                    <input
+                                        type="hidden"
+                                        ng-model="collect.cityCode"
+                                    />
+                                    <div
+                                        class="fstatus"
+                                        style="margin-top: 0"
+                                    >
+                                        <span class="fbadge ok">CITY</span>
+                                        <span>대전 고정 (cityCode = {{collect.cityCode}})</span>
+                                    </div>
+
+                                    <!-- ✅ 출발/도착 검색 입력 -->
+                                    <div
+                                        class="frow"
+                                        style="margin-top: 10px"
+                                    >
+                                        <label class="flbl">출발</label>
                                         <input
                                             class="finp"
                                             type="text"
-                                            ng-model="collect.routeId"
-                                            placeholder="예) DJB303000001"
+                                            ng-model="collect.fromKeyword"
+                                            placeholder="출발 정류장 이름 (예: 시청)"
+                                            ng-keypress="$event.which===13 && (searchCollectFrom && searchCollectFrom())"
                                         />
+                                        <button
+                                            class="fbtn"
+                                            type="button"
+                                            ng-click="searchCollectFrom && searchCollectFrom()"
+                                        >
+                                            검색
+                                        </button>
+
+                                        <label class="flbl">도착</label>
+                                        <input
+                                            class="finp"
+                                            type="text"
+                                            ng-model="collect.toKeyword"
+                                            placeholder="도착 정류장 이름 (예: 정부청사)"
+                                            ng-keypress="$event.which===13 && (searchCollectTo && searchCollectTo())"
+                                        />
+                                        <button
+                                            class="fbtn"
+                                            type="button"
+                                            ng-click="searchCollectTo && searchCollectTo()"
+                                        >
+                                            검색
+                                        </button>
+
                                         <label
                                             class="flbl"
                                             style="width: auto"
@@ -900,48 +961,174 @@
                                         />
                                     </div>
 
-                                    <div class="frow">
-                                        <label class="flbl">도시코드</label>
-                                        <input
-                                            class="finp small"
-                                            type="text"
-                                            ng-model="collect.cityCode"
-                                            placeholder="25"
-                                        />
-                                        <label
-                                            class="flbl"
-                                            style="width: auto"
-                                            >저장 방식</label
+                                    <!-- ✅ 출발/도착 후보 -->
+                                    <div class="pick-row">
+                                        <div class="pick-col">
+                                            <div class="pick-title">출발 후보 (클릭해서 선택)</div>
+                                            <div class="pick-list">
+                                                <button
+                                                    class="pick-item"
+                                                    type="button"
+                                                    ng-repeat="s in collect.fromCandidates track by $index"
+                                                    ng-click="selectCollectFrom && selectCollectFrom(s)"
+                                                    ng-class="{
+                                                        active: (
+                                                            (collect.fromStopId && (collect.fromStopId == (s.nodeid || s.nodeId || s.nodeno || s.nodeNo))) ||
+                                                            (collect.from && collect.from.stopId && (collect.from.stopId == (s.nodeid || s.nodeId || s.nodeno || s.nodeNo)))
+                                                        )
+                                                    }"
+                                                >
+                                                    <div class="nm">{{ s.nodenm || s.nodeNm || s.name }}</div>
+                                                    <div class="meta">nodeId: {{ s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}</div>
+                                                </button>
+
+                                                <div
+                                                    class="empty"
+                                                    ng-if="!collect.fromCandidates || collect.fromCandidates.length===0"
+                                                >
+                                                    검색 결과 없음
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="pick-col">
+                                            <div class="pick-title">도착 후보 (클릭해서 선택)</div>
+                                            <div class="pick-list">
+                                                <button
+                                                    class="pick-item"
+                                                    type="button"
+                                                    ng-repeat="s in collect.toCandidates track by $index"
+                                                    ng-click="selectCollectTo && selectCollectTo(s)"
+                                                    ng-class="{
+                                                        active: (
+                                                            (collect.toStopId && (collect.toStopId == (s.nodeid || s.nodeId || s.nodeno || s.nodeNo))) ||
+                                                            (collect.to && collect.to.stopId && (collect.to.stopId == (s.nodeid || s.nodeId || s.nodeno || s.nodeNo)))
+                                                        )
+                                                    }"
+                                                >
+                                                    <div class="nm">{{ s.nodenm || s.nodeNm || s.name }}</div>
+                                                    <div class="meta">nodeId: {{ s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}</div>
+                                                </button>
+
+                                                <div
+                                                    class="empty"
+                                                    ng-if="!collect.toCandidates || collect.toCandidates.length===0"
+                                                >
+                                                    검색 결과 없음
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- ✅ 선택된 출발/도착 -->
+                                    <div
+                                        class="result-box"
+                                        ng-if="(collect.fromStopId || (collect.from && collect.from.stopId)) || (collect.toStopId || (collect.to && collect.to.stopId))"
+                                    >
+                                        <div class="result-title">선택된 정류장</div>
+                                        <div class="result-grid">
+                                            <div><b>출발</b> {{collectFromSelected.name}}</div>
+                                            <div><b>출발ID</b> {{collect.fromStopId || (collect.from && collect.from.stopId) || '-'}}</div>
+                                            <div><b>도착</b> {{collectToSelected.name}}</div>
+                                            <div><b>도착ID</b> {{collect.toStopId || (collect.to && collect.to.stopId) || '-'}}</div>
+                                        </div>
+                                        <div class="hint2">※ 출발 정류장을 선택하면 아래에 “출발 정류장 도착정보 기반 노선 목록(routeId 포함)”이 표시됩니다.</div>
+                                    </div>
+
+                                    <!-- ✅✅ 노선 목록: routes / routeCandidates 둘 다 지원 -->
+                                    <div
+                                        class="pick-row"
+                                        ng-if="(collect.routes && collect.routes.length) || (collect.routeCandidates && collect.routeCandidates.length)"
+                                    >
+                                        <div
+                                            class="pick-col"
+                                            style="flex: 1 1 100%"
                                         >
+                                            <div class="pick-title">노선 목록 (클릭해서 선택 / routeId)</div>
+
+                                            <div class="pick-list">
+                                                <button
+                                                    class="pick-item"
+                                                    type="button"
+                                                    ng-repeat="r in ((collect.routes && collect.routes.length) ? collect.routes : collect.routeCandidates) track by $index"
+                                                    ng-click="selectCollectRoute && selectCollectRoute(r)"
+                                                    ng-class="{active: collect.routeId && (collect.routeId == (r.routeid || r.routeId))}"
+                                                >
+                                                    <div class="nm">{{ (r.routeno || r.routeNo || '?') }}번</div>
+                                                    <div class="meta">
+                                                        routeId: {{ r.routeid || r.routeId || '-' }}
+                                                        <span ng-if="r.remainMsg || r.arrmsg1 || r.arrmsg2"> / {{ r.remainMsg || r.arrmsg1 || r.arrmsg2 }} </span>
+                                                    </div>
+                                                </button>
+                                            </div>
+
+                                            <div class="hint2">※ 같은 버스번호가 여러 개면 여기서 정확한 routeId를 골라주세요.</div>
+                                        </div>
+                                    </div>
+
+                                    <div
+                                        class="fstatus"
+                                        ng-if="collect.routeId"
+                                    >
+                                        <span class="fbadge ok">ROUTE</span>
+                                        <span>선택된 routeId: <b>{{collect.routeId}}</b></span>
+                                    </div>
+
+                                    <div class="frow">
+                                        <label class="flbl">저장 방식</label>
                                         <select
                                             class="finp"
                                             ng-model="collect.mode"
                                         >
                                             <option value="ARRIVAL_TO_EDGE">도착정보 → 정류장간 추정시간</option>
-                                            <option value="RAW_ARRIVAL">도착정보 원본 저장</option>
+                                            <!-- ✅ "도착정보 원본 저장" 옵션 제거 완료 -->
                                         </select>
                                     </div>
 
                                     <div class="factions">
                                         <button
+                                            type="button"
                                             class="fbtn primary"
-                                            ng-click="startCollect()"
-                                            ng-disabled="collecting"
+                                            ng-click="startCollect && startCollect()"
+                                            ng-disabled="
+                                                collecting ||
+                                                !(
+                                                    collect.routeId &&
+                                                    (collect.fromStopId || (collect.from && collect.from.stopId)) &&
+                                                    (collect.toStopId || (collect.to && collect.to.stopId)) &&
+                                                    (collect.periodSec && collect.periodSec >= 5)
+                                                )
+                                            "
+                                            title="from/to/routeId/주기(>=5초)가 모두 있어야 시작됩니다"
                                         >
-                                            ▶ 수집 시작
+                                            수집 시작
                                         </button>
+
                                         <button
+                                            type="button"
                                             class="fbtn"
-                                            ng-click="stopCollect()"
+                                            ng-click="stopCollect && stopCollect()"
                                             ng-disabled="!collecting"
                                         >
-                                            ■ 수집 중지
+                                            수집 중지
                                         </button>
+
+                                        <!-- ✅✅ 디자인 + disabled 조건 보완 -->
                                         <button
-                                            class="fbtn"
-                                            ng-click="collectOnce()"
+                                            type="button"
+                                            class="fbtn test-save"
+                                            ng-click="collectOnce(true)"
+                                            ng-disabled="
+                                                collecting ||
+                                                !(
+                                                    collect.routeId &&
+                                                    (collect.fromStopId || (collect.from && collect.from.stopId)) &&
+                                                    (collect.toStopId || (collect.to && collect.to.stopId))
+                                                )
+                                            "
+                                            title="출발/도착/노선 선택 후 1회 저장 테스트"
                                         >
-                                            ⟳ 1회 수집 테스트
+                                            1회 수집 테스트(저장)
                                         </button>
                                     </div>
 
@@ -980,6 +1167,7 @@
                                         />
                                         <button
                                             class="fbtn"
+                                            type="button"
                                             ng-click="searchFrom()"
                                         >
                                             검색
@@ -994,6 +1182,7 @@
                                         />
                                         <button
                                             class="fbtn"
+                                            type="button"
                                             ng-click="searchTo()"
                                         >
                                             검색
@@ -1006,12 +1195,13 @@
                                             <div class="pick-list">
                                                 <button
                                                     class="pick-item"
+                                                    type="button"
                                                     ng-repeat="s in path.fromCandidates"
                                                     ng-click="selectFrom(s)"
-                                                    ng-class="{active: path.from && (path.from.stopId===s.stopId)}"
+                                                    ng-class="{ active: !!path.fromNodeId && (path.fromNodeId == (s.nodeid || s.nodeId || s.nodeno || s.nodeNo)) }"
                                                 >
-                                                    <div class="nm">{{s.name}}</div>
-                                                    <div class="meta">{{s.stopId}}</div>
+                                                    <div class="nm">{{ s.nodenm || s.nodeNm || s.name }}</div>
+                                                    <div class="meta">nodeId: {{ s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}</div>
                                                 </button>
                                                 <div
                                                     class="empty"
@@ -1027,12 +1217,13 @@
                                             <div class="pick-list">
                                                 <button
                                                     class="pick-item"
+                                                    type="button"
                                                     ng-repeat="s in path.toCandidates"
                                                     ng-click="selectTo(s)"
-                                                    ng-class="{active: path.to && (path.to.stopId===s.stopId)}"
+                                                    ng-class="{ active: !!path.toNodeId && (path.toNodeId == (s.nodeid || s.nodeId || s.nodeno || s.nodeNo)) }"
                                                 >
-                                                    <div class="nm">{{s.name}}</div>
-                                                    <div class="meta">{{s.stopId}}</div>
+                                                    <div class="nm">{{ s.nodenm || s.nodeNm || s.name }}</div>
+                                                    <div class="meta">nodeId: {{ s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}</div>
                                                 </button>
                                                 <div
                                                     class="empty"
@@ -1070,14 +1261,16 @@
 
                                         <button
                                             class="fbtn primary"
+                                            type="button"
                                             ng-click="findShortestPath()"
-                                            ng-disabled="!path.from || !path.to"
+                                            ng-disabled="!path.fromNodeId || !path.toNodeId"
                                         >
                                             🚀 최단경로 계산
                                         </button>
 
                                         <button
                                             class="fbtn"
+                                            type="button"
                                             ng-click="clearPath()"
                                         >
                                             🧹 경로 지우기
@@ -1113,12 +1306,12 @@
                             </div>
                         </div>
 
+                        <!-- (이 아래는 네 원본 그대로) -->
                         <div class="tool-grid-title">
                             <b>🚋 공구 선택 (1 ~ 14)</b>
                             <span class="hint">클릭하면 해당 공구 노선 경로를 지도에 표시/해제</span>
                         </div>
 
-                        <!-- ✅✅✅ 변경: activeTramSections 로 ON/OFF 표시 -->
                         <div class="tool-grid">
                             <div class="row">
                                 <div
@@ -1224,7 +1417,6 @@
                             </div>
                         </div>
 
-                        <!-- 상태 메시지 -->
                         <div
                             class="status-box"
                             ng-if="statusMessage"
@@ -1237,13 +1429,10 @@
                             {{ statusMessage }}
                         </div>
 
-                        <!-- ✅ 지도 + 정류장 목록 + 도착 정보 (세로 배치) -->
                         <div class="bus-layout">
-                            <!-- 지도 -->
                             <div class="bus-map-wrap">
                                 <div id="output">
                                     <div id="busMap"></div>
-                                    <!-- ★ 마커 클릭 시 사용하는 팝업 -->
                                     <div
                                         id="mapPopup"
                                         class="map-popup"
@@ -1252,7 +1441,6 @@
                                 </div>
                             </div>
 
-                            <!-- ✅ (추가) 마커 클릭 시 선택 정보 시각화 패널 -->
                             <section class="selected-panel">
                                 <h3>
                                     <span>선택된 마커 정보</span>
@@ -1273,63 +1461,52 @@
                                     >
                                 </h3>
 
-                                <!-- 아무것도 선택 안됨 -->
                                 <div
                                     class="selected-row"
                                     ng-if="!selectedStop && !selectedBus"
                                 >
-                                    지도에서 <b>빨간(정류장)</b> / <b>파란(버스)</b>
-                                    마킹을 클릭해보세요.
+                                    지도에서 <b>빨간(정류장)</b> / <b>파란(버스)</b> 마킹을 클릭해보세요.
                                 </div>
 
-                                <!-- 정류장 선택됨 -->
                                 <div
                                     class="selected-row"
                                     ng-if="selectedStop"
                                 >
-                                    <b>정류장명:</b>
-                                    {{ selectedStop.nodenm || selectedStop.nodeNm || selectedStop.name || '-' }}
+                                    <b>정류장명:</b> {{ selectedStop.nodenm || selectedStop.nodeNm || selectedStop.name || '-' }}
                                 </div>
                                 <div
                                     class="selected-row"
                                     ng-if="selectedStop"
                                 >
-                                    <b>정류장ID:</b>
-                                    {{ selectedStop.nodeid || selectedStop.nodeId || selectedStop.id || '-' }}
+                                    <b>정류장ID:</b> {{ selectedStop.nodeid || selectedStop.nodeId || selectedStop.id || '-' }}
                                 </div>
                                 <div
                                     class="selected-row"
                                     ng-if="selectedStop"
                                 >
-                                    <b>좌표:</b>
-                                    {{ selectedStop.gpslati || selectedStop.gpsLat || selectedStop.lat }}, {{ selectedStop.gpslong || selectedStop.gpsLong || selectedStop.lon }}
+                                    <b>좌표:</b> {{ selectedStop.gpslati || selectedStop.gpsLat || selectedStop.lat }}, {{ selectedStop.gpslong || selectedStop.gpsLong || selectedStop.lon }}
                                 </div>
 
-                                <!-- 버스 선택됨 -->
                                 <div
                                     class="selected-row"
                                     ng-if="selectedBus"
                                 >
-                                    <b>차량/표시:</b>
-                                    {{ selectedBus.plateNo || selectedBus.busNo || selectedBus.id || '-' }}
+                                    <b>차량/표시:</b> {{ selectedBus.plateNo || selectedBus.busNo || selectedBus.id || '-' }}
                                 </div>
                                 <div
                                     class="selected-row"
                                     ng-if="selectedBus"
                                 >
-                                    <b>노선ID:</b>
-                                    {{ selectedBus.routeId || selectedBus.routeid || '-' }}
+                                    <b>노선ID:</b> {{ selectedBus.routeId || selectedBus.routeid || '-' }}
                                 </div>
                                 <div
                                     class="selected-row"
                                     ng-if="selectedBus"
                                 >
-                                    <b>좌표:</b>
-                                    {{ selectedBus.lat }}, {{ selectedBus.lon }}
+                                    <b>좌표:</b> {{ selectedBus.lat }}, {{ selectedBus.lon }}
                                 </div>
                             </section>
 
-                            <!-- 정류장 목록 (지도 아래) -->
                             <aside
                                 class="stop-list"
                                 ng-if="stops.length"
@@ -1341,7 +1518,7 @@
                                         ng-repeat="s in stops"
                                         ng-click="focusStop(s)"
                                     >
-                                        <span class="stop-name"> {{ s.nodenm || s.nodeNm }} </span>
+                                        <span class="stop-name">{{ s.nodenm || s.nodeNm }}</span>
                                         <span class="stop-meta">
                                             정류장ID: {{ s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}
                                             <br />
@@ -1351,11 +1528,9 @@
                                 </ul>
                             </aside>
 
-                            <!-- 🔔 선택 정류장 도착 정보 -->
                             <section class="arrival-list">
                                 <h3>
                                     <span>선택 정류장 도착 정보</span>
-                                    <!-- ✅ 선택 정류장명 표시(선택된 마커/목록 클릭 둘 다 대응) -->
                                     <span
                                         style="font-size: 12px; color: #6b7280"
                                         ng-if="selectedStop"
@@ -1365,7 +1540,6 @@
                                 </h3>
 
                                 <div ng-if="loadingArrival">도착 정보를 불러오는 중입니다...</div>
-
                                 <div ng-if="!loadingArrival && (!arrivals || arrivals.length === 0)">도착 정보가 없습니다. 정류장을 선택해 주세요.</div>
 
                                 <ul ng-if="arrivals && arrivals.length > 0">
@@ -1384,11 +1558,10 @@
                 </div>
             </section>
 
-            <!-- 라우트 영역 -->
             <div ng-view></div>
         </main>
 
-        <!-- 로그인/권한/탈퇴 스크립트 (기존 유지 + 버스 리셋 추가) -->
+        <!-- 로그인/권한/탈퇴 스크립트 -->
         <script>
             (function () {
                 try {
@@ -1477,7 +1650,7 @@
 
                 /* 🔔 버스정보 대메뉴 클릭 시 BusController 리셋 이벤트 브로드캐스트 */
                 try {
-                    var busMenu = document.querySelector('a[data-bus-menu]');
+                    var busMenu = document.getElementById('busMenuLink');
                     if (busMenu && window.angular) {
                         busMenu.addEventListener('click', function () {
                             try {
@@ -1486,7 +1659,6 @@
                                 var $rootScope = injector.get('$rootScope');
                                 if (!$rootScope) return;
 
-                                // ✅ BusController에서 $scope.$on('reset-bus-view', ...) 로 받고 리셋하도록 브로드캐스트
                                 $rootScope.$applyAsync(function () {
                                     $rootScope.$broadcast('reset-bus-view');
                                 });
