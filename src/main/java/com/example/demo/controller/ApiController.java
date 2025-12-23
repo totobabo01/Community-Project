@@ -4,7 +4,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map; // ✅ 추가
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -229,7 +229,7 @@ public class ApiController {
 
     // =========================================================
     // Step1: 전체 정류장 적재(import)
-    // POST /api/bus/stops/import?cityCode=25
+    // POST /api/bus/stops/import?cityCode=25&type=BUS
     // =========================================================
     @PostMapping("/stops/import")
     public ResponseEntity<?> importStops(
@@ -238,6 +238,9 @@ public class ApiController {
     ) {
         cityCode = clean(cityCode);
         type = clean(type);
+
+        // ✅ String -> enum 변환 (잘못된 값이면 BUS로)
+        StopDto.StopType stopType = parseStopType(type);
 
         try {
             ArrayNode arr = stopsCache;
@@ -260,23 +263,25 @@ public class ApiController {
                 String stopId = clean(firstText(n, "nodeid", "nodeId", "nodeno", "nodeNo"));
                 String name = clean(firstText(n, "nodenm", "nodeNm", "name"));
 
-                Double lat = firstDouble(n, "gpslati", "gpsLat", "lat", "latitude");
-                Double lon = firstDouble(n, "gpslong", "gpsLong", "lon", "lng", "longitude");
+                Double latObj = firstDouble(n, "gpslati", "gpsLat", "lat", "latitude");
+                Double lonObj = firstDouble(n, "gpslong", "gpsLong", "lon", "lng", "longitude");
 
-                if (stopId == null || stopId.isBlank()) {
-                    skipped++;
-                    continue;
-                }
+                if (stopId == null || stopId.isBlank()) { skipped++; continue; }
                 if (name == null || name.isBlank()) name = "(no-name)";
 
-                StopDto dto = new StopDto(stopId, name, lat, lon, type, cityCode);
-                stopDao.upsert(dto);
+                // ✅ StopDto는 double이므로 좌표가 null이면 저장하지 않는 게 안전
+                if (latObj == null || lonObj == null) { skipped++; continue; }
 
+                double lat = latObj;
+                double lon = lonObj;
+
+                StopDto dto = new StopDto(stopId, name, lat, lon, stopType, cityCode);
+                stopDao.upsert(dto);
                 saved++;
             }
 
-            System.out.println("[IMPORT] 서버 DB에 stops " + saved + "개 저장됨 (skipped=" + skipped + ", cityCode=" + cityCode + ")");
-            return ResponseEntity.ok("서버 DB에 stops " + saved + "개 저장됨");
+            System.out.println("[IMPORT] 서버 DB에 stops " + saved + "개 저장됨 (skipped=" + skipped + ", cityCode=" + cityCode + ", type=" + stopType + ")");
+            return ResponseEntity.ok("서버 DB에 stops " + saved + "개 저장됨 (skipped=" + skipped + ")");
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -364,10 +369,7 @@ public class ApiController {
 
                 String fromId = clean(firstText(A, "nodeid", "nodeId", "nodeno", "nodeNo"));
                 String toId = clean(firstText(B, "nodeid", "nodeId", "nodeno", "nodeNo"));
-                if (fromId == null || toId == null) {
-                    skipped++;
-                    continue;
-                }
+                if (fromId == null || toId == null) { skipped++; continue; }
 
                 Double fromLat = firstDouble(A, "gpslati", "gpsLat", "lat", "latitude");
                 Double fromLon = firstDouble(A, "gpslong", "gpsLong", "lon", "lng", "longitude");
@@ -511,7 +513,7 @@ public class ApiController {
             for (byte b : bytes) System.out.printf("%02X ", b);
             System.out.println();
         } else {
-            System.out.println("[DEBUG] routeId param is missing (param name might be routeId가 아니라 routeid로 들어오거나, 다른 키일 수 있음)");
+            System.out.println("[DEBUG] routeId param is missing");
         }
 
         return ResponseEntity.ok(params);
@@ -530,12 +532,8 @@ public class ApiController {
         cityCode = clean(cityCode);
         routeId = clean(routeId);
 
-        if (cityCode == null || cityCode.isBlank()) {
-            return ResponseEntity.badRequest().body("cityCode is empty");
-        }
-        if (routeId == null || routeId.isBlank()) {
-            return ResponseEntity.badRequest().body("routeId is empty");
-        }
+        if (cityCode == null || cityCode.isBlank()) return ResponseEntity.badRequest().body("cityCode is empty");
+        if (routeId == null || routeId.isBlank()) return ResponseEntity.badRequest().body("routeId is empty");
 
         debugParam("cityCode", cityCode);
         debugParam("routeId", routeId);
@@ -565,10 +563,7 @@ public class ApiController {
                 int totalCount = total.isMissingNode() ? -1 : total.asInt(-1);
 
                 if (totalCount == 0) {
-                    System.out.println("[TAGO 노선경로] totalCount=0 → "
-                            + "routeId가 '버스번호(routeno)'가 아닌지 확인 필요, "
-                            + "또는 routeId에 공백/줄바꿈이 섞였거나, cityCode 불일치 가능. "
-                            + "routeId=" + routeId + ", cityCode=" + cityCode);
+                    System.out.println("[TAGO 노선경로] totalCount=0 → routeId 확인 필요. routeId=" + routeId + ", cityCode=" + cityCode);
                 } else {
                     System.out.println("[TAGO 노선경로] totalCount=" + totalCount);
                 }
@@ -717,15 +712,6 @@ public class ApiController {
         return URLEncoder.encode(s, StandardCharsets.UTF_8);
     }
 
-    /**
-     * ✅ serviceKey 인코딩 공통
-     *
-     * ⚠️ 주의:
-     * - yml에 "Decoding(원문) 키"를 넣었다면 -> encode 하는 게 맞음
-     * - yml에 이미 "%2B", "%3D" 들어간 "Encoding 키"를 넣었다면 -> 여기서 encode 하면 키가 깨질 수 있음
-     *
-     * 이미 인코딩키라면: return key; 로 바꿔.
-     */
     private String encodeServiceKey(String key) {
         key = clean(key);
         if (key == null) return "";
@@ -795,5 +781,15 @@ public class ApiController {
 
         double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return R * c;
+    }
+
+    // ✅ 문자열 type -> enum 변환 유틸 (ApiController 내부에서만 사용)
+    private StopDto.StopType parseStopType(String type) {
+        try {
+            if (type == null) return StopDto.StopType.BUS;
+            return StopDto.StopType.valueOf(type.trim().toUpperCase());
+        } catch (Exception e) {
+            return StopDto.StopType.BUS;
+        }
     }
 }

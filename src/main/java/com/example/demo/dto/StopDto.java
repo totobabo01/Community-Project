@@ -1,16 +1,19 @@
 package com.example.demo.dto;
 
 public class StopDto {
+
+    public enum StopType { BUS, TRAM }
+
     private String stopId;
     private String name;
-    private Double lat;
-    private Double lon;
-    private String type;     // BUS/TRAM
-    private String cityCode; // 25
+    private double lat;
+    private double lon;
+    private StopType type;   // BUS/TRAM
+    private String cityCode; // "25"
 
     public StopDto() {}
 
-    public StopDto(String stopId, String name, Double lat, Double lon, String type, String cityCode) {
+    public StopDto(String stopId, String name, double lat, double lon, StopType type, String cityCode) {
         this.stopId = stopId;
         this.name = name;
         this.lat = lat;
@@ -25,15 +28,21 @@ public class StopDto {
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
 
-    public Double getLat() { return lat; }
-    public void setLat(Double lat) { this.lat = lat; }
+    public double getLat() { return lat; }
+    public void setLat(double lat) { this.lat = lat; }
 
-    public Double getLon() { return lon; }
-    public void setLon(Double lon) { this.lon = lon; }
+    public double getLon() { return lon; }
+    public void setLon(double lon) { this.lon = lon; }
 
-    public String getType() { return type; }
-    public void setType(String type) { this.type = type; }
+    public StopType getType() { return type; }
+    public void setType(StopType type) { this.type = type; }
 
     public String getCityCode() { return cityCode; }
     public void setCityCode(String cityCode) { this.cityCode = cityCode; }
+
+    @Override
+    public String toString() {
+        return "StopDto{stopId='" + stopId + "', name='" + name + "', lat=" + lat + ", lon=" + lon +
+                ", type=" + type + ", cityCode='" + cityCode + "'}";
+    }
 }

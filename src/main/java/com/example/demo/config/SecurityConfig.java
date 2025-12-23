@@ -42,8 +42,9 @@ public class SecurityConfig {
           "/tpl/**" // Angular partial templates
         ).permitAll()
 
-        // 2) 공개 API
+        // 2) ✅ 공개 API
         .requestMatchers("/api/bus/**").permitAll()
+        .requestMatchers("/api/path/**").permitAll()   // ✅ 추가: 최단경로/정류장검색 API 공개
 
         // 3) 댓글 목록 GET만 공개(쓰기/수정/삭제는 인증 필요)
         .requestMatchers(HttpMethod.GET,

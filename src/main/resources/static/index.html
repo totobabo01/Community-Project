@@ -354,6 +354,21 @@
                 color: #1d4ed8;
             }
 
+            /* ✅ 추가: "가중치 한 줄에 거리/시간 같이" 배지 */
+            .badge-soft {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 6px 10px;
+                border-radius: 999px;
+                background: #f3f4f6;
+                font-size: 12px;
+                color: #374151;
+                border: 1px solid #e5e7eb;
+                margin-left: 8px;
+                height: 36px;
+            }
+
             .stop-list {
                 max-height: 260px;
                 overflow: auto;
@@ -632,6 +647,10 @@
                 background: #dcfce7;
                 color: #166534;
             }
+            .fbadge.info {
+                background: #e0f2fe;
+                color: #075985;
+            }
 
             .pick-row {
                 display: flex;
@@ -710,6 +729,14 @@
                 margin-top: 6px;
                 font-size: 11px;
                 color: #64748b;
+            }
+
+            /* ✅ 최단경로 버튼을 "기존 톤"에 맞춰 더 자연스럽게 */
+            .fbtn.secondary {
+                background: #ffffff;
+                border-color: #dbe7f5;
+                color: #111827;
+                font-weight: 800;
             }
         </style>
     </head>
@@ -973,13 +1000,13 @@
                                                     ng-click="selectCollectFrom && selectCollectFrom(s)"
                                                     ng-class="{
                                                         active: (
-                                                            (collect.fromStopId && (collect.fromStopId == (s.nodeid || s.nodeId || s.nodeno || s.nodeNo))) ||
-                                                            (collect.from && collect.from.stopId && (collect.from.stopId == (s.nodeid || s.nodeId || s.nodeno || s.nodeNo)))
+                                                            (collect.fromStopId && (collect.fromStopId == (s.stopId || s.stop_id || s.nodeid || s.nodeId || s.nodeno || s.nodeNo))) ||
+                                                            (collect.from && collect.from.stopId && (collect.from.stopId == (s.stopId || s.stop_id || s.nodeid || s.nodeId || s.nodeno || s.nodeNo)))
                                                         )
                                                     }"
                                                 >
                                                     <div class="nm">{{ s.nodenm || s.nodeNm || s.name }}</div>
-                                                    <div class="meta">nodeId: {{ s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}</div>
+                                                    <div class="meta">nodeId: {{ s.stopId || s.stop_id || s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}</div>
                                                 </button>
 
                                                 <div
@@ -1001,13 +1028,13 @@
                                                     ng-click="selectCollectTo && selectCollectTo(s)"
                                                     ng-class="{
                                                         active: (
-                                                            (collect.toStopId && (collect.toStopId == (s.nodeid || s.nodeId || s.nodeno || s.nodeNo))) ||
-                                                            (collect.to && collect.to.stopId && (collect.to.stopId == (s.nodeid || s.nodeId || s.nodeno || s.nodeNo)))
+                                                            (collect.toStopId && (collect.toStopId == (s.stopId || s.stop_id || s.nodeid || s.nodeId || s.nodeno || s.nodeNo))) ||
+                                                            (collect.to && collect.to.stopId && (collect.to.stopId == (s.stopId || s.stop_id || s.nodeid || s.nodeId || s.nodeno || s.nodeNo)))
                                                         )
                                                     }"
                                                 >
                                                     <div class="nm">{{ s.nodenm || s.nodeNm || s.name }}</div>
-                                                    <div class="meta">nodeId: {{ s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}</div>
+                                                    <div class="meta">nodeId: {{ s.stopId || s.stop_id || s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}</div>
                                                 </button>
 
                                                 <div
@@ -1027,43 +1054,24 @@
                                     >
                                         <div class="result-title">선택된 정류장</div>
                                         <div class="result-grid">
-                                            <div><b>출발</b> {{collectFromSelected.name}}</div>
-                                            <div><b>출발ID</b> {{collect.fromStopId || (collect.from && collect.from.stopId) || '-'}}</div>
-                                            <div><b>도착</b> {{collectToSelected.name}}</div>
-                                            <div><b>도착ID</b> {{collect.toStopId || (collect.to && collect.to.stopId) || '-'}}</div>
+                                            <div>
+                                                <b>출발</b>
+                                                {{collectFromSelected.name}}
+                                            </div>
+                                            <div>
+                                                <b>출발ID</b>
+                                                {{collect.fromStopId || (collect.from && collect.from.stopId) || '-'}}
+                                            </div>
+                                            <div>
+                                                <b>도착</b>
+                                                {{collectToSelected.name}}
+                                            </div>
+                                            <div>
+                                                <b>도착ID</b>
+                                                {{collect.toStopId || (collect.to && collect.to.stopId) || '-'}}
+                                            </div>
                                         </div>
                                         <div class="hint2">※ 출발 정류장을 선택하면 아래에 “출발 정류장 도착정보 기반 노선 목록(routeId 포함)”이 표시됩니다.</div>
-                                    </div>
-
-                                    <!-- ✅✅ 노선 목록: routes / routeCandidates 둘 다 지원 -->
-                                    <div
-                                        class="pick-row"
-                                        ng-if="(collect.routes && collect.routes.length) || (collect.routeCandidates && collect.routeCandidates.length)"
-                                    >
-                                        <div
-                                            class="pick-col"
-                                            style="flex: 1 1 100%"
-                                        >
-                                            <div class="pick-title">노선 목록 (클릭해서 선택 / routeId)</div>
-
-                                            <div class="pick-list">
-                                                <button
-                                                    class="pick-item"
-                                                    type="button"
-                                                    ng-repeat="r in ((collect.routes && collect.routes.length) ? collect.routes : collect.routeCandidates) track by $index"
-                                                    ng-click="selectCollectRoute && selectCollectRoute(r)"
-                                                    ng-class="{active: collect.routeId && (collect.routeId == (r.routeid || r.routeId))}"
-                                                >
-                                                    <div class="nm">{{ (r.routeno || r.routeNo || '?') }}번</div>
-                                                    <div class="meta">
-                                                        routeId: {{ r.routeid || r.routeId || '-' }}
-                                                        <span ng-if="r.remainMsg || r.arrmsg1 || r.arrmsg2"> / {{ r.remainMsg || r.arrmsg1 || r.arrmsg2 }} </span>
-                                                    </div>
-                                                </button>
-                                            </div>
-
-                                            <div class="hint2">※ 같은 버스번호가 여러 개면 여기서 정확한 routeId를 골라주세요.</div>
-                                        </div>
                                     </div>
 
                                     <div
@@ -1081,28 +1089,25 @@
                                             ng-model="collect.mode"
                                         >
                                             <option value="ARRIVAL_TO_EDGE">도착정보 → 정류장간 추정시간</option>
-                                            <!-- ✅ "도착정보 원본 저장" 옵션 제거 완료 -->
                                         </select>
                                     </div>
 
-                                    <div class="factions">
-                                        <button
-                                            type="button"
-                                            class="fbtn primary"
-                                            ng-click="startCollect && startCollect()"
-                                            ng-disabled="
-                                                collecting ||
-                                                !(
-                                                    collect.routeId &&
-                                                    (collect.fromStopId || (collect.from && collect.from.stopId)) &&
-                                                    (collect.toStopId || (collect.to && collect.to.stopId)) &&
-                                                    (collect.periodSec && collect.periodSec >= 5)
-                                                )
-                                            "
-                                            title="from/to/routeId/주기(>=5초)가 모두 있어야 시작됩니다"
-                                        >
-                                            수집 시작
-                                        </button>
+                                   <button
+                                    type="button"
+                                    class="fbtn primary"
+                                    ng-click="startCollect && startCollect()"
+                                    ng-disabled="
+                                                    collecting ||
+                                                    !(
+                                                        (collect.fromStopId || (collect.from && collect.from.stopId)) &&
+                                                        (collect.toStopId || (collect.to && collect.to.stopId)) &&
+                                                        (collect.periodSec && collect.periodSec >= 5)
+                                                    )
+                                                "
+                                                title="출발/도착/주기(>=5초)가 모두 있어야 시작됩니다"
+                                            >
+                                                수집 시작
+                                            </button>
 
                                         <button
                                             type="button"
@@ -1113,23 +1118,22 @@
                                             수집 중지
                                         </button>
 
-                                        <!-- ✅✅ 디자인 + disabled 조건 보완 -->
                                         <button
                                             type="button"
                                             class="fbtn test-save"
-                                            ng-click="collectOnce(true)"
+                                            ng-click="testCollectOnce && testCollectOnce()"
                                             ng-disabled="
-                                                collecting ||
-                                                !(
-                                                    collect.routeId &&
-                                                    (collect.fromStopId || (collect.from && collect.from.stopId)) &&
-                                                    (collect.toStopId || (collect.to && collect.to.stopId))
-                                                )
-                                            "
-                                            title="출발/도착/노선 선택 후 1회 저장 테스트"
-                                        >
-                                            1회 수집 테스트(저장)
-                                        </button>
+                                                            collecting ||
+                                                            !(
+                                                                (collect.fromStopId || (collect.from && collect.from.stopId)) &&
+                                                                (collect.toStopId || (collect.to && collect.to.stopId))
+                                                            )
+                                                        "
+                                                        title="출발/도착 선택 후 1회 저장 테스트"
+                                                    >
+                                                        중복 방지
+                                                    </button>
+
                                     </div>
 
                                     <div
@@ -1168,7 +1172,7 @@
                                         <button
                                             class="fbtn"
                                             type="button"
-                                            ng-click="searchFrom()"
+                                            ng-click="searchFrom && searchFrom()"
                                         >
                                             검색
                                         </button>
@@ -1183,7 +1187,7 @@
                                         <button
                                             class="fbtn"
                                             type="button"
-                                            ng-click="searchTo()"
+                                            ng-click="searchTo && searchTo()"
                                         >
                                             검색
                                         </button>
@@ -1191,17 +1195,38 @@
 
                                     <div class="pick-row">
                                         <div class="pick-col">
-                                            <div class="pick-title">출발 후보</div>
+                                            <div class="pick-title">
+                                                출발 후보
+                                                <span
+                                                    class="badge"
+                                                    style="margin-left: 8px"
+                                                >
+                                                    {{ path.mode === 'TRAM' ? '트램' : (path.mode === 'BUS' ? '버스' : '혼합') }}
+                                                </span>
+                                            </div>
                                             <div class="pick-list">
                                                 <button
                                                     class="pick-item"
                                                     type="button"
                                                     ng-repeat="s in path.fromCandidates"
-                                                    ng-click="selectFrom(s)"
-                                                    ng-class="{ active: !!path.fromNodeId && (path.fromNodeId == (s.nodeid || s.nodeId || s.nodeno || s.nodeNo)) }"
+                                                    ng-click="selectFrom && selectFrom(s)"
+                                                    ng-class="{
+                                                        active: !!path.fromNodeId && (path.fromNodeId == (s.stopId || s.stop_id || s.nodeid || s.nodeId || s.nodeno || s.nodeNo))
+                                                    }"
                                                 >
-                                                    <div class="nm">{{ s.nodenm || s.nodeNm || s.name }}</div>
-                                                    <div class="meta">nodeId: {{ s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}</div>
+                                                    <div class="nm">
+                                                        {{ s.nodenm || s.nodeNm || s.name }}
+
+                                                        <!-- ✅ 데이터에 s.type 넣으면 버스/트램 표시 가능 -->
+                                                        <span
+                                                            class="badge"
+                                                            style="margin-left: 8px"
+                                                            ng-if="s.type"
+                                                        >
+                                                            {{s.type}}
+                                                        </span>
+                                                    </div>
+                                                    <div class="meta">nodeId: {{ s.stopId || s.stop_id || s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}</div>
                                                 </button>
                                                 <div
                                                     class="empty"
@@ -1213,17 +1238,36 @@
                                         </div>
 
                                         <div class="pick-col">
-                                            <div class="pick-title">도착 후보</div>
+                                            <div class="pick-title">
+                                                도착 후보
+                                                <span
+                                                    class="badge"
+                                                    style="margin-left: 8px"
+                                                >
+                                                    {{ path.mode === 'TRAM' ? '트램' : (path.mode === 'BUS' ? '버스' : '혼합') }}
+                                                </span>
+                                            </div>
                                             <div class="pick-list">
                                                 <button
                                                     class="pick-item"
                                                     type="button"
                                                     ng-repeat="s in path.toCandidates"
-                                                    ng-click="selectTo(s)"
-                                                    ng-class="{ active: !!path.toNodeId && (path.toNodeId == (s.nodeid || s.nodeId || s.nodeno || s.nodeNo)) }"
+                                                    ng-click="selectTo && selectTo(s)"
+                                                    ng-class="{
+                                                        active: !!path.toNodeId && (path.toNodeId == (s.stopId || s.stop_id || s.nodeid || s.nodeId || s.nodeno || s.nodeNo))
+                                                    }"
                                                 >
-                                                    <div class="nm">{{ s.nodenm || s.nodeNm || s.name }}</div>
-                                                    <div class="meta">nodeId: {{ s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}</div>
+                                                    <div class="nm">
+                                                        {{ s.nodenm || s.nodeNm || s.name }}
+                                                        <span
+                                                            class="badge"
+                                                            style="margin-left: 8px"
+                                                            ng-if="s.type"
+                                                        >
+                                                            {{s.type}}
+                                                        </span>
+                                                    </div>
+                                                    <div class="meta">nodeId: {{ s.stopId || s.stop_id || s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}</div>
                                                 </button>
                                                 <div
                                                     class="empty"
@@ -1235,11 +1279,14 @@
                                         </div>
                                     </div>
 
+                                    <!-- ✅✅✅ "가중치" 줄에서 거리/시간 같이 보이게 수정 -->
                                     <div class="frow">
                                         <label class="flbl">모드</label>
                                         <select
                                             class="finp"
                                             ng-model="path.mode"
+                                            ng-change="onPathModeChange && onPathModeChange()"
+                                            title="모드 변경 시 후보/선택을 초기화하고, BUS면 버스 정류장 / TRAM이면 트램 정류장만 나오게"
                                         >
                                             <option value="BUS">버스만</option>
                                             <option value="TRAM">트램만</option>
@@ -1259,19 +1306,31 @@
                                             <option value="TIME">시간(초) 최단</option>
                                         </select>
 
+                                        <!-- ✅ 항상 같이 표시: (결과 없으면 '-') -->
+                                        <span class="badge-soft">
+                                            거리:
+                                            <b>{{ (pathResult && pathResult.totalDistM) ? (pathResult.totalDistM + ' m') : '-' }}</b>
+                                        </span>
+                                        <span class="badge-soft">
+                                            시간:
+                                            <b>{{ (pathResult && pathResult.totalTimeSec) ? (pathResult.totalTimeSec + ' s') : '-' }}</b>
+                                        </span>
+
                                         <button
                                             class="fbtn primary"
                                             type="button"
                                             ng-click="findShortestPath()"
-                                            ng-disabled="!path.fromNodeId || !path.toNodeId"
+                                            ng-disabled="pathLoading || !(path.from && path.from.stopId && path.to && path.to.stopId)"
+                                            title="출발/도착 선택 후 실행"
                                         >
                                             🚀 최단경로 계산
                                         </button>
 
                                         <button
-                                            class="fbtn"
+                                            class="fbtn secondary"
                                             type="button"
-                                            ng-click="clearPath()"
+                                            ng-click="clearPath && clearPath()"
+                                            title="지도에 그려진 경로 polyline 제거"
                                         >
                                             🧹 경로 지우기
                                         </button>
@@ -1293,14 +1352,26 @@
                                         class="result-box"
                                         ng-if="pathResult"
                                     >
-                                        <div class="result-title">결과</div>
+                                        <div class="result-title">📍 최단경로 결과</div>
                                         <div class="result-grid">
-                                            <div><b>총 거리</b> {{pathResult.totalDistM}} m</div>
-                                            <div><b>총 시간</b> {{pathResult.totalTimeSec}} sec</div>
-                                            <div><b>정류장 수</b> {{pathResult.nodesCount}}</div>
-                                            <div><b>환승</b> {{pathResult.transfersCount}}</div>
+                                            <div>
+                                                <b>총 거리</b>
+                                                {{pathResult.totalDistM}} m
+                                            </div>
+                                            <div>
+                                                <b>총 시간</b>
+                                                {{pathResult.totalTimeSec}} sec
+                                            </div>
+                                            <div>
+                                                <b>정류장 수</b>
+                                                {{pathResult.nodesCount}}
+                                            </div>
+                                            <div>
+                                                <b>환승</b>
+                                                {{pathResult.transfersCount}}
+                                            </div>
                                         </div>
-                                        <div class="hint2">※ 지도에 파란 polyline으로 경로를 표시합니다.</div>
+                                        <div class="hint2">※ 지도에 <b>파란 polyline</b>으로 경로를 표시합니다.</div>
                                     </div>
                                 </div>
                             </div>
@@ -1472,32 +1543,37 @@
                                     class="selected-row"
                                     ng-if="selectedStop"
                                 >
-                                    <b>정류장명:</b> {{ selectedStop.nodenm || selectedStop.nodeNm || selectedStop.name || '-' }}
+                                    <b>정류장명:</b>
+                                    {{ selectedStop.nodenm || selectedStop.nodeNm || selectedStop.name || '-' }}
                                 </div>
                                 <div
                                     class="selected-row"
                                     ng-if="selectedStop"
                                 >
-                                    <b>정류장ID:</b> {{ selectedStop.nodeid || selectedStop.nodeId || selectedStop.id || '-' }}
+                                    <b>정류장ID:</b>
+                                    {{ selectedStop.stopId || selectedStop.stop_id || selectedStop.nodeid || selectedStop.nodeId || selectedStop.id || '-' }}
                                 </div>
                                 <div
                                     class="selected-row"
                                     ng-if="selectedStop"
                                 >
-                                    <b>좌표:</b> {{ selectedStop.gpslati || selectedStop.gpsLat || selectedStop.lat }}, {{ selectedStop.gpslong || selectedStop.gpsLong || selectedStop.lon }}
+                                    <b>좌표:</b>
+                                    {{ selectedStop.gpslati || selectedStop.gpsLat || selectedStop.lat }}, {{ selectedStop.gpslong || selectedStop.gpsLong || selectedStop.lon }}
                                 </div>
 
                                 <div
                                     class="selected-row"
                                     ng-if="selectedBus"
                                 >
-                                    <b>차량/표시:</b> {{ selectedBus.plateNo || selectedBus.busNo || selectedBus.id || '-' }}
+                                    <b>차량/표시:</b>
+                                    {{ selectedBus.plateNo || selectedBus.busNo || selectedBus.id || '-' }}
                                 </div>
                                 <div
                                     class="selected-row"
                                     ng-if="selectedBus"
                                 >
-                                    <b>노선ID:</b> {{ selectedBus.routeId || selectedBus.routeid || '-' }}
+                                    <b>노선ID:</b>
+                                    {{ selectedBus.routeId || selectedBus.routeid || '-' }}
                                 </div>
                                 <div
                                     class="selected-row"
@@ -1520,7 +1596,7 @@
                                     >
                                         <span class="stop-name">{{ s.nodenm || s.nodeNm }}</span>
                                         <span class="stop-meta">
-                                            정류장ID: {{ s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}
+                                            정류장ID: {{ s.stopId || s.stop_id || s.nodeid || s.nodeId || s.nodeno || s.nodeNo || '-' }}
                                             <br />
                                             좌표: {{ s.gpslati || s.gpsLat }}, {{ s.gpslong || s.gpsLong }}
                                         </span>
