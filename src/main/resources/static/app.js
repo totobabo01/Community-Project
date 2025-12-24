@@ -1783,24 +1783,76 @@
             };
         }
 
-        function fetchStopsFromDb(cityCode, keyword, type, limit) {
+        function fetchStopsFromDb(cityCode, keyword, type, limit, offset) {
+            // ✅ limit/offset 0도 안전하게 포함
             const params = {
                 cityCode: String(cityCode || CITY_CODE || 25),
-                limit: Number(limit || 500),
+                limit: Number(limit == null ? 500 : limit),
+                offset: Number(offset == null ? 0 : offset), // ✅ 핵심: 0도 항상 포함
             };
 
             // keyword는 비어있어도 PathController가 처리(=findAll)
             if (keyword != null) params.keyword = String(keyword);
+
+            // type 옵션
             if (type) params.type = String(type);
 
-            return $http.get('/api/path/stops/search', { params: params }).then(function (res) {
+            return $http.get('/api/path/stops/search', { params }).then(function (res) {
                 const list = Array.isArray(res.data) ? res.data : [];
                 return list.map(adaptDbStopToUiRow).filter(Boolean);
             });
         }
 
+        // ✅ 전체를 배치로 가져오는 헬퍼 (offset 지원 시 끝까지 루프)
+        function fetchAllStopsFromDb(cityCode, keyword, type) {
+            const BATCH = 500; // 한 번에 가져올 개수
+            const MAX_TOTAL = 20000; // 안전장치
+
+            let offset = 0;
+            let all = [];
+
+            // ✅ stopId 추출 헬퍼 (중복 감지용)
+            function pickStopId(row) {
+                return row && (row.nodeid || row.nodeId || row.stopId || row.stop_id || row.id);
+            }
+
+            function step() {
+                return fetchStopsFromDb(cityCode, keyword, type, BATCH, offset).then(function (rows) {
+                    rows = rows || [];
+
+                    all = all.concat(rows);
+                    offset += rows.length;
+
+                    // ✅ 종료 조건
+                    if (rows.length < BATCH) return all;
+                    if (all.length >= MAX_TOTAL) return all;
+
+                    // ✅ offset 무시 케이스 방지(같은 데이터 반복)
+                    if (all.length >= BATCH * 2) {
+                        const prevFirst = pickStopId(all[all.length - BATCH * 2]);
+                        const currFirst = pickStopId(all[all.length - BATCH]);
+                        if (prevFirst && currFirst && String(prevFirst) === String(currFirst)) {
+                            console.warn('[fetchAllStopsFromDb] offset not applied on server. stop looping.');
+                            return all;
+                        }
+                    }
+
+                    return step();
+                });
+            }
+
+            return step().catch(function (err) {
+                console.error('[fetchAllStopsFromDb] fail:', err);
+
+                // ✅ fallback: offset이 지원 안 되거나 실패하면 limit 크게 한 번만 시도
+                return fetchStopsFromDb(cityCode, keyword, type, 10000, 0).catch(function () {
+                    return [];
+                });
+            });
+        }
+
         // =========================================================
-        // ✅ 정류장 검색 (DB 기반으로 통일)
+        // ✅ 정류장 검색 (DB 기반으로 통일) - 수정본
         // =========================================================
         $scope.searchStops = function () {
             const kw = ($scope.keyword || '').trim();
@@ -1835,11 +1887,11 @@
                 if (routeVectorSource) routeVectorSource.clear();
             }
 
-            // ✅ keyword 비면: 전체 목록(DB) 가져오기
+            // ✅ keyword 비면: 전체 목록(DB) 끝까지 가져오기
             if (!kw) {
                 setStatus('info', '전체 정류장(DB) 불러오는 중...', 0);
 
-                return fetchStopsFromDb(CITY_CODE, '', null, 1000)
+                return fetchAllStopsFromDb(CITY_CODE, '', null)
                     .then(function (list) {
                         $scope.$evalAsync(function () {
                             $scope.stops = list;
@@ -1860,9 +1912,6 @@
 
                         currentNodeId = first.nodeid || first.nodeId || first.nodeno || first.nodeNo;
 
-                        // ✅ 전체목록만 로드하고, 도착정보는 사용자가 클릭한 정류장에서 시작하는 게 UX에 더 좋음
-                        // loadArrivalAndBus(currentNodeId); startPolling();  // 원하면 활성화
-
                         setStatus('success', `✅ 전체 정류장(DB) ${list.length}곳을 불러왔습니다.`, 2500);
                     })
                     .catch(function (err) {
@@ -1872,10 +1921,10 @@
                     });
             }
 
-            // ✅ keyword 있으면: 검색(DB)
+            // ✅ keyword 있으면: 검색(DB)도 배치로(많이 뜨는 키워드 대비)
             setStatus('info', '정류장(DB) 검색 중...', 0);
 
-            return fetchStopsFromDb(CITY_CODE, kw, null, 500)
+            return fetchAllStopsFromDb(CITY_CODE, kw, null)
                 .then(function (filtered) {
                     $scope.stops = filtered;
                     ensureMapSize();
@@ -2582,120 +2631,39 @@
         }
 
         $scope.searchCollectFrom = function () {
-            const kw = ($scope.collect.fromKeyword || '').trim();
-            if (!kw) {
-                setCollectStatus('error', '출발 정류장 이름을 입력하세요.');
-                $scope.collect.fromCandidates = [];
-                $scope.collect.from = null;
-                $scope.collect.fromStopId = '';
+            const kw = String(($scope.collect && $scope.collect.fromKeyword) || '').trim();
 
-                $scope.collect.routeCandidates = [];
-                $scope.collect.selectedRoute = null;
-                $scope.collect.routeId = '';
-                return;
-            }
+            setCollectStatus('loading', kw ? '출발 정류장 검색중...' : '출발 정류장 전체 불러오는 중...');
 
-            setCollectStatus('ok', '출발 후보 검색 중...');
-            return fetchStopCandidatesByKeyword(kw)
-                .then(function (filtered) {
-                    $scope.collect.fromCandidates = filtered;
-                    $scope.collect.from = null;
-                    $scope.collect.fromStopId = '';
-
-                    $scope.collect.routeCandidates = [];
-                    $scope.collect.selectedRoute = null;
-                    $scope.collect.routeId = '';
-
-                    if (!filtered.length) {
-                        setCollectStatus('error', `"${kw}" 관련 출발 정류장을 찾지 못했습니다.`);
-                        return;
-                    }
-                    setCollectStatus('ok', `출발 후보 ${filtered.length}개를 찾았습니다. 후보에서 클릭하세요.`);
+            fetchStopsFromDb(CITY_CODE, kw || '', null, kw ? 500 : 5000)
+                .then(function (list) {
+                    $scope.collect = $scope.collect || {};
+                    $scope.collect.fromCandidates = list || [];
+                    setCollectStatus('ok', (kw ? '검색 완료' : '전체 로드 완료') + ' (' + ($scope.collect.fromCandidates.length || 0) + ')');
                 })
-                .catch(function (err) {
-                    console.error('[BusController] collect from search fail:', err);
+                .catch(function () {
+                    $scope.collect = $scope.collect || {};
                     $scope.collect.fromCandidates = [];
-                    $scope.collect.from = null;
-                    $scope.collect.fromStopId = '';
-                    setCollectStatus('error', '출발 후보를 불러오지 못했습니다.');
+                    setCollectStatus('error', '출발 정류장 조회 실패');
                 });
         };
 
-        // ✅ 도착 후보 검색 (출발 선택 시: “출발 기준으로 도착 후보 필터링” 적용)
         $scope.searchCollectTo = function () {
-            $scope.collect = $scope.collect || {};
+            const kw = String(($scope.collect && $scope.collect.toKeyword) || '').trim();
 
-            const kw = String($scope.collect.toKeyword || '').trim();
-            if (!kw) {
-                setCollectStatus('error', '도착 정류장 이름을 입력하세요.');
-                $scope.collect.toCandidates = [];
-                $scope.collect.to = null;
-                $scope.collect.toStopId = '';
-                $scope.collect.toStopName = '';
-                $scope.collectToSelected = null;
-                return;
-            }
+            setCollectStatus('loading', kw ? '도착 정류장 검색중...' : '도착 정류장 전체 불러오는 중...');
 
-            setCollectStatus('ok', '도착 후보 검색 중...');
-
-            return fetchStopCandidatesByKeyword(kw)
+            fetchStopsFromDb(CITY_CODE, kw || '', null, kw ? 500 : 5000)
                 .then(function (list) {
-                    // list: API로부터 받은 "도착 검색 원본 후보들"
-                    if (!Array.isArray(list)) list = list ? [list] : [];
-
-                    // ✅ (핵심) 출발을 선택했다면 "출발 기준으로 갈 수 있는 도착"만 남김
-                    // - Set 이름은 네가 화면 하단에서 “가능 후보 nodenId 약 400개” 찍을 때 쓴 그 변수 그대로 사용
-                    // - 혹시 배열로 들고 있으면(Set이 아니라면) Set으로 변환해서 처리
-                    const reachableSet =
-                        ($scope.collectReachableToSet && $scope.collectReachableToSet instanceof Set && $scope.collectReachableToSet) ||
-                        (Array.isArray($scope.collectReachableToList) ? new Set($scope.collectReachableToList.map(String)) : null) ||
-                        (Array.isArray($scope.collectReachableToIds) ? new Set($scope.collectReachableToIds.map(String)) : null) ||
-                        null;
-
-                    // 출발이 선택된 상태인지 확인(선택 안 했으면 전체 검색 그대로 보여줌)
-                    const fromChosen = !!(($scope.collect.from && $scope.collect.from.stopId) || String($scope.collect.fromStopId || '').trim() || ($scope.collectFromSelected && $scope.collectFromSelected.id));
-
-                    let filtered = list;
-
-                    if (fromChosen && reachableSet) {
-                        filtered = list.filter(function (raw) {
-                            const s = normalizeStop(raw);
-                            if (!s || !s.stopId) return false;
-                            return reachableSet.has(String(s.stopId));
-                        });
-                    }
-
-                    // ✅ UI 반영
-                    $scope.collect.toCandidates = filtered;
-                    $scope.collect.to = null;
-                    $scope.collect.toStopId = '';
-                    $scope.collect.toStopName = '';
-                    $scope.collectToSelected = null;
-
-                    // ✅ 메시지
-                    if (!filtered.length) {
-                        if (fromChosen && reachableSet) {
-                            setCollectStatus('error', `"${kw}" 결과가 있지만 “출발 기준 도착 가능 목록”에 포함된 정류장이 없어요.`);
-                        } else {
-                            setCollectStatus('error', `"${kw}" 관련 도착 정류장을 찾지 못했습니다.`);
-                        }
-                        return;
-                    }
-
-                    if (fromChosen && reachableSet) {
-                        setCollectStatus('ok', `도착 후보 ${filtered.length}개 (출발 기준 필터 적용) — 후보에서 클릭하세요.`);
-                    } else {
-                        setCollectStatus('ok', `도착 후보 ${filtered.length}개를 찾았습니다. 후보에서 클릭하세요.`);
-                    }
+                    $scope.collect = $scope.collect || {};
+                    // ✅ 더 이상 reachableSet 필터링 하지 않음
+                    $scope.collect.toCandidates = list || [];
+                    setCollectStatus('ok', (kw ? '검색 완료' : '전체 로드 완료') + ' (' + ($scope.collect.toCandidates.length || 0) + ')');
                 })
-                .catch(function (err) {
-                    console.error('[BusController] collect to search fail:', err);
+                .catch(function () {
+                    $scope.collect = $scope.collect || {};
                     $scope.collect.toCandidates = [];
-                    $scope.collect.to = null;
-                    $scope.collect.toStopId = '';
-                    $scope.collect.toStopName = '';
-                    $scope.collectToSelected = null;
-                    setCollectStatus('error', '도착 후보를 불러오지 못했습니다.');
+                    setCollectStatus('error', '도착 정류장 조회 실패');
                 });
         };
 
@@ -2801,7 +2769,7 @@
         }
 
         // ---------------------------------------------------------
-        // ✅ 출발 후보 클릭 → 출발 확정 + "도착 가능 정류장 Set" 준비
+        // ✅ 출발 후보 클릭 → 출발 확정
         $scope.selectCollectFrom = function (stopRaw) {
             const s = normalizeStop(stopRaw);
             if (!s || !s.stopId) {
@@ -2815,7 +2783,9 @@
 
             $scope.collect.from = s;
             $scope.collect.fromStopId = s.stopId;
-            $scope.collect.fromKeyword = stopName;
+
+            // ✅🔥 여기 추가 (DB 저장용 이름)
+            $scope.collect.fromStopName = stopName;
 
             $scope.collectFromSelected = {
                 id: s.stopId,
@@ -2824,107 +2794,9 @@
                 nodeNm: stopName,
                 raw: stopRaw,
             };
-
-            $scope.collect.fromStopName = stopName;
-
-            // ✅ 노선 후보 관련 초기화
-            $scope.collect.routeCandidates = [];
-            $scope.collect.selectedRoute = null;
-            $scope.collect.routeId = '';
-            $scope.collect.routeNo = '';
-
-            // 도착은 초기화
-            $scope.collect.toCandidates = [];
-            $scope.collect.to = null;
-            $scope.collect.toStopId = '';
-            $scope.collect.toStopName = '';
-            $scope.collectToSelected = null;
-
-            // ✅ 핵심: 출발 기준 "도착 가능 nodeId Set" 초기화/생성
-            $scope.collectReachableToSet = null; // Set(nodeId)
-            $scope.collectReachableRoutes = []; // routeId 목록(디버깅용)
-
-            const cityCode = String($scope.collect.cityCode || CITY_CODE || 25);
-            const fromStopId = String(s.stopId).trim();
-
-            setCollectStatus('ok', `출발 선택됨: ${stopName} (ID: ${fromStopId}) → 도착 가능 정류장 계산 중...`);
-
-            // ✅ 1) 출발 정류장 arrival로 routeId 뽑기
-            fetchArrivalForStop(cityCode, fromStopId)
-                .then(function (fromArrivals) {
-                    fromArrivals = fromArrivals || [];
-
-                    // routeId 수집(중복 제거)
-                    const routeIds = [];
-                    const seen = new Set();
-
-                    fromArrivals.forEach(function (x) {
-                        const rid = String(x.routeid || x.routeId || x.busRouteId || x.route_id || '').trim();
-                        if (!rid) return;
-                        if (seen.has(rid)) return;
-                        seen.add(rid);
-                        routeIds.push(rid);
-                    });
-
-                    // 너무 많으면 상위 N개만(네트워크 폭주 방지)
-                    // 필요하면 10~20으로 조절해
-                    const MAX_ROUTES = 12;
-                    const picked = routeIds.slice(0, MAX_ROUTES);
-
-                    $scope.collectReachableRoutes = picked;
-
-                    if (!picked.length) {
-                        setCollectStatus('error', '출발 정류장 도착정보(arrival)에서 노선(routeId)을 찾지 못했어요.');
-                        $scope.$applyAsync();
-                        return null;
-                    }
-
-                    // ✅ 2) routePathRaw로 "해당 노선에 포함된 정류장 nodeId" 모으기
-                    const ps = picked.map(function (rid) {
-                        return loadRoutePathRaw(rid, cityCode).then(function (info) {
-                            if (!info || !info.byNodeId) return null;
-
-                            // info.byNodeId: Map(nodeId -> {ord,item}) 형태라고 가정
-                            // Map 키들(nodeId) 전부를 reachable 후보로 추가
-                            const ids = [];
-                            try {
-                                info.byNodeId.forEach(function (_v, k) {
-                                    ids.push(String(k));
-                                });
-                            } catch (e) {}
-
-                            return ids;
-                        });
-                    });
-
-                    return $q.all(ps).then(function (lists) {
-                        const set = new Set();
-                        (lists || []).forEach(function (ids) {
-                            (ids || []).forEach(function (id) {
-                                if (!id) return;
-                                // 출발 자기 자신은 도착 후보에서 제외(원하면 제거)
-                                if (String(id) === String(fromStopId)) return;
-                                set.add(String(id));
-                            });
-                        });
-
-                        $scope.collectReachableToSet = set;
-
-                        setCollectStatus('ok', `출발 선택됨: ${stopName} → 도착 후보 제한 준비 완료 (가능 후보 nodeId 약 ${set.size}개)`);
-                        $scope.$applyAsync();
-                    });
-                })
-                .catch(function (err) {
-                    console.error('[selectCollectFrom] reachable build fail', err);
-                    setCollectStatus('error', '도착 가능 정류장 계산 실패(네트워크/routePathRaw 문제)');
-                    $scope.$applyAsync();
-                });
         };
 
-        // ---------------------------------------------------------
-        // 도착 후보 클릭 → 도착 확정 + (선택) 노선 후보 필터링
-        // ---------------------------------------------------------
-        // ✅ 도착 후보 클릭 → 도착 확정 (출발 기준 필터링 포함)
+        // ✅ 도착 후보 클릭 → 도착 확정
         $scope.selectCollectTo = function (stopRaw) {
             const s = normalizeStop(stopRaw);
             if (!s || !s.stopId) {
@@ -2932,43 +2804,24 @@
                 return;
             }
 
-            const stopId = String(s.stopId).trim();
             const stopName = String(s.name || s.nodenm || s.nodeNm || '').trim();
-
-            // ✅ 출발 기준 도착 가능 여부 체크 (핵심)
-            const set = $scope.collectReachableToSet;
-            if (set && set instanceof Set) {
-                if (!set.has(stopId)) {
-                    setCollectStatus('error', '출발 정류장에서 같은 노선으로 갈 수 있는 도착 정류장이 아닙니다.');
-                    return;
-                }
-            }
 
             $scope.collect = $scope.collect || {};
 
             $scope.collect.to = s;
-            $scope.collect.toStopId = stopId;
-            $scope.collect.toKeyword = stopName;
+            $scope.collect.toStopId = s.stopId;
+
+            // ✅🔥 여기 추가 (DB 저장용 이름)
+            $scope.collect.toStopName = stopName;
 
             $scope.collectToSelected = {
-                id: stopId,
+                id: s.stopId,
                 name: stopName,
                 nodenm: stopName,
                 nodeNm: stopName,
                 raw: stopRaw,
             };
-
-            $scope.collect.toStopName = stopName;
-
-            // ✅ 노선 관련 UI/상태는 사용 안 함
-            $scope.collect.routeCandidates = [];
-            $scope.collect.selectedRoute = null;
-            $scope.collect.routeId = '';
-            $scope.collect.routeNo = '';
-
-            setCollectStatus('ok', `도착 선택됨: ${stopName} (ID: ${stopId})`);
         };
-
         // ---------------------------------------------------------
         // ❌ 노선 수동 선택 기능은 더 이상 사용하지 않으므로 유지하되 비활성
         $scope.selectCollectRoute = function () {
@@ -3061,9 +2914,112 @@
             return $scope.collectOnce(true, collectToken);
         };
 
+        // ---------------------------------------------------------
+        // ✅ arrival API (출발/도착 기준)
+        function fetchArrivalForStop(cityCode, stopId) {
+            return $http
+                .get('/api/bus/arrival', {
+                    params: {
+                        cityCode: cityCode,
+                        nodeId: stopId,
+                        numOfRows: 50,
+                        pageNo: 1,
+                    },
+                })
+                .then(function (res) {
+                    let data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+                    let body = ((data || {}).response || {}).body || {};
+                    let list = (body.items && body.items.item) || [];
+                    if (!Array.isArray(list)) list = list ? [list] : [];
+                    return list;
+                });
+        }
+
+        function pickRouteId(x) {
+            return String(x && (x.routeid || x.routeId || x.busRouteId || x.route_id || x.rid || '')).trim();
+        }
+        function pickRouteNo(x) {
+            return String(x && (x.routeno || x.routeNo || x.routenm || x.routeNm || x.lineNo || x.busRouteNm || '')).trim();
+        }
+        function pickArrSec(x) {
+            const sec = Number(x && (x.arrtime || x.arrTime || x.arrivalSec || x.remaintime || x.remainTime || x.traTime));
+            if (!isFinite(sec) || sec < 0) return null;
+            return Math.floor(sec);
+        }
+
+        // ✅ “해당 정류장”에서 가장 빨리 오는 1개(=API 기반)
+        function pickBestArrivalItem(list) {
+            let best = null;
+            (list || []).forEach(function (x) {
+                const rid = pickRouteId(x);
+                const rno = pickRouteNo(x);
+                const sec = pickArrSec(x);
+                if (!rid || !rno) return; // ✅ route 정보도 API에서 있어야 저장
+                if (sec == null) return;
+
+                if (!best || sec < best.sec) {
+                    best = { routeId: rid, routeNo: rno, sec: sec, raw: x };
+                }
+            });
+            return best;
+        }
+
+        // ✅ 공통 노선으로 “이동 소요시간 의미” 유지 가능한 케이스만 선택 (API 기반)
+        function pickBestCommonRoute(fromList, toList) {
+            const fromMap = new Map(); // routeId -> (가장 빠른 출발 도착 1개)
+            (fromList || []).forEach(function (x) {
+                const rid = pickRouteId(x);
+                const sec = pickArrSec(x);
+                if (!rid || sec == null) return;
+
+                if (!fromMap.has(rid)) fromMap.set(rid, x);
+                else {
+                    const prev = fromMap.get(rid);
+                    const prevSec = pickArrSec(prev);
+                    if (prevSec == null || sec < prevSec) fromMap.set(rid, x);
+                }
+            });
+
+            let best = null;
+
+            (toList || []).forEach(function (y) {
+                const rid = pickRouteId(y);
+                if (!rid) return;
+                if (!fromMap.has(rid)) return;
+
+                const x = fromMap.get(rid);
+
+                const fromSec = pickArrSec(x);
+                const toSec = pickArrSec(y);
+                if (fromSec == null || toSec == null) return;
+
+                const diffSec = toSec - fromSec;
+                if (diffSec <= 0 || diffSec > 7200) return;
+
+                const routeNo = pickRouteNo(x) || pickRouteNo(y);
+                if (!routeNo) return;
+
+                const cand = {
+                    routeId: rid,
+                    routeNo: routeNo,
+                    fromSec: fromSec,
+                    toSec: toSec,
+                    diffSec: diffSec,
+                    mode: 'API_COMMON_ROUTE',
+                };
+
+                if (!best || cand.diffSec < best.diffSec) best = cand;
+            });
+
+            return best;
+        }
+
+        // ---------------------------------------------------------
+        // ✅ 수집 1회 실행 (API ONLY)
+        // ---------------------------------------------------------
         $scope.collectOnce = function (saveToDb, tokenFromCaller) {
-            if (saveToDb === undefined) saveToDb = true;
-            saveToDb = saveToDb === true;
+            // ✅ boolean normalize
+            saveToDb = saveToDb !== false;
 
             const myToken = tokenFromCaller == null ? collectToken : tokenFromCaller;
 
@@ -3088,173 +3044,139 @@
             }
 
             // ---------------------------
-            // ✅ 좌표/거리/추정 유틸
+            // ✅ 실행 시작 (API ONLY)
             // ---------------------------
-            function getLatLon(obj) {
-                if (!obj) return null;
+            setCollectStatus('ok', saveToDb ? '수집 + DB 저장 중...(API ONLY)' : '수집 중...(저장 안 함)');
 
-                const latRaw = obj.gpslati ?? obj.gpsLat ?? obj.lat ?? obj.latitude ?? obj.y ?? obj.mapy ?? obj.mapY ?? obj.posY;
-                const lonRaw = obj.gpslong ?? obj.gpsLong ?? obj.lon ?? obj.lng ?? obj.longitude ?? obj.x ?? obj.mapx ?? obj.mapX ?? obj.posX;
+            const pFrom = fetchArrivalForStop(cityCode, fromStopId);
+            const pTo = fetchArrivalForStop(cityCode, toStopId);
 
-                const lat = parseFloat(latRaw);
-                const lon = parseFloat(lonRaw);
-
-                if (!isFinite(lat) || !isFinite(lon)) return null;
-                return { lat: lat, lon: lon };
-            }
-
-            function haversineM(a, b) {
-                const R = 6371000;
-                const toRad = (d) => (d * Math.PI) / 180;
-                const dLat = toRad(b.lat - a.lat);
-                const dLon = toRad(b.lon - a.lon);
-                const lat1 = toRad(a.lat);
-                const lat2 = toRad(b.lat);
-
-                const s = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
-
-                return 2 * R * Math.asin(Math.sqrt(s));
-            }
-
-            function estimateDiffSecByDistance(fromStopObj, toStopObj) {
-                const A = getLatLon(fromStopObj);
-                const B = getLatLon(toStopObj);
-
-                if (!A || !B) return 720; // 좌표 없으면 12분
-
-                const distM = haversineM(A, B);
-
-                const speed = 6.1; // 22km/h ≈ 6.1m/s
-                let sec = distM / speed;
-
-                sec += Math.max(40, (distM / 800) * 35); // 신호/정차 패널티
-
-                sec = Math.max(120, Math.min(sec, 7200));
-                return Math.round(sec);
-            }
-
-            function estimateDiffSecByOrd(fromItem, toItem) {
-                const aOrd = parseInt(fromItem.nodeord || fromItem.nodeOrd || fromItem.nodeseq || fromItem.nodeSeq || fromItem.seq || fromItem.ord || 0, 10);
-                const bOrd = parseInt(toItem.nodeord || toItem.nodeOrd || toItem.nodeseq || toItem.nodeSeq || toItem.seq || toItem.ord || 0, 10);
-
-                const hop = Math.abs(bOrd - aOrd);
-
-                let secByHop = hop > 0 ? hop * 55 : 0;
-                const secByDist = estimateDiffSecByDistance(fromItem, toItem);
-
-                let sec = Math.max(120, Math.max(secByHop, secByDist));
-                sec = Math.min(sec, 7200);
-                return Math.round(sec);
-            }
-
-            // ---------------------------
-            // ✅ “출발 arrival에서 가장 빠른 arrtime” 뽑기 (fallback에서 fromSec=0 방지)
-            // ---------------------------
-            function getBestFromArrSec(fromList) {
-                let best = null;
-                (fromList || []).forEach(function (x) {
-                    const sec = Number(x.arrtime || x.arrTime || x.arrivalSec || x.remaintime || x.remainTime);
-                    if (!isFinite(sec) || sec < 0) return;
-                    if (best == null || sec < best) best = sec;
-                });
-                return best == null ? 0 : Math.floor(best);
-            }
-
-            // ---------------------------
-            // ✅ 공통 노선 선택(1차)
-            // ---------------------------
-            function pickBestCommonRoute(fromList, toList) {
-                const fromMap = new Map(); // routeId -> item(출발쪽 가장 빠른 도착 1개)
-                (fromList || []).forEach(function (x) {
-                    const rid = String(x.routeid || x.routeId || x.busRouteId || x.route_id || '').trim();
-                    if (!rid) return;
-
-                    const sec = Number(x.arrtime || x.arrTime || x.arrivalSec || x.remaintime || x.remainTime);
-                    if (!isFinite(sec)) return;
-
-                    if (!fromMap.has(rid)) fromMap.set(rid, x);
-                    else {
-                        const prev = fromMap.get(rid);
-                        const prevSec = Number(prev.arrtime || prev.arrTime || prev.arrivalSec || prev.remaintime || prev.remainTime);
-                        if (!isFinite(prevSec) || sec < prevSec) fromMap.set(rid, x);
-                    }
-                });
-
-                let best = null;
-
-                (toList || []).forEach(function (y) {
-                    const rid = String(y.routeid || y.routeId || y.busRouteId || y.route_id || '').trim();
-                    if (!rid) return;
-                    if (!fromMap.has(rid)) return;
-
-                    const x = fromMap.get(rid);
-
-                    const fromSec = Number(x.arrtime || x.arrTime || x.arrivalSec || x.remaintime || x.remainTime);
-                    const toSec = Number(y.arrtime || y.arrTime || y.arrivalSec || y.remaintime || y.remainTime);
-                    if (!isFinite(fromSec) || !isFinite(toSec)) return;
-
-                    const diffSec = toSec - fromSec;
-
-                    if (diffSec <= 0 || diffSec > 7200) return;
-
-                    const routeNo = String(x.routeno || x.routeNo || x.routenm || x.routeNm || y.routeno || y.routeNo || y.routenm || y.routeNm || '').trim();
-
-                    const cand = {
-                        routeId: rid,
-                        routeNo: routeNo,
-                        fromItem: x,
-                        toItem: y,
-                        fromSec: fromSec,
-                        toSec: toSec,
-                        diffSec: diffSec,
-                        mode: 'AUTO_COMMON_ROUTE',
-                    };
-
-                    if (!best || cand.diffSec < best.diffSec) best = cand;
-                });
-
-                return best;
-            }
-
-            // ---------------------------
-            // ✅ best를 “공통 처리”(UI/저장)로 통일
-            // ---------------------------
-            function applyBestAndContinue(best) {
-                const diffSec = Math.max(1, Math.floor(Number(best.diffSec) || 0));
-
-                const fromName = ($scope.collectFromSelected && ($scope.collectFromSelected.name || $scope.collectFromSelected.nodenm || $scope.collectFromSelected.nodeNm)) || $scope.collect.fromStopName || '';
-
-                const toName = ($scope.collectToSelected && ($scope.collectToSelected.name || $scope.collectToSelected.nodenm || $scope.collectToSelected.nodeNm)) || $scope.collect.toStopName || '';
-
-                // 내부적으로 저장
-                $scope.collect.routeId = best.routeId;
-                $scope.collect.routeNo = best.routeNo;
-
-                const fromArrSec = Number(best.fromSec) || 0;
-                const toArrSec = Number(best.toSec) || fromArrSec + diffSec;
-
-                $scope.collectLast = {
-                    cityCode: cityCode,
-                    routeId: best.routeId,
-                    routeNo: best.routeNo,
-                    fromStopId: fromStopId,
-                    toStopId: toStopId,
-                    fromStopName: fromName,
-                    toStopName: toName,
-                    fromArrSec: fromArrSec,
-                    toArrSec: toArrSec,
-                    diffSec: diffSec,
-                    pretty: formatEta(diffSec) + (best.mode !== 'AUTO_COMMON_ROUTE' ? ' (추정)' : ''),
-                    collectedAt: new Date(),
-                    mode: best.mode,
-                };
-
-                if (!saveToDb) {
-                    setCollectStatus('ok', '수집 완료: ' + $scope.collectLast.pretty);
+            return $q.all([pFrom, pTo]).then(function (arr) {
+                if (saveToDb && (myToken !== collectToken || !$scope.collecting)) {
+                    console.warn('[collectOnce] canceled by stopCollect (before compute)');
                     return;
                 }
 
-                if (myToken !== collectToken || !$scope.collecting) {
+                const fromList = arr[0] || [];
+                const toList = arr[1] || [];
+
+                // ✅🔥 FIX: 출발/도착 이름 fallback 보강
+                // collectFromSelected(선택객체) → collect.from(정류장 객체) → collect.fromStopName(문자열)
+                const fromName =
+                    ($scope.collectFromSelected && ($scope.collectFromSelected.name || $scope.collectFromSelected.nodenm || $scope.collectFromSelected.nodeNm)) ||
+                    ($scope.collect.from && ($scope.collect.from.name || $scope.collect.from.nodenm || $scope.collect.from.nodeNm)) ||
+                    $scope.collect.fromStopName ||
+                    '';
+
+                const toName =
+                    ($scope.collectToSelected && ($scope.collectToSelected.name || $scope.collectToSelected.nodenm || $scope.collectToSelected.nodeNm)) ||
+                    ($scope.collect.to && ($scope.collect.to.name || $scope.collect.to.nodenm || $scope.collect.to.nodeNm)) ||
+                    $scope.collect.toStopName ||
+                    '';
+
+                // ✅ 1) 공통 노선(= “이동 소요시간 의미” 유지 가능) → API 값만 저장
+                const bestCommon = pickBestCommonRoute(fromList, toList);
+                if (bestCommon) {
+                    return saveApiOnlyResult(saveToDb, myToken, {
+                        cityCode,
+                        routeId: bestCommon.routeId,
+                        routeNo: bestCommon.routeNo,
+                        fromStopId,
+                        toStopId,
+                        fromStopName: fromName,
+                        toStopName: toName,
+                        fromArrSec: bestCommon.fromSec,
+                        toArrSec: bestCommon.toSec,
+                        diffSec: bestCommon.diffSec,
+                        mode: bestCommon.mode,
+                        note: '공통노선(API) 기준',
+                    });
+                }
+
+                // ✅ 2) 공통 노선이 없어도 저장: 각 정류장 최단 도착 1개씩 (API ONLY)
+                const bestFrom = pickBestArrivalItem(fromList);
+                const bestTo = pickBestArrivalItem(toList);
+
+                if (!bestFrom || !bestTo) {
+                    setCollectStatus('error', 'API 도착정보에서 routeId/routeNo/arrtime을 충분히 얻지 못해 저장할 수 없습니다.');
+                    return;
+                }
+
+                const fromArrSec = bestFrom.sec;
+                const toArrSec = bestTo.sec;
+
+                // diffSec는 참고용(두 도착시간 차이)
+                const diffSec = Math.max(0, (toArrSec || 0) - (fromArrSec || 0));
+
+                setCollectStatus('ok', '⚠ 공통노선이 없어 “각 정류장 도착시간(API)”으로 저장합니다. (이동시간 추정 없음)');
+
+                return saveApiOnlyResult(saveToDb, myToken, {
+                    cityCode,
+                    // ✅ 출발 정류장 기준(bestFrom) — 추정 금지
+                    routeId: bestFrom.routeId,
+                    routeNo: bestFrom.routeNo,
+
+                    fromStopId,
+                    toStopId,
+                    fromStopName: fromName,
+                    toStopName: toName,
+
+                    fromArrSec,
+                    toArrSec,
+                    diffSec,
+
+                    mode: 'API_NO_COMMON_SAVE_BOTH_STOPS',
+
+                    // 확장용(백엔드가 무시해도 OK)
+                    toRouteId: bestTo.routeId,
+                    toRouteNo: bestTo.routeNo,
+                    note: '공통노선 없음 → 각 정류장 최단도착(API) 저장',
+                });
+            });
+
+            // ---------------------------------------------------------
+            // ✅ DB 저장/화면 반영 (API ONLY 공통 처리)
+            // ---------------------------------------------------------
+            function saveApiOnlyResult(saveToDbArg, myTokenArg, obj) {
+                const routeId = String(obj.routeId || '').trim();
+                const routeNo = String(obj.routeNo || '').trim();
+
+                // ✅ 추정 금지: routeId/routeNo 없으면 저장하지 않음
+                if (!routeId || !routeNo) {
+                    setCollectStatus('error', 'routeId/routeNo를 API에서 얻지 못해 저장을 중단했습니다.');
+                    return;
+                }
+
+                const diffSec = Math.max(0, Math.floor(Number(obj.diffSec) || 0));
+
+                $scope.collect.routeId = routeId;
+                $scope.collect.routeNo = routeNo;
+
+                $scope.collectLast = {
+                    cityCode: obj.cityCode,
+                    routeId: routeId,
+                    routeNo: routeNo,
+                    fromStopId: obj.fromStopId,
+                    toStopId: obj.toStopId,
+                    fromStopName: obj.fromStopName,
+                    toStopName: obj.toStopName,
+                    fromArrSec: obj.fromArrSec,
+                    toArrSec: obj.toArrSec,
+                    diffSec: diffSec,
+                    pretty: formatEta(diffSec),
+                    collectedAt: new Date(),
+                    mode: obj.mode,
+                    note: obj.note || '',
+                    toRouteId: obj.toRouteId,
+                    toRouteNo: obj.toRouteNo,
+                };
+
+                if (!saveToDbArg) {
+                    setCollectStatus('ok', '수집 완료(API ONLY): ' + $scope.collectLast.pretty);
+                    return;
+                }
+
+                if (myTokenArg !== collectToken || !$scope.collecting) {
                     console.warn('[collectOnce] canceled by stopCollect (before save)');
                     return;
                 }
@@ -3265,30 +3187,35 @@
                 }
                 $scope.collect._saving = true;
 
-                const dedupeKey = [cityCode, best.routeId, fromStopId, toStopId, $scope.collectLast.fromArrSec, $scope.collectLast.toArrSec, diffSec, best.mode].join('|');
+                const dedupeKey = [obj.cityCode, routeId, obj.fromStopId, obj.toStopId, obj.fromArrSec, obj.toArrSec, diffSec, obj.mode, obj.toRouteId || '', obj.toRouteNo || ''].join('|');
 
                 const payload = {
-                    cityCode: Number(cityCode),
-                    routeId: best.routeId,
-                    routeNo: best.routeNo,
-                    fromStopId: fromStopId,
-                    toStopId: toStopId,
-                    fromStopName: fromName,
-                    toStopName: toName,
-                    fromArrSec: $scope.collectLast.fromArrSec,
-                    toArrSec: $scope.collectLast.toArrSec,
+                    cityCode: Number(obj.cityCode),
+                    routeId: routeId,
+                    routeNo: routeNo,
+                    fromStopId: obj.fromStopId,
+                    toStopId: obj.toStopId,
+                    fromStopName: obj.fromStopName,
+                    toStopName: obj.toStopName,
+                    fromArrSec: obj.fromArrSec,
+                    toArrSec: obj.toArrSec,
                     diffSec: diffSec,
-                    mode: best.mode,
+                    mode: obj.mode,
                     collectedAt: new Date().toISOString(),
                     dedupeKey: dedupeKey,
+
+                    // 확장 필드(백엔드가 지원하면 저장)
+                    toRouteId: obj.toRouteId,
+                    toRouteNo: obj.toRouteNo,
+                    note: obj.note || '',
                 };
 
                 return $http
                     .post('/api/buscollect/save', payload)
                     .then(function (res) {
                         const data = res.data || {};
-                        if (data.saved === false) setCollectStatus('ok', '⏭ 중복이라 저장 안 함: ' + $scope.collectLast.pretty);
-                        else setCollectStatus('ok', '✅ 저장 완료: ' + $scope.collectLast.pretty);
+                        if (data.saved === false) setCollectStatus('ok', '⏭ 중복이라 저장 안 함(API ONLY): ' + $scope.collectLast.pretty);
+                        else setCollectStatus('ok', '✅ 저장 완료(API ONLY): ' + $scope.collectLast.pretty);
                     })
                     .catch(function (err) {
                         console.error('[collectOnce] DB save fail', err);
@@ -3298,189 +3225,208 @@
                         $scope.collect._saving = false;
                     });
             }
-
-            // ---------------------------
-            // ✅ 실행 시작
-            // ---------------------------
-            setCollectStatus('ok', saveToDb ? '수집 + DB 저장 중...(노선 자동 선택)' : '수집 중...(저장 안 함)');
-
-            const pFrom = fetchArrivalForStop(cityCode, fromStopId);
-            const pTo = fetchArrivalForStop(cityCode, toStopId);
-
-            return $q
-                .all([pFrom, pTo])
-                .then(function (arr) {
-                    if (saveToDb && (myToken !== collectToken || !$scope.collecting)) {
-                        console.warn('[collectOnce] canceled by stopCollect (before compute)');
-                        return;
-                    }
-
-                    const fromList = arr[0] || [];
-                    const toList = arr[1] || [];
-
-                    const bestFromArrSec = getBestFromArrSec(fromList); // ✅ fallback에서 사용
-
-                    // 1) 공통 노선으로 정상 계산
-                    const best = pickBestCommonRoute(fromList, toList);
-                    if (best) return applyBestAndContinue(best);
-
-                    // 2) routePathRaw + nodeord 기반 추정 (가능하면)
-                    const fromCandidates = (fromList || [])
-                        .map(function (x) {
-                            const rid = String(x.routeid || x.routeId || x.busRouteId || x.route_id || '').trim();
-                            const sec = Number(x.arrtime || x.arrTime || x.arrivalSec || x.remaintime || x.remainTime);
-                            const rno = String(x.routeno || x.routeNo || x.routenm || x.routeNm || '').trim();
-                            return { rid: rid, sec: sec, routeNo: rno, raw: x };
-                        })
-                        .filter(function (o) {
-                            return !!o.rid && isFinite(o.sec);
-                        })
-                        .sort(function (a, b) {
-                            return a.sec - b.sec;
-                        })
-                        .slice(0, 6);
-
-                    if (typeof loadRoutePathRaw === 'function' && fromCandidates.length) {
-                        return $q
-                            .all(
-                                fromCandidates.map(function (c) {
-                                    return loadRoutePathRaw(c.rid, cityCode).then(function (info) {
-                                        if (!info || !info.byNodeId) return null;
-
-                                        const a = info.byNodeId.get(String(fromStopId));
-                                        const b = info.byNodeId.get(String(toStopId));
-                                        if (!a || !b || !a.item || !b.item) return null;
-
-                                        const diffGuess = estimateDiffSecByOrd(a.item, b.item);
-                                        if (!isFinite(diffGuess) || diffGuess <= 0) return null;
-
-                                        const fromSec = isFinite(c.sec) ? Math.floor(Number(c.sec)) : bestFromArrSec;
-
-                                        return {
-                                            routeId: c.rid,
-                                            routeNo: c.routeNo || '추정',
-                                            fromSec: fromSec, // ✅ 0 방지
-                                            toSec: fromSec + diffGuess, // ✅ 0 방지
-                                            diffSec: diffGuess,
-                                            mode: 'EST_BY_NODEORD',
-                                        };
-                                    });
-                                })
-                            )
-                            .then(function (results) {
-                                const ok = (results || []).filter(Boolean);
-                                if (ok.length) {
-                                    ok.sort(function (a, b) {
-                                        return a.diffSec - b.diffSec;
-                                    });
-                                    setCollectStatus('ok', '⚠ 공통노선은 없어서 경로(nodeord) 기반으로 소요시간을 추정했어요.');
-                                    return applyBestAndContinue(ok[0]);
-                                }
-
-                                // 3) 최후 fallback: 거리 기반
-                                const fromStopObj = ($scope.collect && $scope.collect.from) || $scope.collectFromSelected || {};
-                                const toStopObj = ($scope.collect && $scope.collect.to) || $scope.collectToSelected || {};
-                                const diffSec = estimateDiffSecByDistance(fromStopObj, toStopObj);
-
-                                const fromSec = bestFromArrSec; // ✅ 0 방지(가능한 한 API 기반)
-
-                                setCollectStatus('ok', '⚠ 공통노선/경로정보가 없어 거리 기반으로 소요시간을 추정했어요.');
-                                return applyBestAndContinue({
-                                    routeId: 'ESTIMATED',
-                                    routeNo: '추정',
-                                    fromSec: fromSec,
-                                    toSec: fromSec + diffSec,
-                                    diffSec: diffSec,
-                                    mode: 'EST_BY_DISTANCE',
-                                });
-                            });
-                    }
-
-                    // loadRoutePathRaw 없거나 후보 없음 → 바로 거리 기반
-                    const fromStopObj = ($scope.collect && $scope.collect.from) || $scope.collectFromSelected || {};
-                    const toStopObj = ($scope.collect && $scope.collect.to) || $scope.collectToSelected || {};
-                    const diffSec = estimateDiffSecByDistance(fromStopObj, toStopObj);
-
-                    const fromSec = bestFromArrSec; // ✅ 0 방지(가능한 한 API 기반)
-
-                    setCollectStatus('ok', '⚠ 공통노선이 없어 거리 기반으로 소요시간을 추정했어요.');
-                    return applyBestAndContinue({
-                        routeId: 'ESTIMATED',
-                        routeNo: '추정',
-                        fromSec: fromSec,
-                        toSec: fromSec + diffSec,
-                        diffSec: diffSec,
-                        mode: 'EST_BY_DISTANCE',
-                    });
-                })
-                .catch(function (err) {
-                    console.error('[collectOnce] arrival fetch fail', err);
-
-                    // arrival 자체 실패 → 그래도 거리 기반으로 계속
-                    const fromStopObj = ($scope.collect && $scope.collect.from) || $scope.collectFromSelected || {};
-                    const toStopObj = ($scope.collect && $scope.collect.to) || $scope.collectToSelected || {};
-                    const diffSec = estimateDiffSecByDistance(fromStopObj, toStopObj);
-
-                    setCollectStatus('ok', '⚠ arrival 호출 실패로 거리 기반 추정으로 대체했어요.');
-
-                    return applyBestAndContinue({
-                        routeId: 'ESTIMATED',
-                        routeNo: '추정',
-                        fromSec: 0,
-                        toSec: diffSec,
-                        diffSec: diffSec,
-                        mode: 'EST_BY_DISTANCE_ON_ERROR',
-                    });
-                });
         };
 
         // =========================================================
         // ✅ 최단경로(데모) - 출발/도착 후보 검색 (DB 기반으로 변경)
         // =========================================================
-        function searchStopsDbForPath(keyword) {
+        // ✅ 최단경로(데모) - 출발/도착 후보 검색 (DB 기반)
+        //  - BUS 모드에서 입력이 비어있으면 "버스 정류장 전체"를 후보로 띄움
+        // =========================================================
+        function searchStopsDbForPath(keyword, mode) {
             const kw = (keyword || '').trim();
-            if (!kw) return $q.resolve([]);
-            return fetchStopsFromDb(CITY_CODE, kw, null, 50).then(function (rows) {
-                return rows.map(normalizeStop).filter(Boolean).slice(0, 10);
+
+            // ✅ [TRAM] 입력이 비어있으면 → tram-data.js의 정류장 목록을 그대로 반환
+            if (mode === 'TRAM' && !kw) {
+                const all = window.TRAM_STATIONS || window.TRAM_ROUTE_FULL_HD || [];
+                const list = (all || [])
+                    .filter(function (p) {
+                        return p && p.type === 'station';
+                    })
+                    .map(function (p) {
+                        return {
+                            nodeid: 'TRAM-' + p.id, // ✅ stopId 겹침 방지용 prefix
+                            nodenm: String(p.name || '트램 정류장 ' + p.id),
+                            gpslati: p.lat,
+                            gpslong: p.lng,
+                            type: 'TRAM', // ✅ 표시용(선택)
+                            _tram: p,
+                        };
+                    })
+                    .map(normalizeStop)
+                    .filter(function (x) {
+                        return x && x.stopId && x.name;
+                    });
+
+                // ✅ 번호 순 정렬 (TRAM-1, TRAM-2 ...)
+                list.sort(function (a, b) {
+                    const ai = parseInt(String(a.stopId).replace(/[^\d]/g, ''), 10);
+                    const bi = parseInt(String(b.stopId).replace(/[^\d]/g, ''), 10);
+                    return (ai || 0) - (bi || 0);
+                });
+
+                // ✅✅ 여기서 더 이상 slice로 자르지 않음 (전체 반환)
+                return $q.resolve(list);
+            }
+
+            // ✅ mode에 따른 type 필터
+            let type = null;
+            if (mode === 'BUS') type = 'BUS';
+            else if (mode === 'TRAM') type = 'TRAM';
+            else type = null; // MIXED는 일단 전체
+
+            // ✅✅ BUS 전체조회(kw 없음)는 3069개 전부 필요 → limit 크게
+            // fetchStopsFromDb가 limit 없으면 서버 기본 limit 걸릴 수 있으니 큰 값 넣음
+            const limit = kw ? 50 : 20000;
+
+            return fetchStopsFromDb(CITY_CODE, kw, type, limit).then(function (rows) {
+                const list = (rows || []).map(normalizeStop).filter(function (x) {
+                    return x && x.stopId && x.name;
+                });
+
+                // ✅✅ 검색어 없으면 "전체 반환" (절대 slice 하지 말 것)
+                if (!kw) return list;
+
+                // ✅ 검색어 있을 때만 상위 n개 제한(원하면 10→30 같은 식으로 변경)
+                return list.slice(0, 10);
             });
         }
 
+        // ✅ (추가) type 정규화 + 트램 판별 헬퍼
+        function normType(v) {
+            return String(v || '')
+                .trim()
+                .toUpperCase();
+        }
+
+        function isTramRow(s) {
+            const t = normType(s && s.type);
+            if (t === 'TRAM') return true;
+            if (t === 'T') return true;
+            if (t.indexOf('TRAM') !== -1) return true;
+            if (t.indexOf('트램') !== -1) return true;
+            return false;
+        }
+
+        // =========================================================
+        // ✅ searchFrom / searchTo : searchStopsDbForPath() 사용
+        // =========================================================
         $scope.searchFrom = function () {
             $scope.pathResult = null;
-            return searchStopsDbForPath($scope.path.fromKeyword).then(function (rows) {
-                $scope.path.fromCandidates = rows;
-                $scope.path.from = null;
-                setPathStatus('', rows.length ? '출발 후보를 선택하세요.' : '출발 후보가 없습니다.');
-            });
+
+            const mode = ($scope.path && $scope.path.mode) || 'BUS';
+            const kw = (($scope.path && $scope.path.fromKeyword) || '').trim();
+
+            setPathStatus('info', kw ? '출발 정류장 검색 중...' : mode === 'TRAM' ? '출발 트램 정류장 목록 불러오는 중...' : '출발 정류장 전체 불러오는 중...');
+
+            return searchStopsDbForPath(kw, mode)
+                .then(function (list) {
+                    list = list || [];
+
+                    $scope.path.fromCandidates = list;
+
+                    // ✅ 후보 다시 불러오면 기존 선택 초기화
+                    $scope.path.from = null;
+                    $scope.path.fromNodeId = null; // 버튼 disabled 조건이 이거라서 초기화는 OK
+
+                    if (!list.length) {
+                        setPathStatus('error', mode === 'TRAM' ? '출발 트램 후보가 없습니다. (tram-data.js 로드/데이터 확인)' : '출발 후보가 없습니다.');
+                    } else {
+                        if (mode === 'BUS') {
+                            setPathStatus('', kw ? `출발 후보를 선택하세요. (${list.length}개)` : `출발 버스 정류장 후보를 선택하세요. (${list.length}개)`);
+                        } else if (mode === 'TRAM') {
+                            setPathStatus('', kw ? `출발 후보를 선택하세요. (${list.length}개)` : `출발 트램 정류장 후보를 선택하세요. (${list.length}개)`);
+                        } else {
+                            setPathStatus('', kw ? `출발 후보를 선택하세요. (${list.length}개)` : `출발 후보(전체)를 선택하세요. (${list.length}개)`);
+                        }
+                    }
+
+                    return list;
+                })
+                .catch(function (err) {
+                    console.error('[searchFrom] fail:', err);
+                    $scope.path.fromCandidates = [];
+                    $scope.path.from = null;
+                    $scope.path.fromNodeId = null;
+                    setPathStatus('error', '출발 정류장 검색 실패');
+                    return [];
+                });
         };
 
         $scope.searchTo = function () {
             $scope.pathResult = null;
-            return searchStopsDbForPath($scope.path.toKeyword).then(function (rows) {
-                $scope.path.toCandidates = rows;
-                $scope.path.to = null;
-                setPathStatus('', rows.length ? '도착 후보를 선택하세요.' : '도착 후보가 없습니다.');
-            });
+
+            const mode = ($scope.path && $scope.path.mode) || 'BUS';
+            const kw = (($scope.path && $scope.path.toKeyword) || '').trim();
+
+            setPathStatus('info', kw ? '도착 정류장 검색 중...' : mode === 'TRAM' ? '도착 트램 정류장 목록 불러오는 중...' : '도착 정류장 전체 불러오는 중...');
+
+            return searchStopsDbForPath(kw, mode)
+                .then(function (list) {
+                    list = list || [];
+
+                    $scope.path.toCandidates = list;
+
+                    // ✅ 후보 다시 불러오면 기존 선택 초기화
+                    $scope.path.to = null;
+                    $scope.path.toNodeId = null;
+
+                    if (!list.length) {
+                        setPathStatus('error', mode === 'TRAM' ? '도착 트램 후보가 없습니다. (tram-data.js 로드/데이터 확인)' : '도착 후보가 없습니다.');
+                    } else {
+                        if (mode === 'BUS') {
+                            setPathStatus('', kw ? `도착 후보를 선택하세요. (${list.length}개)` : `도착 버스 정류장 후보를 선택하세요. (${list.length}개)`);
+                        } else if (mode === 'TRAM') {
+                            setPathStatus('', kw ? `도착 후보를 선택하세요. (${list.length}개)` : `도착 트램 정류장 후보를 선택하세요. (${list.length}개)`);
+                        } else {
+                            setPathStatus('', kw ? `도착 후보를 선택하세요. (${list.length}개)` : `도착 후보(전체)를 선택하세요. (${list.length}개)`);
+                        }
+                    }
+
+                    return list;
+                })
+                .catch(function (err) {
+                    console.error('[searchTo] fail:', err);
+                    $scope.path.toCandidates = [];
+                    $scope.path.to = null;
+                    $scope.path.toNodeId = null;
+                    setPathStatus('error', '도착 정류장 검색 실패');
+                    return [];
+                });
         };
 
+        // ✅✅✅ 핵심 수정: 선택 시 fromNodeId / toNodeId 를 반드시 채운다
         $scope.selectFrom = function (s) {
+            if (!s) return;
+
             $scope.path.from = s;
-            setPathStatus('', `출발 선택: ${s.name} (${s.stopId})`);
+
+            // 🔥 버튼 활성화 조건이 이 값임
+            $scope.path.fromNodeId = s.stopId || (s.raw && (s.raw.nodeid || s.raw.nodeId)) || null;
+
+            setPathStatus('', `출발 선택: ${s.name} (${$scope.path.fromNodeId || s.stopId})`);
         };
 
         $scope.selectTo = function (s) {
+            if (!s) return;
+
             $scope.path.to = s;
-            setPathStatus('', `도착 선택: ${s.name} (${s.stopId})`);
+
+            // 🔥 버튼 활성화 조건이 이 값임
+            $scope.path.toNodeId = s.stopId || (s.raw && (s.raw.nodeid || s.raw.nodeId)) || null;
+
+            setPathStatus('', `도착 선택: ${s.name} (${$scope.path.toNodeId || s.stopId})`);
         };
 
         $scope.findShortestPath = function () {
             if (!$scope.path.from || !$scope.path.to) return setPathStatus('error', '출발/도착을 각각 선택해야 합니다.');
 
-            // ✅ 실제 API 쓰고 싶으면 아래로 교체 가능
-            // return $http.get('/api/path/shortest', { params: { cityCode: CITY_CODE, fromStopId: $scope.path.from.stopId, toStopId: $scope.path.to.stopId, mode: $scope.path.mode, weight: $scope.path.weight }})
-            //   .then(res => { $scope.pathResult = res.data; setPathStatus('ok', '최단경로 계산 완료'); })
-            //   .catch(err => setPathStatus('error', '최단경로 계산 실패'));
+            // ✅ 버튼 ng-disabled와 동일한 조건을 코드에서도 한번 더 방어
+            if (!($scope.path.fromNodeId && $scope.path.toNodeId)) {
+                return setPathStatus('error', '출발/도착 nodeId가 비어있습니다. 후보를 다시 선택해 주세요.');
+            }
 
+            // ✅ (지금은 데모 유지)
             $scope.pathResult = {
                 totalDistM: 1234,
                 totalTimeSec: 540,
@@ -3488,6 +3434,18 @@
                 transfersCount: $scope.path.mode === 'MIXED' ? 1 : 0,
             };
             setPathStatus('ok', `최단경로 계산(데모) 완료: ${$scope.path.from.name} → ${$scope.path.to.name}`);
+
+            // ✅ (원하면 실제 API로 교체)
+            // const params = {
+            //   cityCode: CITY_CODE,
+            //   fromStopId: $scope.path.fromNodeId,
+            //   toStopId: $scope.path.toNodeId,
+            //   mode: $scope.path.mode,
+            //   weight: $scope.path.weight
+            // };
+            // return $http.get('/api/path/shortest', { params })
+            //   .then(res => { $scope.pathResult = res.data; setPathStatus('ok', '최단경로 계산 완료'); })
+            //   .catch(err => { console.error(err); setPathStatus('error', '최단경로 계산 실패'); });
         };
 
         $scope.clearPath = function () {
