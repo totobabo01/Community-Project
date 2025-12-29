@@ -514,7 +514,6 @@
                 gap: 16px;
                 margin: 12px 0 14px;
                 flex-wrap: wrap;
-                /* ✅ 추가: "소요시간 → 최단경로"를 세로로 고정하고 싶으면 아래 2줄 유지 */
                 flex-direction: column;
             }
             .panel-card {
@@ -594,7 +593,6 @@
                 font-weight: 800;
             }
 
-            /* ✅✅ "1회 수집 테스트(저장)" 버튼을 다른 버튼처럼 보이게 (초록 계열) */
             .fbtn.test-save {
                 background: #22c55e;
                 border-color: #22c55e;
@@ -733,7 +731,6 @@
                 color: #64748b;
             }
 
-            /* ✅ 최단경로 버튼을 "기존 톤"에 맞춰 더 자연스럽게 */
             .fbtn.secondary {
                 background: #ffffff;
                 border-color: #dbe7f5;
@@ -1039,11 +1036,8 @@
 
                         <div class="bus-layout">
                             <div class="bus-map-wrap">
-                                <!-- ✅✅✅ [추가] 스크롤 앵커 -->
-                                <div
-                                    id="output"
-                                    id="mapAnchor"
-                                >
+                                <!-- ✅✅✅ FIX: id 중복 제거 (id는 1개만) -->
+                                <div id="output">
                                     <div id="busMap"></div>
                                     <div
                                         id="mapPopup"
@@ -1172,9 +1166,9 @@
                             </section>
                         </div>
 
-                        <!-- ✅✅✅ (순서 변경) 기능 패널을 아래로 내림: 소요시간 → 최단경로 -->
+                        <!-- ✅✅✅ 기능 패널 -->
                         <div class="feature-panels">
-                            <!-- A) 소요시간 수집 -->
+                            <!-- A) 소요시간 수집 (원본 그대로) -->
                             <div class="panel-card">
                                 <div class="panel-title">
                                     <span class="dot"></span>
@@ -1197,7 +1191,6 @@
                                         <span>대전 고정 (cityCode = {{collect.cityCode}})</span>
                                     </div>
 
-                                    <!-- ✅ 출발/도착 검색 입력 -->
                                     <div
                                         class="frow"
                                         style="margin-top: 10px"
@@ -1248,7 +1241,6 @@
                                         />
                                     </div>
 
-                                    <!-- ✅ 출발/도착 후보 -->
                                     <div class="pick-row">
                                         <div class="pick-col">
                                             <div class="pick-title">출발 후보 (클릭해서 선택)</div>
@@ -1307,7 +1299,6 @@
                                         </div>
                                     </div>
 
-                                    <!-- ✅ 선택된 출발/도착 -->
                                     <div
                                         class="result-box"
                                         ng-if="(collect.fromStopId || (collect.from && collect.from.stopId)) || (collect.toStopId || (collect.to && collect.to.stopId))"
@@ -1340,7 +1331,6 @@
                                         </select>
                                     </div>
 
-                                    <!-- ✅✅✅ FIX: 버튼 3개를 frow 밖에서 factions로 묶어서 태그 깨짐 방지 -->
                                     <div class="factions">
                                         <button
                                             type="button"
@@ -1384,7 +1374,6 @@
                                             중복 방지
                                         </button>
                                     </div>
-                                    <!-- ✅✅✅ FIX 끝 -->
 
                                     <div
                                         class="fstatus"
@@ -1521,7 +1510,6 @@
                                         </div>
                                     </div>
 
-                                    <!-- ✅✅✅ "가중치" 줄에서 거리/시간 같이 보이게 수정 -->
                                     <div class="frow">
                                         <label class="flbl">모드</label>
                                         <select
@@ -1548,28 +1536,26 @@
                                             <option value="TIME">시간(초) 최단</option>
                                         </select>
 
-                                        <!-- ✅ 항상 같이 표시: (결과 없으면 '-') -->
+                                        <!-- ✅✅✅ 보기좋게: 거리(정수+콤마) / 시간(분초 형태) -->
                                         <span class="badge-soft">
                                             거리:
-                                            <b>{{ (pathResult && pathResult.totalDistM) ? (pathResult.totalDistM + ' m') : '-' }}</b>
+                                            <b> {{ (pathResult && pathResult.totalDistM != null) ? ((pathResult.totalDistM | number:0) + ' m') : '-' }} </b>
                                         </span>
                                         <span class="badge-soft">
                                             시간:
-                                            <b>{{ (pathResult && pathResult.totalTimeSec) ? (pathResult.totalTimeSec + ' s') : '-' }}</b>
+                                            <b> {{ (pathResult && pathResult.totalTimeS != null) ? (formatDuration && formatDuration(pathResult.totalTimeS)) : '-' }} </b>
                                         </span>
 
-                                        <!-- ✅✅✅ FIX: disabled 조건을 nodeId 기준으로 (UI active 조건과 일치) -->
                                         <button
                                             class="fbtn primary"
                                             type="button"
-                                            ng-click="findShortestPath && findShortestPath()"
+                                            ng-click="findShortestPath()"
                                             ng-disabled="pathLoading || !(path.fromNodeId && path.toNodeId)"
                                             title="출발/도착 nodeId 선택 후 실행"
                                         >
                                             🚀 최단경로 계산
                                         </button>
 
-                                        <!-- ✅✅✅ [추가] 경로로 이동하기 (경로 지우기 왼쪽) -->
                                         <button
                                             class="fbtn"
                                             type="button"
@@ -1608,9 +1594,16 @@
                                     >
                                         <div class="result-title">📍 최단경로 결과</div>
                                         <div class="result-grid">
-                                            <div><b>총 거리</b> {{pathResult.totalDistM}} m</div>
-                                            <div><b>총 시간</b> {{pathResult.totalTimeSec}} sec</div>
-                                            <div><b>정류장 수</b> {{pathResult.nodesCount}}</div>
+                                            <div><b>총 거리</b> {{pathResult.totalDistM | number:0}} m</div>
+
+                                            <!-- ✅ 초 단위 대신 '31분 43초' 형태 + (원하면 괄호로 초도 같이) -->
+                                            <div>
+                                                <b>총 시간</b>
+                                                {{ formatDuration && formatDuration(pathResult.totalTimeS) }}
+                                                <span style="color: #94a3b8"> ({{pathResult.totalTimeS | number:0}}s)</span>
+                                            </div>
+
+                                            <div><b>정류장 수</b> {{pathResult.stopCount}}</div>
                                             <div><b>환승</b> {{pathResult.transfersCount}}</div>
                                         </div>
                                         <div class="hint2">※ 지도에 <b>파란 polyline</b>으로 경로를 표시합니다.</div>
@@ -1618,7 +1611,7 @@
                                 </div>
                             </div>
                         </div>
-                        <!-- ✅✅✅ 기능 패널 끝 -->
+                        <!-- 기능 패널 끝 -->
                     </section>
                 </div>
             </section>
@@ -1670,12 +1663,12 @@
 
                         try {
                             if (window.angular) {
-                                var body = document.querySelector('body[ng-controller]');
-                                var s = body ? angular.element(body).scope() : null;
-                                if (s)
-                                    s.$applyAsync(function () {
-                                        s.__isAdmin = isAdmin;
-                                        s.isAdmin = isAdmin;
+                                var body2 = document.querySelector('body[ng-controller]');
+                                var s2 = body2 ? angular.element(body2).scope() : null;
+                                if (s2)
+                                    s2.$applyAsync(function () {
+                                        s2.__isAdmin = isAdmin;
+                                        s2.isAdmin = isAdmin;
                                     });
                             }
                         } catch (e) {}
@@ -1736,6 +1729,33 @@
                     console.warn('busMenu 리스너 등록 실패:', e);
                 }
             })();
+        </script>
+
+        <!-- ✅✅✅ 추가: '초 -> 31분 43초' 포맷 유틸(어디서든 쓸 수 있게 전역 함수) -->
+        <script>
+            // Angular 템플릿에서 formatDuration(...) 호출 가능하게 전역으로 제공
+            // (BusController에서 $scope.formatDuration = window.formatDuration; 식으로 연결해도 됨)
+            window.formatDuration = function (sec) {
+                var s = Math.round(Number(sec) || 0);
+                if (s < 0) s = 0;
+
+                var h = Math.floor(s / 3600);
+                var m = Math.floor((s % 3600) / 60);
+                var r = s % 60;
+
+                // 0초면 '0초'
+                if (h <= 0 && m <= 0) return r + '초';
+                // 1시간 이상이면 '1시간 02분 03초' (분/초는 2자리)
+                if (h > 0) return h + '시간 ' + String(m).padStart(2, '0') + '분 ' + String(r).padStart(2, '0') + '초';
+                // 1시간 미만이면 '31분 43초'
+                return m + '분 ' + String(r).padStart(2, '0') + '초';
+            };
+
+            // ✅ (중요) Angular scope에서 바로 쓰려면,
+            // BusController 안에서 아래 한 줄만 추가해주면 됨:
+            // $scope.formatDuration = window.formatDuration;
+            //
+            // 만약 이미 BusController에 formatDuration이 있다면 이 스크립트는 빼도 됨.
         </script>
     </body>
 </html>

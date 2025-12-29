@@ -41,7 +41,8 @@ public class ShortestPathService {
         res.mode = mode.name();
         res.weight = weight.name();
 
-        if (fromStopId == null || fromStopId.isBlank() || toStopId == null || toStopId.isBlank()) {
+        if (fromStopId == null || fromStopId.isBlank() ||
+            toStopId == null || toStopId.isBlank()) {
             res.found = false;
             res.message = "fromStopId / toStopId가 비었습니다.";
             return res;
@@ -54,10 +55,14 @@ public class ShortestPathService {
             return res;
         }
 
-        // stop 캐시 (DB hit 줄이기)
+        // =====================================================
+        // ✅ stop 캐시 (DB hit 최소화)
+        // =====================================================
         Map<String, StopDto> stopCache = new HashMap<>();
 
+        // =====================================================
         // 그래프 구성
+        // =====================================================
         Map<String, List<Edge>> adj = new HashMap<>();
 
         for (BusEdgeDao.EdgeRow e : edges) {
@@ -74,16 +79,18 @@ public class ShortestPathService {
             adj.computeIfAbsent(from.getStopId(), k -> new ArrayList<>())
                .add(new Edge(to.getStopId(), dist, timeS, cost));
 
-            // ✅ 버스는 방향 데이터가 부족한 경우가 많아서 “양방향” 옵션을 기본으로 넣는 게 체감 좋음
-            //    (원치 않으면 아래 블록 주석처리)
+            // ✅ 양방향
             adj.computeIfAbsent(to.getStopId(), k -> new ArrayList<>())
                .add(new Edge(from.getStopId(), dist, timeS, cost));
         }
 
+        // =====================================================
+        // 다익스트라
+        // =====================================================
         DijkstraResult dr = dijkstra(adj, fromStopId, toStopId);
         if (!dr.found) {
             res.found = false;
-            res.message = "경로를 찾지 못했습니다. edges 연결이 부족하거나, 해당 stopId들이 그래프에 없습니다.";
+            res.message = "경로를 찾지 못했습니다. edges 연결이 부족합니다.";
             return res;
         }
 
@@ -97,13 +104,19 @@ public class ShortestPathService {
         res.stopIds = path;
         res.found = true;
 
+        // =====================================================
+        // 총 거리 / 시간 + polyline
+        // =====================================================
         double totalDist = 0.0;
         double totalTime = 0.0;
 
         List<PathResponse.Point> poly = new ArrayList<>();
+
         for (int i = 0; i < path.size(); i++) {
             StopDto s = getStopCached(stopCache, cityCode, path.get(i));
-            if (s != null) poly.add(new PathResponse.Point(s.getLat(), s.getLon()));
+            if (s != null) {
+                poly.add(new PathResponse.Point(s.getLat(), s.getLon()));
+            }
 
             if (i < path.size() - 1) {
                 String a = path.get(i);
@@ -119,6 +132,17 @@ public class ShortestPathService {
         res.totalDistM = totalDist;
         res.totalTimeS = totalTime;
         res.polyline = poly;
+
+        // =====================================================
+        // ✅✅✅ [방법 A 핵심] stopIds → stops (정류장 정보)
+        // =====================================================
+        List<StopDto> stops = new ArrayList<>();
+        for (String stopId : path) {
+            StopDto s = stopCache.get(stopId);
+            if (s != null) stops.add(s);
+        }
+        res.stops = stops;
+
         res.message = "OK";
         return res;
     }
@@ -128,6 +152,7 @@ public class ShortestPathService {
     private StopDto getStopCached(Map<String, StopDto> cache, String cityCode, String stopId) {
         StopDto hit = cache.get(stopId);
         if (hit != null) return hit;
+
         StopDto s = stopDao.findById(cityCode, stopId);
         if (s != null) cache.put(stopId, s);
         return s;
@@ -144,13 +169,18 @@ public class ShortestPathService {
         return (t == StopDto.StopType.TRAM) ? TRAM_SPEED_MPS : BUS_SPEED_MPS;
     }
 
+    // ───────── dijkstra ─────────
+
     private static class Edge {
         String to;
         double distM;
         double timeS;
         double cost;
         Edge(String to, double distM, double timeS, double cost) {
-            this.to = to; this.distM = distM; this.timeS = timeS; this.cost = cost;
+            this.to = to;
+            this.distM = distM;
+            this.timeS = timeS;
+            this.cost = cost;
         }
     }
 
