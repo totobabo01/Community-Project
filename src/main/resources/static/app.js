@@ -3736,7 +3736,62 @@
         };
 
         // =========================================================
-        // ✅✅✅ [REAL] 최단경로 결과를 지도에 그리기 위한 PATH 레이어 추가
+
+        // =========================================================
+        // ✅ 공통: 현재 지도 projection 기준으로 [lon,lat] -> map XY 변환
+        //    (NGII/OpenLayers는 view projection이 3857이 아닐 수 있어서 필수)
+        // =========================================================
+        // ✅ 좌표 변환: EPSG:4326(lon/lat) -> 현재 지도 projection
+        // =========================================================
+        function lonLatToMapXY(lon, lat) {
+            lon = Number(lon);
+            lat = Number(lat);
+            if (!isFinite(lon) || !isFinite(lat)) return null;
+
+            const map = getInnerOlMap();
+            if (!map || !window.ol || !ol.proj) return null;
+
+            const view = map.getView && map.getView();
+            const proj = (view && view.getProjection && view.getProjection()) || window.mapProjection || null;
+
+            try {
+                if (proj && ol.proj.transform) {
+                    return ol.proj.transform([lon, lat], 'EPSG:4326', proj);
+                }
+            } catch (e) {}
+
+            // fallback
+            try {
+                if (ol.proj.fromLonLat) return ol.proj.fromLonLat([lon, lat]);
+            } catch (e) {}
+
+            return [lon, lat];
+        }
+
+        // ✅ 좌표가 거의 같을 때 눈에 보이도록 살짝 밀기
+        function offsetLonLat(lon, lat, meters) {
+            lon = Number(lon);
+            lat = Number(lat);
+            if (!isFinite(lon) || !isFinite(lat)) return [lon, lat];
+
+            const dLat = meters / 111000;
+            const dLon = meters / (111000 * Math.cos((lat * Math.PI) / 180));
+
+            return [lon + dLon, lat + dLat];
+        }
+
+        // ✅ 거리(m)
+        function distanceMeters(lon1, lat1, lon2, lat2) {
+            const R = 6371000;
+            const toRad = (d) => (d * Math.PI) / 180;
+            const dLat = toRad(lat2 - lat1);
+            const dLon = toRad(lon2 - lon1);
+            const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+            return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+
+        // =========================================================
+        // ✅ PATH (파란 경로) 레이어
         // =========================================================
         let pathVectorSource = null;
         let pathVectorLayer = null;
@@ -3749,7 +3804,7 @@
 
             const STYLE = new ol.style.Style({
                 stroke: new ol.style.Stroke({
-                    color: '#2563eb', // ✅ 파랑으로
+                    color: '#2563eb',
                     width: 5,
                     lineCap: 'round',
                     lineJoin: 'round',
@@ -3760,7 +3815,7 @@
                 pathVectorLayer = new ol.layer.Vector({
                     source: pathVectorSource,
                     style: STYLE,
-                    zIndex: 14, // ✅ routeLayer(15)보다 아래로 (또는 5)
+                    zIndex: 14,
                 });
                 map.addLayer(pathVectorLayer);
             } else {
@@ -3770,34 +3825,9 @@
             return true;
         }
 
-        // =========================================================
-        // ✅ 공통: 현재 지도 projection 기준으로 [lon,lat] -> map XY 변환
-        //    (NGII/OpenLayers는 view projection이 3857이 아닐 수 있어서 필수)
-        // =========================================================
-        function lonLatToMapXY(lon, lat) {
-            const map = getInnerOlMap();
-            if (!map || !window.ol) return null;
-
-            const view = map.getView && map.getView();
-            const proj = (view && view.getProjection && view.getProjection()) || mapProjection;
-
-            lon = Number(lon);
-            lat = Number(lat);
-            if (!isFinite(lon) || !isFinite(lat)) return null;
-
-            if (proj && ol.proj && ol.proj.transform) {
-                return ol.proj.transform([lon, lat], 'EPSG:4326', proj);
-            }
-            return [lon, lat];
-        }
-
-        // =========================================================
-        // ✅ PATH clear 시: 경로 + 정류장 + 도보 모두 같이 지우기
-        // =========================================================
+        // ✅ PATH만 clear (권장: stops/walk까지 여기서 지우지 말기)
         function clearPathOnMap() {
             if (pathVectorSource) pathVectorSource.clear(true);
-            if (stopsVectorSource) stopsVectorSource.clear(true); // ✅ 추가
-            if (walkVectorSource) walkVectorSource.clear(true); // ✅ 추가
 
             $scope.pathPolylineFeature = null;
             $scope.pathPolylineExtent = null;
@@ -3812,14 +3842,13 @@
             if (!pathVectorSource) return false;
 
             pathVectorSource.clear(true);
-
             if (!Array.isArray(polyLonLat) || polyLonLat.length < 2) return false;
 
             const projected = polyLonLat
                 .map(function (xy) {
                     const lon = Number(xy && xy[0]);
                     const lat = Number(xy && xy[1]);
-                    return lonLatToMapXY(lon, lat); // ✅ 변경
+                    return lonLatToMapXY(lon, lat);
                 })
                 .filter(Boolean);
 
@@ -3834,11 +3863,14 @@
             $scope.pathPolylineExtent = line.getExtent();
             $scope.pathPolylineReady = true;
 
+            // 렌더 강제
+            if (map.renderSync) map.renderSync();
+
             return true;
         }
 
         // =========================================================
-        // ✅ [추가] 정류장 마커 레이어
+        // ✅ STOPS (정류장 마커) 레이어
         // =========================================================
         let stopsVectorSource = null;
         let stopsVectorLayer = null;
@@ -3852,7 +3884,7 @@
             if (!stopsVectorLayer) {
                 stopsVectorLayer = new ol.layer.Vector({
                     source: stopsVectorSource,
-                    zIndex: 15, // 경로보다 위
+                    zIndex: 15,
                 });
                 map.addLayer(stopsVectorLayer);
             }
@@ -3863,49 +3895,10 @@
             if (stopsVectorSource) stopsVectorSource.clear(true);
         }
 
-        // =========================================================
-        // ✅ [추가] 도보 점선 레이어
-        // =========================================================
-        let walkVectorSource = null;
-        let walkVectorLayer = null;
-
-        function ensureWalkLayer() {
-            const map = getInnerOlMap();
-            if (!map || !window.ol) return false;
-
-            if (!walkVectorSource) walkVectorSource = new ol.source.Vector();
-
-            if (!walkVectorLayer) {
-                walkVectorLayer = new ol.layer.Vector({
-                    source: walkVectorSource,
-                    style: new ol.style.Style({
-                        stroke: new ol.style.Stroke({
-                            color: 'rgba(0,0,0,0.85)',
-                            width: 4,
-                            lineDash: [8, 8], // ✅ 점선
-                            lineCap: 'round',
-                            lineJoin: 'round',
-                        }),
-                    }),
-                    zIndex: 13, // 경로 아래
-                });
-                map.addLayer(walkVectorLayer);
-            }
-            return true;
-        }
-
-        function clearWalkOnMap() {
-            if (walkVectorSource) walkVectorSource.clear(true);
-        }
-
-        // =========================================================
-        // ✅ 마커 스타일 개선 + projection 안전 변환 적용
-        //    - kind: 'FROM' | 'TO' | 'MID'
-        // =========================================================
         function drawStopMarker(lon, lat, color, label, kind) {
             if (!ensureStopsLayer()) return;
 
-            const xy = lonLatToMapXY(lon, lat); // ✅ 변경
+            const xy = lonLatToMapXY(lon, lat);
             if (!xy) return;
 
             const f = new ol.Feature({ geometry: new ol.geom.Point(xy) });
@@ -3938,10 +3931,6 @@
             stopsVectorSource.addFeature(f);
         }
 
-        // =========================================================
-        // ✅ 서버 stops 배열로 출발/도착/중간 마커 한 번에 그리기
-        //   r.stops: [{stopId,name,lat,lon}, ...]
-        // =========================================================
         function drawStopsFromServer(stops, fromStopId, toStopId) {
             clearStopsOnMap();
             if (!Array.isArray(stops) || stops.length === 0) return;
@@ -3963,45 +3952,111 @@
                 else if (i === 0) kind = 'FROM';
                 else if (i === stops.length - 1) kind = 'TO';
 
-                // 색/라벨: 출발/도착만 라벨
-                let color = 'rgba(59,130,246,0.95)'; // MID 파랑
+                let color = 'rgba(59,130,246,0.95)';
                 let label = '';
 
                 if (kind === 'FROM') {
-                    color = 'rgba(239,68,68,0.95)'; // 빨강
+                    color = 'rgba(239,68,68,0.95)';
                     label = name || stopId || '출발';
                 } else if (kind === 'TO') {
-                    color = 'rgba(34,197,94,0.95)'; // 초록
+                    color = 'rgba(34,197,94,0.95)';
                     label = name || stopId || '도착';
                 }
 
                 drawStopMarker(lon, lat, color, label, kind);
             }
+
+            const map = getInnerOlMap();
+            if (map && map.renderSync) map.renderSync();
         }
 
         // =========================================================
-        // ✅ 도보 점선 (좌표변환 안전 + 기존 라인 clear)
+        // ✅ WALK (도보 점선) 레이어
         // =========================================================
+        let walkVectorSource = null;
+        let walkVectorLayer = null;
+
+        // ✅ 점선 스타일은 재사용
+        const WALK_STYLE = new ol.style.Style({
+            stroke: new ol.style.Stroke({
+                color: 'rgba(0,0,0,0.95)',
+                width: 6,
+                lineDash: [10, 10],
+                lineCap: 'round',
+                lineJoin: 'round',
+            }),
+        });
+
+        function ensureWalkLayer() {
+            const map = getInnerOlMap();
+            if (!map || !window.ol || !ol.layer || !ol.source || !ol.style || !ol.geom) return false;
+
+            if (!walkVectorSource) walkVectorSource = new ol.source.Vector();
+
+            if (!walkVectorLayer) {
+                walkVectorLayer = new ol.layer.Vector({
+                    source: walkVectorSource,
+                    style: WALK_STYLE,
+                    renderBuffer: 256,
+                    updateWhileAnimating: true,
+                    updateWhileInteracting: true,
+                    declutter: false,
+                });
+                map.addLayer(walkVectorLayer);
+            } else {
+                // 꼬임 방지: source/style 강제
+                if (walkVectorLayer.getSource && walkVectorLayer.getSource() !== walkVectorSource) {
+                    walkVectorLayer.setSource(walkVectorSource);
+                }
+                walkVectorLayer.setStyle(WALK_STYLE);
+            }
+
+            // ✅ 최상단
+            walkVectorLayer.setZIndex(9999);
+
+            return true;
+        }
+
+        function clearWalkOnMap() {
+            if (walkVectorSource) walkVectorSource.clear(true);
+        }
+
+        // ✅ drawWalkDashed: clear는 밖에서, 여기선 feature만 추가
         function drawWalkDashed(lonLatPairs) {
-            if (!ensureWalkLayer()) return;
-            if (!Array.isArray(lonLatPairs) || lonLatPairs.length < 2) return;
+            if (!ensureWalkLayer()) return false;
+            if (!Array.isArray(lonLatPairs) || lonLatPairs.length < 2) return false;
 
-            clearWalkOnMap();
+            const a = lonLatPairs[0];
+            const b = lonLatPairs[lonLatPairs.length - 1];
+            if (!a || !b) return false;
 
-            const coords = lonLatPairs
-                .map(function (pair) {
-                    const lon = pair && pair[0];
-                    const lat = pair && pair[1];
-                    return lonLatToMapXY(lon, lat); // ✅ 변경
-                })
-                .filter(Boolean);
+            const lon1 = Number(a[0]),
+                lat1 = Number(a[1]);
+            const lon2 = Number(b[0]),
+                lat2 = Number(b[1]);
+            if (!isFinite(lon1) || !isFinite(lat1) || !isFinite(lon2) || !isFinite(lat2)) return false;
 
-            if (coords.length < 2) return;
+            // ✅ A안 핵심: 너무 가까우면(거의 0m) 점선은 아예 그리지 않음
+            const dMeters = distanceMeters(lon1, lat1, lon2, lat2);
+            const MIN_DRAW_M = 20; // ✅ 임계값: 20m 미만은 생략 (원하면 10~30 조절)
+            if (dMeters < MIN_DRAW_M) {
+                // console.log('[walk] skip (too close):', dMeters);
+                return false;
+            }
 
-            const line = new ol.geom.LineString(coords);
+            // ✅ 현재 지도 projection으로 변환
+            const p1 = lonLatToMapXY(lon1, lat1);
+            const p2 = lonLatToMapXY(lon2, lat2);
+            if (!p1 || !p2) return false;
+
+            const line = new ol.geom.LineString([p1, p2]);
             const f = new ol.Feature({ geometry: line });
-
             walkVectorSource.addFeature(f);
+
+            const map = getInnerOlMap();
+            if (map && map.renderSync) map.renderSync();
+
+            return true;
         }
 
         // =========================================================
@@ -4042,11 +4097,14 @@
 
             function computeTransfersFromPath(pathArr) {
                 if (!Array.isArray(pathArr) || pathArr.length < 2) return 0;
+
                 function pickMode(x) {
                     return String((x && (x.mode ?? x.kind ?? x.type ?? x.vehicle ?? x.edgeType ?? x.transitType ?? '')) || '').toUpperCase();
                 }
+
                 let prev = pickMode(pathArr[0]);
                 let transfers = 0;
+
                 for (let i = 1; i < pathArr.length; i++) {
                     const cur = pickMode(pathArr[i]);
                     if (cur && prev && cur !== prev) transfers++;
@@ -4055,13 +4113,28 @@
                 return transfers;
             }
 
+            // ✅ (추가) 두 좌표(lon/lat) 사이 거리(m)
+            function distanceMeters(lon1, lat1, lon2, lat2) {
+                const R = 6371000;
+                const toRad = (d) => (d * Math.PI) / 180;
+                const dLat = toRad(lat2 - lat1);
+                const dLon = toRad(lon2 - lon1);
+                const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                return R * c;
+            }
+
+            // ✅✅✅ (추가) 도보시간 계산용: m/s (원하면 조절)
+            // 일반 성인 평균 도보속도는 1.2~1.4 m/s 정도.
+            const WALK_SPEED_MPS = 1.25;
+
             try {
                 $scope.pathResult = null;
 
                 // ✅✅✅ 지도 싹 초기화
-                clearPathOnMap(); // (이 안에서 stops/walk도 같이 clear하도록 수정해둔 버전이면 이것만으로도 OK)
+                clearPathOnMap();
                 if (typeof clearStopsOnMap === 'function') clearStopsOnMap();
-                if (typeof clearWalkOnMap === 'function') clearWalkOnMap();
+                if (typeof clearWalkOnMap === 'function') clearWalkOnMap(); // ✅ 여기서만 1번
 
                 // ✅ 선택이 raw로 들어왔을 가능성 방어
                 if ($scope.path.from && !$scope.path.from.stopId) $scope.path.from = normalizeStop($scope.path.from);
@@ -4104,6 +4177,7 @@
                                 found: false,
                                 totalDistM: 0,
                                 totalTimeS: 0,
+                                walkTimeS: 0, // ✅ 추가
                                 stopCount: 0,
                                 transfersCount: 0,
                                 stopIds: [],
@@ -4116,24 +4190,15 @@
                         const stopIds = Array.isArray(r.stopIds) ? r.stopIds : [];
                         const pathArr = Array.isArray(r.path) ? r.path : [];
 
+                        // ✅ 환승값 확정(서버 우선, 없으면 path 기반)
                         const serverTransfers = pickTransfersCount(r);
                         const computedTransfers = computeTransfersFromPath(pathArr);
-
-                        $scope.pathResult = {
-                            found: r.found !== false,
-                            totalDistM: Number(r.totalDistM || 0),
-                            totalTimeS: Number(r.totalTimeS || 0),
-                            stopCount: stopIds.length,
-                            transfersCount: serverTransfers > 0 ? serverTransfers : computedTransfers,
-                            stopIds: stopIds,
-                            path: pathArr,
-                        };
+                        const finalTransfers = (serverTransfers > 0 ? serverTransfers : computedTransfers) || 0;
 
                         // =========================================================
-                        // ✅ 1) 파란 경로(polyline) 그리기
+                        // ✅ polyline 좌표 준비
                         // =========================================================
                         let coordsLonLat = [];
-
                         if (Array.isArray(r.polyline) && r.polyline.length >= 2) {
                             coordsLonLat = r.polyline
                                 .map(function (p) {
@@ -4144,23 +4209,91 @@
                                 .filter(function (c) {
                                     return isFinite(c[0]) && isFinite(c[1]);
                                 });
+                        }
 
-                            const ok = coordsLonLat.length >= 2 ? drawPathPolylineLonLat(coordsLonLat) : false;
+                        // =========================================================
+                        // ✅✅✅ (추가) 도보시간 계산 (출발->첫점, 마지막점->도착)
+                        // - 점선 그릴 때 기준과 동일 (거리 5m 미만이면 0 처리)
+                        // =========================================================
+                        let walkDistM = 0;
+                        let walkTimeS = 0;
+
+                        (function computeWalkFromEnds() {
+                            if (!Array.isArray(coordsLonLat) || coordsLonLat.length < 2) {
+                                walkDistM = 0;
+                                walkTimeS = 0;
+                                return;
+                            }
+
+                            const first = coordsLonLat[0];
+                            const last = coordsLonLat[coordsLonLat.length - 1];
+
+                            // 출발/도착 좌표 우선순위: r.stops -> raw
+                            let fLon, fLat, tLon, tLat;
+
+                            if (Array.isArray(r.stops) && r.stops.length >= 2) {
+                                const s0 = r.stops[0];
+                                const sN = r.stops[r.stops.length - 1];
+                                fLon = Number(s0 && (s0.lon ?? s0.gpslong ?? s0.gpsLong));
+                                fLat = Number(s0 && (s0.lat ?? s0.gpslati ?? s0.gpsLat));
+                                tLon = Number(sN && (sN.lon ?? sN.gpslong ?? sN.gpsLong));
+                                tLat = Number(sN && (sN.lat ?? sN.gpslati ?? sN.gpsLat));
+                            } else {
+                                fLat = Number($scope.path.from.gpslati || $scope.path.from.gpsLat || $scope.path.from.lat);
+                                fLon = Number($scope.path.from.gpslong || $scope.path.from.gpsLong || $scope.path.from.lon);
+                                tLat = Number($scope.path.to.gpslati || $scope.path.to.gpsLat || $scope.path.to.lat);
+                                tLon = Number($scope.path.to.gpslong || $scope.path.to.gpsLong || $scope.path.to.lon);
+                            }
+
+                            // 출발 -> polyline 첫점
+                            if (isFinite(fLon) && isFinite(fLat) && first && isFinite(first[0]) && isFinite(first[1])) {
+                                const d1 = distanceMeters(fLon, fLat, first[0], first[1]);
+                                if (d1 >= 5) walkDistM += d1;
+                            }
+
+                            // polyline 마지막점 -> 도착
+                            if (isFinite(tLon) && isFinite(tLat) && last && isFinite(last[0]) && isFinite(last[1])) {
+                                const d2 = distanceMeters(last[0], last[1], tLon, tLat);
+                                if (d2 >= 5) walkDistM += d2;
+                            }
+
+                            // 거리 -> 시간(초)
+                            if (walkDistM > 0 && WALK_SPEED_MPS > 0) {
+                                walkTimeS = Math.round(walkDistM / WALK_SPEED_MPS);
+                            } else {
+                                walkTimeS = 0;
+                            }
+                        })();
+
+                        // ✅ pathResult 먼저 세팅 (UI 바인딩)
+                        $scope.pathResult = {
+                            found: r.found !== false,
+                            totalDistM: Number(r.totalDistM || 0),
+                            totalTimeS: Number(r.totalTimeS || 0),
+                            walkTimeS: walkTimeS, // ✅✅✅ 추가: 도보 시간(초)
+                            stopCount: stopIds.length,
+                            transfersCount: finalTransfers,
+                            stopIds: stopIds,
+                            path: pathArr,
+                        };
+
+                        // =========================================================
+                        // ✅ 1) 파란 경로(polyline) 그리기
+                        // =========================================================
+                        if (Array.isArray(coordsLonLat) && coordsLonLat.length >= 2) {
+                            const ok = typeof drawPathPolylineLonLat === 'function' ? drawPathPolylineLonLat(coordsLonLat) : false;
                             if (!ok) {
                                 setPathStatus('info', '경로 계산은 됐지만 지도에 polyline을 그리지 못했습니다(좌표/투영 확인 필요).');
                             }
                         }
 
                         // =========================================================
-                        // ✅ 2) 정류장 마커(출발/도착/중간) - r.stops 기반으로 "예쁘게" 찍기
-                        //    r.stops: [{stopId,name,lat,lon}, ...]
+                        // ✅ 2) 정류장 마커(출발/도착/중간)
                         // =========================================================
                         if (typeof drawStopsFromServer === 'function' && Array.isArray(r.stops) && r.stops.length) {
                             drawStopsFromServer(r.stops, $scope.path.fromNodeId, $scope.path.toNodeId);
                         } else {
-                            // (fallback) 서버 stops가 없다면 출발/도착만이라도
                             if (typeof drawStopMarker === 'function') {
-                                // ⚠️ raw에서 좌표가 없을 수 있음 → 있으면만 찍기
                                 const fLat = Number($scope.path.from.gpslati || $scope.path.from.gpsLat || $scope.path.from.lat);
                                 const fLon = Number($scope.path.from.gpslong || $scope.path.from.gpsLong || $scope.path.from.lon);
                                 const tLat = Number($scope.path.to.gpslati || $scope.path.to.gpsLat || $scope.path.to.lat);
@@ -4172,50 +4305,74 @@
                         }
 
                         // =========================================================
-                        // ✅ 3) 도보 점선 (검은 점선)
-                        //    - "출발 정류장 → 경로 시작점"
-                        //    - "경로 끝점 → 도착 정류장"
-                        //
-                        // ⚠️ drawWalkDashed 내부에서 clearWalkOnMap()를 해버리면 2번 호출 시 첫 라인이 지워짐.
-                        // ✅ 해결: 여기서 2개를 따로 호출하지 말고, "한 번에 그릴 좌표 배열"을 만들어서 한번만 호출
+                        // ✅ 3) 도보 점선(검은 점선)
+                        //  - clearWalkOnMap()는 위에서 1번만 했음 (여기서 절대 clear 금지)
                         // =========================================================
-                        if (typeof drawWalkDashed === 'function' && coordsLonLat.length >= 2 && Array.isArray(r.stops) && r.stops.length) {
+                        if (typeof drawWalkDashed === 'function' && Array.isArray(coordsLonLat) && coordsLonLat.length >= 2) {
                             const first = coordsLonLat[0];
                             const last = coordsLonLat[coordsLonLat.length - 1];
 
-                            // 출발/도착 좌표는 서버 stops에서 가장 확실
-                            const s0 = r.stops[0];
-                            const sN = r.stops[r.stops.length - 1];
+                            // 출발/도착 좌표 우선순위: r.stops -> raw
+                            let fLon, fLat, tLon, tLat;
 
-                            const fLon = Number(s0 && s0.lon);
-                            const fLat = Number(s0 && s0.lat);
-                            const tLon = Number(sN && sN.lon);
-                            const tLat = Number(sN && sN.lat);
-
-                            // 점선은 "한 번에" 그릴 수 있게 좌표를 4개로 구성(중간은 끊기지만, 시각적으로는 2개 라인처럼 보이게)
-                            // 방법: line 2개를 각각 feature로 그리고 싶으면 drawWalkDashed를 feature 단위로 여러개 추가하는 함수로 바꾸면 됨.
-                            // 지금은 가장 단순하게 2번 호출하되, clearWalkOnMap()는 여기서 딱 한번만 하고, drawWalkDashed는 clear 안하게(권장)
-                            // -----
-                            // ✅ 여기서는 안전하게: clear를 여기서 딱 한 번 하고, drawWalkDashed는 2번 호출
-                            if (typeof clearWalkOnMap === 'function') clearWalkOnMap();
-
-                            if (isFinite(fLon) && isFinite(fLat) && first && isFinite(first[0]) && isFinite(first[1])) {
-                                drawWalkDashed([
-                                    [fLon, fLat],
-                                    [first[0], first[1]],
-                                ]);
+                            if (Array.isArray(r.stops) && r.stops.length >= 2) {
+                                const s0 = r.stops[0];
+                                const sN = r.stops[r.stops.length - 1];
+                                fLon = Number(s0 && s0.lon);
+                                fLat = Number(s0 && s0.lat);
+                                tLon = Number(sN && sN.lon);
+                                tLat = Number(sN && sN.lat);
+                            } else {
+                                fLat = Number($scope.path.from.gpslati || $scope.path.from.gpsLat || $scope.path.from.lat);
+                                fLon = Number($scope.path.from.gpslong || $scope.path.from.gpsLong || $scope.path.from.lon);
+                                tLat = Number($scope.path.to.gpslati || $scope.path.to.gpsLat || $scope.path.to.lat);
+                                tLon = Number($scope.path.to.gpslong || $scope.path.to.gpsLong || $scope.path.to.lon);
                             }
+
+                            // 출발 -> polyline 첫점 (너무 가까우면 생략)
+                            if (isFinite(fLon) && isFinite(fLat) && first && isFinite(first[0]) && isFinite(first[1])) {
+                                const d1 = distanceMeters(fLon, fLat, first[0], first[1]);
+                                if (d1 >= 5) {
+                                    drawWalkDashed([
+                                        [fLon, fLat],
+                                        [first[0], first[1]],
+                                    ]);
+                                }
+                            }
+
+                            // polyline 마지막점 -> 도착 (너무 가까우면 생략)
                             if (isFinite(tLon) && isFinite(tLat) && last && isFinite(last[0]) && isFinite(last[1])) {
-                                drawWalkDashed([
-                                    [last[0], last[1]],
-                                    [tLon, tLat],
-                                ]);
+                                const d2 = distanceMeters(last[0], last[1], tLon, tLat);
+                                if (d2 >= 5) {
+                                    drawWalkDashed([
+                                        [last[0], last[1]],
+                                        [tLon, tLat],
+                                    ]);
+                                }
                             }
                         }
 
+                        // =========================================================
+                        // ✅ 최종 상태 메시지 (딱 1번만)
+                        // =========================================================
+                        const fromName = $scope.path && $scope.path.from && ($scope.path.from.name || $scope.path.from.nodenm || $scope.path.from.nodeNm) ? $scope.path.from.name || $scope.path.from.nodenm || $scope.path.from.nodeNm : '-';
+                        const toName = $scope.path && $scope.path.to && ($scope.path.to.name || $scope.path.to.nodenm || $scope.path.to.nodeNm) ? $scope.path.to.name || $scope.path.to.nodenm || $scope.path.to.nodeNm : '-';
+
                         setPathStatus(
                             'ok',
-                            '최단경로 계산 완료: ' + ($scope.path.from.name || '-') + ' → ' + ($scope.path.to.name || '-') + ` (거리 ${$scope.pathResult.totalDistM}m, 시간 ${$scope.pathResult.totalTimeS}s, 환승 ${$scope.pathResult.transfersCount}회)`
+                            '최단경로 계산 완료: ' +
+                                fromName +
+                                ' → ' +
+                                toName +
+                                ' (거리 ' +
+                                (($scope.pathResult && $scope.pathResult.totalDistM) || 0) +
+                                'm, 시간 ' +
+                                (($scope.pathResult && $scope.pathResult.totalTimeS) || 0) +
+                                's, 도보 ' +
+                                (($scope.pathResult && $scope.pathResult.walkTimeS) || 0) +
+                                's, 환승 ' +
+                                finalTransfers +
+                                '회)'
                         );
                     })
                     .catch(function (err) {

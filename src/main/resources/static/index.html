@@ -1596,11 +1596,16 @@
                                         <div class="result-grid">
                                             <div><b>총 거리</b> {{pathResult.totalDistM | number:0}} m</div>
 
-                                            <!-- ✅ 초 단위 대신 '31분 43초' 형태 + (원하면 괄호로 초도 같이) -->
+                                            <!-- ✅✅✅ 여기만 수정: 총 시간 = 무조건 "n분 nn초" 형태로 나오게 -->
                                             <div>
                                                 <b>총 시간</b>
-                                                {{ formatDuration && formatDuration(pathResult.totalTimeS) }}
-                                                <span style="color: #94a3b8"> ({{pathResult.totalTimeS | number:0}}s)</span>
+                                                {{ (pathResult && pathResult.totalTimeS != null) ? ((formatDuration && formatDuration(pathResult.totalTimeS)) || (pathResult.totalTimeS | number:0) + '초') : '0초' }}
+                                            </div>
+
+                                            <!-- ✅✅✅ 여기만 수정: 도보 = 없으면 0초, 있으면 n분 nn초 -->
+                                            <div>
+                                                <b>도보</b>
+                                                {{ (pathResult && pathResult.walkTimeS != null) ? ((formatDuration && formatDuration(pathResult.walkTimeS)) || (pathResult.walkTimeS | number:0) + '초') : '0초' }}
                                             </div>
 
                                             <div><b>정류장 수</b> {{pathResult.stopCount}}</div>
