@@ -1,11 +1,13 @@
 // 애플리케이션의 최상위 패키지 (하위 패키지까지 컴포넌트 스캔 대상이 됨)
 package com.example.demo;
 
-import org.springframework.boot.SpringApplication;              // 스프링 부트 앱을 부팅/실행하는 유틸리티
-import org.springframework.boot.autoconfigure.SpringBootApplication; // 자동 설정 + 컴포넌트 스캔 + 구성 클래스를 묶은 애너테이션
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling; // ✅ 스케줄러 활성화
 
 // @SpringBootApplication = @Configuration + @EnableAutoConfiguration + @ComponentScan
 // => com.example.demo 및 그 하위 패키지의 @Component/@Service/@Repository/@RestController 등을 자동 등록
+@EnableScheduling // ✅ 서버 켜지면 @Scheduled 메서드 자동 실행 가능
 @SpringBootApplication
 public class DemoApplication {
 

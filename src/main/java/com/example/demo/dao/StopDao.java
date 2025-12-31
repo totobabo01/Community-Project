@@ -106,9 +106,9 @@ public class StopDao {
         }
     }
 
-    // ✅✅ [추가] 전체 정류장 조회 (검색어 없이 '검색' 눌렀을 때 후보 목록용)
+    // ✅✅ 전체 정류장 조회
     // - type이 있으면 type으로 필터링 가능(BUS/TRAM 등)
-    // - limit 기본 500, 최대 5000 정도로 제한 권장
+    // - limit 기본 500, 최대 5000
     public List<StopDto> findAll(String cityCode, String type, int limit) {
         type = (type == null || type.isBlank()) ? null : type.trim().toUpperCase();
         limit = (limit <= 0) ? 500 : Math.min(limit, 5000);
@@ -138,6 +138,20 @@ public class StopDao {
         } catch (Exception e) {
             throw new RuntimeException("StopDao.findAll 실패: " + e.getMessage(), e);
         }
+    }
+
+    // =========================================================
+    // ✅✅✅ [추가] 서비스에서 쓰기 편하게 래핑 메서드
+    // - ShortestPathService에서 환승 엣지 만들 때 "전체 조회"가 필요함
+    // =========================================================
+    public List<StopDto> findByCity(String cityCode) {
+        // 충분히 크게 (환승 연결 만들 때는 많이 필요)
+        return findAll(cityCode, null, 5000);
+    }
+
+    // (옵션) 타입별 전체 조회가 필요할 때
+    public List<StopDto> findByCityAndType(String cityCode, String type) {
+        return findAll(cityCode, type, 5000);
     }
 
     private StopDto map(ResultSet rs) throws Exception {
