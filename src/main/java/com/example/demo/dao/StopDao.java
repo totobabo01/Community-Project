@@ -141,7 +141,51 @@ public class StopDao {
     }
 
     // =========================================================
-    // ✅✅✅ [추가] 서비스에서 쓰기 편하게 래핑 메서드
+    // ✅✅✅ [추가] DB 정류장 조회 API 용 (keyword/type/limit/offset)
+    // GET /api/stops?cityCode=25&keyword=...&type=BUS|TRAM&limit=500&offset=0
+    // =========================================================
+    public List<StopDto> search(String cityCode, String keyword, String type, int limit, int offset) {
+        cityCode = (cityCode == null) ? "" : cityCode.trim();
+        keyword  = (keyword == null) ? "" : keyword.trim();
+        type     = (type == null || type.isBlank()) ? null : type.trim().toUpperCase();
+
+        limit  = (limit <= 0) ? 500 : Math.min(limit, 5000);
+        offset = Math.max(offset, 0);
+
+        boolean hasKeyword = !keyword.isBlank();
+
+        String sql =
+            "SELECT stop_id, name, lat, lon, type, city_code " +
+            "FROM stops " +
+            "WHERE city_code=? " +
+            (hasKeyword ? "AND name LIKE ? " : "") +
+            (type != null ? "AND type=? " : "") +
+            "ORDER BY name ASC " +
+            "LIMIT ? OFFSET ?";
+
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+
+            int idx = 1;
+            ps.setString(idx++, cityCode);
+            if (hasKeyword) ps.setString(idx++, "%" + keyword + "%");
+            if (type != null) ps.setString(idx++, type);
+            ps.setInt(idx++, limit);
+            ps.setInt(idx++, offset);
+
+            List<StopDto> out = new ArrayList<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) out.add(map(rs));
+            }
+            return out;
+
+        } catch (Exception e) {
+            throw new RuntimeException("StopDao.search 실패: " + e.getMessage(), e);
+        }
+    }
+
+    // =========================================================
+    // ✅✅✅ 서비스에서 쓰기 편하게 래핑 메서드
     // - ShortestPathService에서 환승 엣지 만들 때 "전체 조회"가 필요함
     // =========================================================
     public List<StopDto> findByCity(String cityCode) {

@@ -4,12 +4,13 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,6 +26,7 @@ import com.example.demo.dto.StopDto;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import jakarta.annotation.PostConstruct;
 
@@ -60,16 +62,10 @@ public class ApiController {
     @Value("${tago.bus.route.service-key}")
     private String routeServiceKey;
 
-    // 공용 RestTemplate
     private final RestTemplate rt = new RestTemplate();
-
-    // TAGO JSON 파싱용
     private final ObjectMapper om = new ObjectMapper();
 
-    // DB 저장용 DAO
     private final StopDao stopDao;
-
-    // 노선 간선(edge) 저장 DAO
     private final BusEdgeDao busEdgeDao;
 
     public ApiController(StopDao stopDao, BusEdgeDao busEdgeDao) {
@@ -78,7 +74,7 @@ public class ApiController {
     }
 
     // =========================================================
-    // ✅ 전체 정류장 "캐시"
+    // ✅ 전체 정류장 캐시
     // =========================================================
     private volatile ArrayNode stopsCache = null;
     private volatile long stopsCacheAtMs = 0L;
@@ -89,8 +85,13 @@ public class ApiController {
     private final AtomicBoolean refreshRunning = new AtomicBoolean(false);
 
     private static final String DEFAULT_CITY_CODE = "25";
-    private static final int DEFAULT_NUM_OF_ROWS = 1000;
-    private static final int DEFAULT_MAX_PAGES = 30;
+
+    // ✅ 핵심 최적화:
+    // 대전(cityCode=25) 정류장 총량이 3069개 수준이면 numOfRows=5000 한 번 호출로 끝남
+    private static final int DEFAULT_NUM_OF_ROWS = 5000;
+
+    // ✅ maxPages는 여유로 5 정도만 (실제로 1페이지에서 끝날 가능성이 큼)
+    private static final int DEFAULT_MAX_PAGES = 5;
 
     // =========================================================
     // ✅ 서버 시작 시 캐시 워밍업
@@ -99,7 +100,8 @@ public class ApiController {
     public void warmupStopsCacheOnStartup() {
         new Thread(() -> {
             try {
-                System.out.println("[CACHE/WARMUP] start cityCode=" + DEFAULT_CITY_CODE);
+                System.out.println("[CACHE/WARMUP] start cityCode=" + DEFAULT_CITY_CODE +
+                        " numOfRows=" + DEFAULT_NUM_OF_ROWS + " maxPages=" + DEFAULT_MAX_PAGES);
                 ArrayNode loaded = loadAllStops(DEFAULT_CITY_CODE, DEFAULT_NUM_OF_ROWS, DEFAULT_MAX_PAGES);
                 if (loaded != null) {
                     stopsCache = loaded;
@@ -112,8 +114,19 @@ public class ApiController {
         }, "stops-cache-warmup").start();
     }
 
-    // ================== 1) 정류장 목록(1페이지) ==================
-    @GetMapping("/stops")
+    // =========================================================
+    // ✅ 1) 정류장 목록 - /api/bus/stops
+    //
+    // ✅ 변경 포인트(속도 핵심):
+    // - 기존: 호출마다 TAGO 외부 API를 직접 호출 → 느림
+    // - 개선: 캐시(stopsCache)가 있으면 캐시에서 "검색/페이징"만 → 매우 빠름
+    // - 캐시가 없으면: 한 번만 로드해서 캐시 채우고 응답
+    //
+    // ✅ 반환 형식:
+    // - 프론트 호환 위해 TAGO 비슷한 구조 유지:
+    //   response.body.items.item (배열) + totalCount
+    // =========================================================
+    @GetMapping(value = "/stops", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> searchStops(
             @RequestParam("cityCode") String cityCode,
             @RequestParam(value = "keyword", required = false) String keyword,
@@ -123,45 +136,52 @@ public class ApiController {
         cityCode = clean(cityCode);
         keyword = clean(keyword);
 
-        String serviceKey = encodeServiceKey(stationServiceKey);
-        String encodedCityCode = enc(cityCode);
-
-        String url = String.format(
-                "%s/getSttnNoList?serviceKey=%s&cityCode=%s&pageNo=%d&numOfRows=%d&_type=json",
-                stationBaseUrl,
-                serviceKey,
-                encodedCityCode,
-                pageNo,
-                numOfRows
-        );
-
-        System.out.println("[TAGO 정류장(1페이지)] URL = " + url + " (keyword=" + keyword + ")");
+        // 방어
+        if (pageNo < 1) pageNo = 1;
+        numOfRows = clamp(numOfRows, 1, 5000, 500);
 
         try {
-            String body = rt.getForObject(url, String.class);
-            return ResponseEntity.ok(body);
+            // ✅ 1) 캐시 보장(없으면 1회 로드)
+            ArrayNode cache = ensureStopsCache(cityCode);
+
+            // ✅ 2) 캐시 기반 필터링
+            ArrayNode filtered = filterStops(cache, keyword);
+
+            int total = filtered.size();
+
+            // ✅ 3) 캐시 기반 페이징
+            ArrayNode paged = slicePage(filtered, pageNo, numOfRows);
+
+            // ✅ 4) TAGO-like 구조로 반환(프론트 호환)
+            ObjectNode out = buildTagoLikeStopsResponse(paged, total, pageNo, numOfRows);
+
+            // ✅ 응답 캐시(브라우저/프록시) 조금 허용: 30초
+            return ResponseEntity.ok()
+                    .cacheControl(CacheControl.maxAge(30, TimeUnit.SECONDS))
+                    .body(out);
+
         } catch (RestClientResponseException e) {
-            System.out.println("[TAGO 정류장(1페이지)] 에러 status=" + e.getRawStatusCode());
-            System.out.println("[TAGO 정류장(1페이지)] response=" + e.getResponseBodyAsString());
+            System.out.println("[STOPS/CACHE] 에러 status=" + e.getRawStatusCode());
+            System.out.println("[STOPS/CACHE] response=" + e.getResponseBodyAsString());
             return ResponseEntity.status(e.getRawStatusCode()).body(e.getResponseBodyAsString());
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.status(500).body("TAGO 정류장(1페이지) 호출 중 서버 내부 오류: " + e.getMessage());
+            return ResponseEntity.status(500).body("정류장 캐시 조회 중 서버 내부 오류: " + e.getMessage());
         }
     }
 
     // ================== 1-2) 전체 정류장 목록(캐시 버전) ==================
-    @GetMapping("/stops/all")
+    @GetMapping(value = "/stops/all", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> getAllStops(
             @RequestParam("cityCode") String cityCode,
-            @RequestParam(defaultValue = "1000") int numOfRows,
-            @RequestParam(defaultValue = "30") int maxPages,
+            @RequestParam(defaultValue = "5000") int numOfRows,
+            @RequestParam(defaultValue = "5") int maxPages,
             @RequestParam(value = "refresh", required = false, defaultValue = "false") boolean refresh
     ) {
         cityCode = clean(cityCode);
 
-        numOfRows = clamp(numOfRows, 1, 5000, 1000);
-        maxPages = clamp(maxPages, 1, 200, 30);
+        numOfRows = clamp(numOfRows, 1, 5000, 5000);
+        maxPages = clamp(maxPages, 1, 200, 5);
 
         long now = System.currentTimeMillis();
 
@@ -239,7 +259,6 @@ public class ApiController {
         cityCode = clean(cityCode);
         type = clean(type);
 
-        // ✅ String -> enum 변환 (잘못된 값이면 BUS로)
         StopDto.StopType stopType = parseStopType(type);
 
         try {
@@ -269,7 +288,6 @@ public class ApiController {
                 if (stopId == null || stopId.isBlank()) { skipped++; continue; }
                 if (name == null || name.isBlank()) name = "(no-name)";
 
-                // ✅ StopDto는 double이므로 좌표가 null이면 저장하지 않는 게 안전
                 if (latObj == null || lonObj == null) { skipped++; continue; }
 
                 double lat = latObj;
@@ -280,7 +298,8 @@ public class ApiController {
                 saved++;
             }
 
-            System.out.println("[IMPORT] 서버 DB에 stops " + saved + "개 저장됨 (skipped=" + skipped + ", cityCode=" + cityCode + ", type=" + stopType + ")");
+            System.out.println("[IMPORT] 서버 DB에 stops " + saved + "개 저장됨 (skipped=" + skipped +
+                    ", cityCode=" + cityCode + ", type=" + stopType + ")");
             return ResponseEntity.ok("서버 DB에 stops " + saved + "개 저장됨 (skipped=" + skipped + ")");
 
         } catch (Exception e) {
@@ -290,8 +309,7 @@ public class ApiController {
     }
 
     // =========================================================
-    // ✅✅✅ 추가: 노선 목록(노선번호 리스트)
-    // GET /api/bus/routeList?cityCode=25
+    // ✅ 노선 목록
     // =========================================================
     @GetMapping("/routeList")
     public ResponseEntity<?> getRouteList(
@@ -301,7 +319,7 @@ public class ApiController {
     ) {
         cityCode = clean(cityCode);
 
-        String serviceKey = encodeServiceKey(routeServiceKey);
+        String serviceKey = serviceKeyForUrl(routeServiceKey);
         String encodedCityCode = enc(cityCode);
 
         String url = String.format(
@@ -330,7 +348,6 @@ public class ApiController {
 
     // =========================================================
     // Step2: "버스 클릭한 노선(routeId)"으로 간선(edge) 저장
-    // POST /api/bus/edges/import?cityCode=25&routeId=30300001
     // =========================================================
     @PostMapping("/edges/import")
     public ResponseEntity<?> importEdgesForRoute(
@@ -353,7 +370,6 @@ public class ApiController {
             if (itemNode.isArray()) itemNode.forEach(stops::add);
             else stops.add(itemNode);
 
-            // nodeord 기준 정렬
             stops.sort((a, b) -> {
                 Integer ao = safeInt(firstText(a, "nodeord", "nodeOrd"), 0);
                 Integer bo = safeInt(firstText(b, "nodeord", "nodeOrd"), 0);
@@ -420,7 +436,7 @@ public class ApiController {
         cityCode = clean(cityCode);
         routeId = clean(routeId);
 
-        String serviceKey = encodeServiceKey(locationServiceKey);
+        String serviceKey = serviceKeyForUrl(locationServiceKey);
         String encodedCityCode = enc(cityCode);
         String encodedRouteId = enc(routeId);
 
@@ -466,7 +482,7 @@ public class ApiController {
 
         debugParam("nodeId", nodeId);
 
-        String serviceKey = encodeServiceKey(arrivalServiceKey);
+        String serviceKey = serviceKeyForUrl(arrivalServiceKey);
         String encodedCityCode = enc(cityCode);
         String encodedNodeId = enc(nodeId);
 
@@ -496,30 +512,6 @@ public class ApiController {
     }
 
     // =========================================================
-    // ✅✅✅ 추가: 서버가 “실제로 받은 파라미터 이름/값” 확인용
-    // GET /api/bus/routePath/debug?cityCode=25&routeId=...&pageNo=1&numOfRows=500
-    // =========================================================
-    @GetMapping("/routePath/debug")
-    public ResponseEntity<?> debugRoutePathParams(@RequestParam Map<String, String> params) {
-        System.out.println("[DEBUG PARAMS] " + params);
-
-        String routeId = params.get("routeId");
-        if (routeId != null) {
-            System.out.println("[DEBUG routeId raw] = [" + routeId + "]");
-            System.out.println("[DEBUG routeId length] = " + routeId.length());
-
-            System.out.print("[DEBUG routeId hex] = ");
-            byte[] bytes = routeId.getBytes(StandardCharsets.UTF_8);
-            for (byte b : bytes) System.out.printf("%02X ", b);
-            System.out.println();
-        } else {
-            System.out.println("[DEBUG] routeId param is missing");
-        }
-
-        return ResponseEntity.ok(params);
-    }
-
-    // =========================================================
     // 4) 노선 경유 정류장(경로)
     // =========================================================
     @GetMapping("/routePath")
@@ -538,7 +530,7 @@ public class ApiController {
         debugParam("cityCode", cityCode);
         debugParam("routeId", routeId);
 
-        String serviceKey = encodeServiceKey(routeServiceKey);
+        String serviceKey = serviceKeyForUrl(routeServiceKey);
         String encodedCityCode = enc(cityCode);
         String encodedRouteId = enc(routeId);
 
@@ -604,6 +596,87 @@ public class ApiController {
         }, "stops-cache-refresh").start();
     }
 
+    // ✅ 캐시 보장(없으면 로드)
+    private ArrayNode ensureStopsCache(String cityCode) throws Exception {
+        long now = System.currentTimeMillis();
+
+        // 캐시가 있고 TTL 안 지났으면 그대로
+        if (stopsCache != null) {
+            long age = now - stopsCacheAtMs;
+            if (age <= CACHE_TTL_MS) return stopsCache;
+
+            // TTL 지났으면 백그라운드 갱신만 트리거하고 일단 캐시 반환(대기 없음)
+            triggerStopsRefreshAsync(cityCode, DEFAULT_NUM_OF_ROWS, DEFAULT_MAX_PAGES);
+            return stopsCache;
+        }
+
+        // 캐시가 없으면 1회만 로드(여기만 최초 1번 비용)
+        synchronized (cacheLock) {
+            if (stopsCache == null) {
+                ArrayNode loaded = loadAllStops(cityCode, DEFAULT_NUM_OF_ROWS, DEFAULT_MAX_PAGES);
+                stopsCache = loaded;
+                stopsCacheAtMs = System.currentTimeMillis();
+                System.out.println("[CACHE] build done size=" + (loaded == null ? 0 : loaded.size()));
+            }
+        }
+        return stopsCache;
+    }
+
+    // ✅ keyword로 캐시 필터
+    private ArrayNode filterStops(ArrayNode src, String keyword) {
+        ArrayNode out = om.createArrayNode();
+        if (src == null) return out;
+
+        if (keyword == null || keyword.isBlank()) {
+            // 그대로 복사(참조 공유 피하려면 add로)
+            for (JsonNode n : src) out.add(n);
+            return out;
+        }
+
+        final String kw = keyword.toLowerCase(Locale.ROOT);
+        for (JsonNode n : src) {
+            String name = clean(firstText(n, "nodenm", "nodeNm", "name"));
+            if (name != null && name.toLowerCase(Locale.ROOT).contains(kw)) {
+                out.add(n);
+            }
+        }
+        return out;
+    }
+
+    // ✅ page slice
+    private ArrayNode slicePage(ArrayNode src, int pageNo, int numOfRows) {
+        ArrayNode out = om.createArrayNode();
+        if (src == null) return out;
+
+        int total = src.size();
+        int start = (pageNo - 1) * numOfRows;
+        if (start < 0) start = 0;
+        if (start >= total) return out;
+
+        int end = Math.min(total, start + numOfRows);
+        for (int i = start; i < end; i++) {
+            out.add(src.get(i));
+        }
+        return out;
+    }
+
+    // ✅ TAGO-like response 생성(프론트 호환)
+    private ObjectNode buildTagoLikeStopsResponse(ArrayNode itemArr, int totalCount, int pageNo, int numOfRows) {
+        ObjectNode root = om.createObjectNode();
+        ObjectNode response = root.putObject("response");
+        ObjectNode body = response.putObject("body");
+        body.put("totalCount", totalCount);
+
+        ObjectNode items = body.putObject("items");
+        // TAGO는 items.item
+        items.set("item", itemArr != null ? itemArr : om.createArrayNode());
+
+        body.put("pageNo", pageNo);
+        body.put("numOfRows", numOfRows);
+
+        return root;
+    }
+
     // 내부: 전체 정류장 페이지 합쳐 반환
     private ArrayNode loadAllStops(String cityCode, int numOfRows, int maxPages) throws Exception {
         ArrayNode merged = om.createArrayNode();
@@ -636,7 +709,7 @@ public class ApiController {
     private String callStopsPage(String cityCode, int pageNo, int numOfRows) {
         cityCode = clean(cityCode);
 
-        String serviceKey = encodeServiceKey(stationServiceKey);
+        String serviceKey = serviceKeyForUrl(stationServiceKey);
         String encodedCityCode = enc(cityCode);
 
         String url = String.format(
@@ -652,12 +725,11 @@ public class ApiController {
         return rt.getForObject(url, String.class);
     }
 
-    // 내부: routePath raw 호출(Edges import용)
     private String callRoutePathRaw(String cityCode, String routeId, int pageNo, int numOfRows) {
         cityCode = clean(cityCode);
         routeId = clean(routeId);
 
-        String serviceKey = encodeServiceKey(routeServiceKey);
+        String serviceKey = serviceKeyForUrl(routeServiceKey);
         String encodedCityCode = enc(cityCode);
         String encodedRouteId = enc(routeId);
 
@@ -675,7 +747,6 @@ public class ApiController {
         return rt.getForObject(url, String.class);
     }
 
-    // 내부: TAGO JSON에서 response.body.items.item 추출
     private JsonNode extractStopsItemArray(String bodyString) throws Exception {
         if (bodyString == null || bodyString.isBlank()) return null;
 
@@ -697,7 +768,6 @@ public class ApiController {
         return v;
     }
 
-    // ✅ 핵심: 공백/줄바꿈/탭 제거 + null 처리
     private String clean(String s) {
         if (s == null) return null;
         s = s.trim();
@@ -705,21 +775,20 @@ public class ApiController {
         return s;
     }
 
-    // ✅ URL 인코딩 공통
     private String enc(String s) {
         s = clean(s);
         if (s == null) return "";
         return URLEncoder.encode(s, StandardCharsets.UTF_8);
     }
 
-    private String encodeServiceKey(String key) {
+    // ✅ serviceKey는 '%'가 이미 있으면 그대로 사용.
+    private String serviceKeyForUrl(String key) {
         key = clean(key);
         if (key == null) return "";
+        if (key.contains("%")) return key;
         return URLEncoder.encode(key, StandardCharsets.UTF_8);
-        // (이미 인코딩키면) return key;
     }
 
-    // ✅ 파라미터 디버그: 눈에 안 보이는 문자가 섞였는지 확인
     private void debugParam(String name, String value) {
         String v = value;
         if (v == null) {
@@ -736,6 +805,7 @@ public class ApiController {
     }
 
     private String firstText(JsonNode n, String... keys) {
+        if (n == null || n.isNull()) return null;
         for (String k : keys) {
             JsonNode v = n.get(k);
             if (v != null && !v.isNull()) {
@@ -747,6 +817,7 @@ public class ApiController {
     }
 
     private Double firstDouble(JsonNode n, String... keys) {
+        if (n == null || n.isNull()) return null;
         for (String k : keys) {
             JsonNode v = n.get(k);
             if (v != null && !v.isNull()) {
@@ -771,7 +842,7 @@ public class ApiController {
     private Double haversineMeters(Double lat1, Double lon1, Double lat2, Double lon2) {
         if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
 
-        double R = 6371000.0; // meters
+        double R = 6371000.0;
         double dLat = Math.toRadians(lat2 - lat1);
         double dLon = Math.toRadians(lon2 - lon1);
 
@@ -783,7 +854,6 @@ public class ApiController {
         return R * c;
     }
 
-    // ✅ 문자열 type -> enum 변환 유틸 (ApiController 내부에서만 사용)
     private StopDto.StopType parseStopType(String type) {
         try {
             if (type == null) return StopDto.StopType.BUS;

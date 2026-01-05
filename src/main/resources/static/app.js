@@ -1062,144 +1062,141 @@
         }
 
         // =========================================================
-        // ✅ 노선 경로(라인) 레이어
+        // ✅ Route Layer (버스/도보/트램/트램공구) 공통 레이어
         // =========================================================
-        // =========================================================
-        // ✅ 노선 경로(라인) 레이어 (버스/트램/도보 공용)
-        // =========================================================
-        // ✅ 노선 경로(라인) 레이어 (버스/트램/도보 공용)
-        // =========================================================
-        // ✅ 노선 경로(라인) 레이어 (버스/트램/도보 공용)
-        // =========================================================
-        // ✅ 노선 경로(라인) 레이어 (버스/트램/도보 공용)
-        // - 트램 공구(tramVectorLayer, zIndex=60)를 건드리지 않고
-        //   routeVectorLayer만 위로 올려서(>= 80) 버스/도보가 덮이지 않게 함
-        // =========================================================
-        // ✅ 최단경로 전용: routeLayer (BUS=파랑, TRAM=분홍, WALK=검정 점선)
-        // =========================================================
-        function ensureRouteLayer() {
-            const map = getInnerOlMap();
-            if (!map || !window.ol || !ol.layer || !ol.source || !ol.geom || !ol.style) return;
 
-            if (routeVectorLayer && routeVectorSource) return;
+        // 전역(컨트롤러 스코프) 변수라고 가정
+        // var routeVectorLayer = null;
+        // var routeVectorSource = null;
+        // var mapProjection = ...; // 이미 쓰고 있음
+        // function getInnerOlMap(){...} // 이미 쓰고 있음
+
+        // ✅ 스타일은 매번 새로 만들면 성능도 떨어지고, 미묘하게 참조 꼬임도 생김 → 캐시
+        let __ROUTE_STYLES__ = null;
+
+        // ✅ pathKind 정규화
+        function normRouteKind(k) {
+            const s = String(k || '').toUpperCase();
+
+            // 공구
+            if (s === 'TRAM_TOOL' || s === 'TRAMTOOL' || s === 'TOOL' || s === 'TRAM_TOOL_ROUTE') return 'TRAM_TOOL';
+
+            // 도보
+            if (s === 'WALK' || s === 'WALKING' || s === 'FOOT' || s === 'PED' || s === 'PEDESTRIAN') return 'WALK';
+
+            // 트램 최단
+            if (s === 'TRAM' || s === 'RAIL' || s === 'TRAIN') return 'TRAM';
+
+            // 기본 = 버스
+            return 'BUS';
+        }
+
+        function ensureRouteLayer() {
+            const map = getInnerOlMap && getInnerOlMap();
+            if (!map || !window.ol || !ol.layer || !ol.source || !ol.geom || !ol.style) return false;
+
+            // 이미 있으면 OK
+            if (routeVectorLayer && routeVectorSource) return true;
+
+            // ✅ 스타일 캐시 생성(최초 1회)
+            if (!__ROUTE_STYLES__) {
+                __ROUTE_STYLES__ = {
+                    BUS: new ol.style.Style({
+                        stroke: new ol.style.Stroke({
+                            color: '#2563eb',
+                            width: 5,
+                            lineCap: 'round',
+                            lineJoin: 'round',
+                        }),
+                    }),
+                    WALK: new ol.style.Style({
+                        stroke: new ol.style.Stroke({
+                            color: '#111827',
+                            width: 3,
+                            lineCap: 'round',
+                            lineJoin: 'round',
+                            lineDash: [8, 8],
+                        }),
+                    }),
+                    TRAM: new ol.style.Style({
+                        stroke: new ol.style.Stroke({
+                            color: '#ec4899',
+                            width: 6,
+                            lineCap: 'round',
+                            lineJoin: 'round',
+                        }),
+                    }),
+                    TRAM_TOOL: new ol.style.Style({
+                        stroke: new ol.style.Stroke({
+                            color: '#111827',
+                            width: 6,
+                            lineCap: 'round',
+                            lineJoin: 'round',
+                        }),
+                    }),
+                };
+            }
 
             routeVectorSource = new ol.source.Vector();
-
-            // ✅ 버스 최단 = 파랑
-            const STYLE_BUS = new ol.style.Style({
-                stroke: new ol.style.Stroke({
-                    color: '#2563eb',
-                    width: 5,
-                    lineCap: 'round',
-                    lineJoin: 'round',
-                }),
-            });
-
-            // ✅ 도보 최단 = 검정 점선
-            const STYLE_WALK = new ol.style.Style({
-                stroke: new ol.style.Stroke({
-                    color: '#111827',
-                    width: 3,
-                    lineCap: 'round',
-                    lineJoin: 'round',
-                    lineDash: [8, 8],
-                }),
-            });
-
-            // ✅ 트램 최단 = 분홍
-            const STYLE_TRAM = new ol.style.Style({
-                stroke: new ol.style.Stroke({
-                    color: '#ec4899',
-                    width: 6,
-                    lineCap: 'round',
-                    lineJoin: 'round',
-                }),
-            });
-
-            // ✅ 트램 공구 = 검정 실선 (최단 트램(분홍)과 구분!)
-            const STYLE_TRAM_TOOL = new ol.style.Style({
-                stroke: new ol.style.Stroke({
-                    color: '#111827',
-                    width: 6,
-                    lineCap: 'round',
-                    lineJoin: 'round',
-                }),
-            });
-
-            // ✅ pathKind 값 흡수 + 표준화
-            function normKind(k) {
-                const s = String(k || '').toUpperCase();
-
-                // 공구
-                if (s === 'TRAM_TOOL' || s === 'TRAMTOOL' || s === 'TOOL' || s === 'TRAM_TOOL_ROUTE') return 'TRAM_TOOL';
-
-                // 도보
-                if (s === 'WALK' || s === 'WALKING' || s === 'FOOT' || s === 'PED' || s === 'PEDESTRIAN') return 'WALK';
-
-                // 트램 최단
-                if (s === 'TRAM' || s === 'RAIL' || s === 'TRAIN') return 'TRAM';
-
-                // 기본 = 버스
-                return 'BUS';
-            }
 
             routeVectorLayer = new ol.layer.Vector({
                 source: routeVectorSource,
                 style: function (feature) {
-                    const kind = normKind(feature && feature.get ? feature.get('pathKind') : '');
+                    const kind = normRouteKind(feature && feature.get ? feature.get('pathKind') : '');
 
-                    // ✅ 공구(검정) 우선
-                    if (kind === 'TRAM_TOOL') return STYLE_TRAM_TOOL;
+                    // 공구 우선
+                    if (kind === 'TRAM_TOOL') return __ROUTE_STYLES__.TRAM_TOOL;
+                    if (kind === 'WALK') return __ROUTE_STYLES__.WALK;
+                    if (kind === 'TRAM') return __ROUTE_STYLES__.TRAM;
 
-                    if (kind === 'WALK') return STYLE_WALK;
-                    if (kind === 'TRAM') return STYLE_TRAM;
-
-                    return STYLE_BUS;
+                    return __ROUTE_STYLES__.BUS;
                 },
-                zIndex: 15, // 최단경로 레이어(공구 60 아래)
+                zIndex: 15,
             });
 
             map.addLayer(routeVectorLayer);
 
-            // ensureRouteLayer() 맨 마지막에
+            // ✅ 디버그용 전역 핸들 (콘솔에서 확인 가능)
             window.__routeVectorLayer = routeVectorLayer;
             window.__routeVectorSource = routeVectorSource;
+
+            // ✅ 콘솔에서 map 접근도 가능하게(원하면)
+            window.__getInnerOlMap = getInnerOlMap;
+
+            return true;
         }
 
         // =========================================================
         function clearRouteLayer() {
-            ensureRouteLayer();
-            if (routeVectorSource) routeVectorSource.clear();
+            if (!ensureRouteLayer()) return;
+            if (routeVectorSource) routeVectorSource.clear(true);
         }
 
+        // =========================================================
+        // coordsAny: [ [x,y], ... ] or [ [lon,lat], ... ]
+        // =========================================================
         function addPathLineToRouteLayer(kind, coordsAny, meta) {
-            ensureRouteLayer();
+            if (!ensureRouteLayer()) return;
 
-            const map = getInnerOlMap();
+            const map = getInnerOlMap && getInnerOlMap();
             if (!map || !routeVectorSource || !coordsAny || coordsAny.length < 2) return;
 
             const view = map.getView && map.getView();
-            const proj = view && view.getProjection ? view.getProjection() : mapProjection;
-
-            function normKind(k) {
-                const s = String(k || '').toUpperCase();
-                if (s === 'TRAM_TOOL' || s === 'TRAMTOOL' || s === 'TOOL') return 'TRAM_TOOL';
-                if (s === 'WALK' || s === 'WALKING' || s === 'FOOT' || s === 'PED' || s === 'PEDESTRIAN') return 'WALK';
-                if (s === 'TRAM' || s === 'RAIL' || s === 'TRAIN') return 'TRAM';
-                return 'BUS';
-            }
+            const proj = (view && view.getProjection && view.getProjection()) || mapProjection;
 
             function looksLikeLonLatXY(x, y) {
                 return isFinite(x) && isFinite(y) && Math.abs(x) <= 180 && Math.abs(y) <= 90;
             }
 
             function decideIsLonLat(arr) {
-                const n = Math.min(3, arr.length);
+                // 앞쪽 몇개만 보고 판단
+                const n = Math.min(5, arr.length);
                 for (let i = 0; i < n; i++) {
                     const c = arr[i];
                     if (!c || c.length < 2) continue;
                     const x = parseFloat(c[0]);
                     const y = parseFloat(c[1]);
+                    if (!isFinite(x) || !isFinite(y)) continue;
                     if (looksLikeLonLatXY(x, y)) return true;
                 }
                 return false;
@@ -1227,10 +1224,10 @@
 
             const f = new ol.Feature({ geometry: new ol.geom.LineString(out) });
 
-            f.set('pathKind', normKind(kind));
+            f.set('pathKind', normRouteKind(kind));
 
-            // ✅✅✅ 핵심: feature에 걸린 기존 style을 제거해서 "layer style"을 무조건 타게 함
-            if (f.setStyle) f.setStyle(null);
+            // ✅ 레이어 스타일 강제 적용
+            if (typeof f.setStyle === 'function') f.setStyle(null);
 
             if (meta && typeof meta === 'object') {
                 Object.keys(meta).forEach(function (k) {
@@ -1241,47 +1238,66 @@
             routeVectorSource.addFeature(f);
         }
 
-        // segments: [{kind:'BUS'|'TRAM'|'WALK', coords:[...]}...]
+        // segments: [{kind:'BUS'|'TRAM'|'WALK'|'TRAM_TOOL', coords:[...]}...]
         function drawPathSegmentsOnRouteLayer(segments) {
-            ensureRouteLayer();
+            if (!ensureRouteLayer()) return;
             if (!routeVectorSource) return;
 
-            routeVectorSource.clear();
+            routeVectorSource.clear(true);
             (segments || []).forEach(function (seg) {
-                addPathLineToRouteLayer(seg.kind || 'BUS', seg.coords || []);
+                addPathLineToRouteLayer(seg.kind || 'BUS', seg.coords || [], seg.meta || null);
             });
         }
 
         // =========================================================
         // ✅ routePathIndex에 캐시된 "버스 노선 경로"를 routeLayer에 그리기
         // =========================================================
-        function drawBusRouteFromIndex(routeId) {
-            if (!routeId) return;
-            ensureRouteLayer();
-            if (!routeVectorSource) return;
+        // routePathIndex[routeId] = { dirs:{ALL:[proj...],UP:...,DOWN:...}, proj:... }
+        function drawBusRouteFromIndex(routeId, opts) {
+            opts = opts || {};
+            const shouldClear = opts.clear !== false; // 기본 true
 
-            const info = routePathIndex[routeId];
-            if (!info || !info.dirs) return;
+            routeId = String(routeId || '').trim();
+            if (!routeId) return false;
 
-            const coordsProj = (info.dirs.ALL && info.dirs.ALL.length >= 2 && info.dirs.ALL) || (info.dirs.UP && info.dirs.UP.length >= 2 && info.dirs.UP) || (info.dirs.DOWN && info.dirs.DOWN.length >= 2 && info.dirs.DOWN) || null;
+            if (!ensureRouteLayer()) return false;
+            if (!routeVectorSource) return false;
 
-            if (!coordsProj || coordsProj.length < 2) return;
+            const info = routePathIndex && routePathIndex[routeId];
+            if (!info || !info.dirs) return false;
+
+            const dirs = info.dirs || {};
+            const coordsProj = (dirs.ALL && dirs.ALL.length >= 2 && dirs.ALL) || (dirs.UP && dirs.UP.length >= 2 && dirs.UP) || (dirs.DOWN && dirs.DOWN.length >= 2 && dirs.DOWN) || null;
+
+            if (!coordsProj || coordsProj.length < 2) return false;
+
+            if (shouldClear) routeVectorSource.clear(true);
 
             const f = new ol.Feature({
                 geometry: new ol.geom.LineString(coordsProj),
             });
 
-            // ✅ layer style이 먹도록 "pathKind"만 세팅 (BUS=파랑)
             f.set('pathKind', 'BUS');
             f.set('routeId', routeId);
-
-            // ✅ 클릭 판별에서 stop/bus가 아니라 “선”
             f.set('kind', 'routeLine');
 
-            // ✅✅✅ 핵심: feature에 style이 붙어 있으면 layer style(파랑)이 무시됨 → 강제 제거
             if (typeof f.setStyle === 'function') f.setStyle(null);
 
             routeVectorSource.addFeature(f);
+
+            // ✅ 보기 편하게 화면 fit(원치 않으면 opts.fit=false)
+            if (opts.fit !== false) {
+                try {
+                    const map = getInnerOlMap && getInnerOlMap();
+                    const view = map && map.getView && map.getView();
+                    const ext = f.getGeometry().getExtent();
+                    if (view && ext && isFinite(ext[0])) {
+                        view.fit(ext, { padding: [30, 30, 30, 30], duration: 150 });
+                    }
+                } catch (e) {}
+            }
+
+            return true;
         }
 
         // =========================================================
@@ -1954,19 +1970,67 @@
         }
 
         // =========================================================
-        // ✅ 도착정보 + 버스 위치 로딩
+        // ✅ 도착정보 + 버스 위치 로딩 (수정본)
+        // - 응답이 TAGO원본 or {items:[...]} or string(JSON) 모두 대응
+        // - routeId/routeNo 필드 흔들림 흡수
+        // - prevCnt 숫자 파싱 보정
         // =========================================================
         function loadArrivalAndBus(nodeId) {
             if (!nodeId) return;
 
             $scope.loadingArrival = true;
 
-            const prevIndex = {};
+            // ---------------------------
+            // ✅ util: JSON 문자열/객체 모두 안전 파싱
+            // ---------------------------
+            function parseJsonMaybe(v) {
+                if (!v) return null;
+                if (typeof v === 'string') {
+                    try {
+                        return JSON.parse(v);
+                    } catch (e) {
+                        return null;
+                    }
+                }
+                return v;
+            }
+
+            // ---------------------------
+            // ✅ util: items.item 추출 (TAGO 원본 + {items:[...]} 둘 다)
+            // ---------------------------
+            function extractItems(obj) {
+                if (!obj) return [];
+                // 1) 서버가 {items:[...]}로 준 경우
+                if (Array.isArray(obj.items)) return obj.items;
+
+                // 2) TAGO 원본 구조
+                var item = obj?.response?.body?.items?.item;
+                if (!item) return [];
+                return Array.isArray(item) ? item : [item];
+            }
+
+            // ---------------------------
+            // ✅ util: routeId / routeNo 안전 추출
+            // ---------------------------
+            function pickRouteId(x) {
+                var v = x && (x.routeid || x.routeId || x.busRouteId || x.route_id || x.rid);
+                return v != null ? String(v).trim() : '';
+            }
+
+            function pickRouteNo(x) {
+                var v = x && (x.routeno || x.routeNo || x.routenm || x.routeNm || x.lineNo || x.busRouteNm || x.rn);
+                return v != null ? String(v).trim() : '-';
+            }
+
+            // ---------------------------
+            // ✅ 이전 arrivals index (같은 노선 매칭해서 remainSec 안정화)
+            // ---------------------------
+            var prevIndex = {};
             ($scope.arrivals || []).forEach(function (a) {
-                const raw = a._raw || {};
-                const routeIdPrev = a.routeId || raw.routeid || raw.routeId || raw.busRouteId || raw.route_id || '';
-                const routeNoPrev = a.routeNo || raw.routeno || raw.routeNo || raw.routenm || raw.routeNm || raw.lineNo || raw.busRouteNm || '-';
-                const key = routeIdPrev + '|' + String(routeNoPrev);
+                var raw = a && a._raw ? a._raw : {};
+                var routeIdPrev = String(a.routeId != null ? a.routeId : raw.routeid || raw.routeId || raw.busRouteId || raw.route_id || '').trim();
+                var routeNoPrev = String(a.routeNo != null ? a.routeNo : raw.routeno || raw.routeNo || raw.routenm || raw.routeNm || raw.lineNo || raw.busRouteNm || '-').trim();
+                var key = routeIdPrev + '|' + routeNoPrev;
                 prevIndex[key] = a;
             });
 
@@ -1975,44 +2039,55 @@
                     params: { cityCode: CITY_CODE, nodeId: nodeId, numOfRows: 50, pageNo: 1 },
                 })
                 .then(function (res) {
-                    let data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
-                    let body = ((data || {}).response || {}).body || {};
-                    let list = (body.items && body.items.item) || [];
-                    if (!Array.isArray(list)) list = list ? [list] : [];
+                    var data = parseJsonMaybe(res.data);
 
-                    $scope.arrivals = list.map(function (x) {
-                        const routeNoRaw = x.routeno || x.routeNo || x.routenm || x.routeNm || x.lineNo || x.busRouteNm || '-';
-                        const routeNo = routeNoRaw != null ? String(routeNoRaw) : '-';
+                    // ✅ list 추출 (여기서부터 x는 TAGO item 1개)
+                    var list = extractItems(data);
 
-                        const routeIdRaw = x.routeid || x.routeId || x.busRouteId || x.route_id || '';
-                        const key = routeIdRaw + '|' + routeNo;
+                    // ✅ 화면용 arrivals 정규화
+                    var arrivalsNorm = list.map(function (x) {
+                        var routeNo = pickRouteNo(x);
+                        var routeId = pickRouteId(x);
+                        var key = routeId + '|' + routeNo;
 
-                        const secRaw = x.arrtime || x.arrTime || x.arrtime1 || x.predictTime1 || x.remaintime || x.remainTime || x.traTime;
-                        let newSec = parseInt(secRaw, 10);
+                        // 남은 시간(sec) 필드 흔들림 흡수
+                        var secRaw = x.arrtime || x.arrTime || x.arrtime1 || x.predictTime1 || x.remaintime || x.remainTime || x.traTime || x.arrsec || x.arrSec;
+
+                        var newSec = parseInt(secRaw, 10);
                         if (!isFinite(newSec)) newSec = null;
 
-                        const prev = prevIndex[key];
-                        let mergedSec = newSec;
+                        // 이전값과 병합(이전 remainSec이 있으면 급격히 증가하지 않게)
+                        var prev = prevIndex[key];
+                        var mergedSec = newSec;
 
                         if (prev && isFinite(prev.remainSec)) {
                             if (isFinite(newSec)) mergedSec = Math.min(prev.remainSec, newSec);
                             else mergedSec = prev.remainSec;
                         }
 
-                        const prevCnt = x.arrprevstationcnt || x.arrPrevStationCnt || x.staOrd || x.staord;
-                        const msg = formatArrivalMessage(x, mergedSec);
+                        // 정류장 몇 정거장 전
+                        var prevCntRaw = x.arrprevstationcnt || x.arrPrevStationCnt || x.staOrd || x.staord;
+                        var prevCnt = parseInt(prevCntRaw, 10);
+                        if (!isFinite(prevCnt)) prevCnt = null;
+
+                        var msg = formatArrivalMessage(x, mergedSec);
 
                         return {
-                            routeNo,
-                            routeId: routeIdRaw,
+                            routeNo: routeNo,
+                            routeId: routeId, // ✅ 무조건 문자열 routeId
                             remainSec: mergedSec,
-                            prevCnt: isFinite(prevCnt) ? prevCnt : null,
+                            prevCnt: prevCnt,
                             remainMsg: msg,
                             _raw: x,
                         };
                     });
 
-                    fetchAndDrawBusLocations(list);
+                    $scope.arrivals = arrivalsNorm;
+
+                    // ✅ 버스 위치/마커는 "원본 list"가 아니라
+                    //    routeId가 정규화된 arrivalsNorm 기반으로 넘기는게 안전
+                    //    (fetchAndDrawBusLocations가 routeid를 못찾는 문제 방지)
+                    fetchAndDrawBusLocations(arrivalsNorm);
                 })
                 .catch(function (err) {
                     console.error('[BusController] 도착정보 조회 실패:', err);
@@ -2082,90 +2157,228 @@
             };
         }
 
+        // =========================================================
+        // ✅ DB 정류장 조회 (백엔드: /api/bus/stops 사용)
+        // - keyword: '' 가능 (전체)
+        // - limit/offset 지원(클라에서 offset->pageNo로 변환)
+        // ✅ 반환 형태를 "pack"으로 통일: { items:[], totalCount:number|null, pageNo:number, numOfRows:number }
+        // =========================================================
         function fetchStopsFromDb(cityCode, keyword, type, limit, offset) {
-            // ✅ limit/offset 0도 안전하게 포함
-            const params = {
-                cityCode: String(cityCode || CITY_CODE || 25),
-                limit: Number(limit == null ? 500 : limit),
-                offset: Number(offset == null ? 0 : offset), // ✅ 핵심: 0도 항상 포함
-            };
+            // ✅ TAGO는 pageNo/numOfRows 기반
+            var numOfRows = limit != null ? Number(limit) : 500;
+            if (!isFinite(numOfRows) || numOfRows <= 0) numOfRows = 500;
 
-            // keyword는 비어있어도 PathController가 처리(=findAll)
-            if (keyword != null) params.keyword = String(keyword);
+            // 🔥 너무 크게 하면 TAGO가 불안정할 때가 많아서 1000 권장
+            if (numOfRows > 1000) numOfRows = 1000;
 
-            // type 옵션
-            if (type) params.type = String(type);
-
-            return $http.get('/api/path/stops/search', { params }).then(function (res) {
-                const list = Array.isArray(res.data) ? res.data : [];
-                return list.map(adaptDbStopToUiRow).filter(Boolean);
-            });
-        }
-
-        // ✅ 전체를 배치로 가져오는 헬퍼 (offset 지원 시 끝까지 루프)
-        function fetchAllStopsFromDb(cityCode, keyword, type) {
-            const BATCH = 500; // 한 번에 가져올 개수
-            const MAX_TOTAL = 20000; // 안전장치
-
-            let offset = 0;
-            let all = [];
-
-            // ✅ stopId 추출 헬퍼 (중복 감지용)
-            function pickStopId(row) {
-                return row && (row.nodeid || row.nodeId || row.stopId || row.stop_id || row.id);
+            // offset -> pageNo 변환 (0부터 시작하는 offset 기준)
+            var pageNo = 1;
+            if (offset != null) {
+                var off = Number(offset);
+                if (isFinite(off) && off > 0) pageNo = Math.floor(off / numOfRows) + 1;
             }
 
-            function step() {
-                return fetchStopsFromDb(cityCode, keyword, type, BATCH, offset).then(function (rows) {
-                    rows = rows || [];
+            var params = [];
+            params.push('cityCode=' + encodeURIComponent(cityCode));
+            if (keyword) params.push('keyword=' + encodeURIComponent(keyword));
+            params.push('pageNo=' + encodeURIComponent(pageNo));
+            params.push('numOfRows=' + encodeURIComponent(numOfRows));
 
-                    all = all.concat(rows);
-                    offset += rows.length;
+            var url = '/api/bus/stops?' + params.join('&');
 
-                    // ✅ 종료 조건
-                    if (rows.length < BATCH) return all;
-                    if (all.length >= MAX_TOTAL) return all;
+            return $http
+                .get(url, { responseType: 'text' })
+                .then(function (res) {
+                    var text = res && res.data ? res.data : '';
+                    if (!text) {
+                        return { items: [], totalCount: null, pageNo: pageNo, numOfRows: numOfRows };
+                    }
 
-                    // ✅ offset 무시 케이스 방지(같은 데이터 반복)
-                    if (all.length >= BATCH * 2) {
-                        const prevFirst = pickStopId(all[all.length - BATCH * 2]);
-                        const currFirst = pickStopId(all[all.length - BATCH]);
-                        if (prevFirst && currFirst && String(prevFirst) === String(currFirst)) {
-                            console.warn('[fetchAllStopsFromDb] offset not applied on server. stop looping.');
-                            return all;
+                    var obj;
+                    try {
+                        obj = typeof text === 'string' ? JSON.parse(text) : text;
+                    } catch (e) {
+                        console.warn('[fetchStopsFromDb] JSON parse fail. raw=', text);
+                        return { items: [], totalCount: null, pageNo: pageNo, numOfRows: numOfRows };
+                    }
+
+                    var body = obj && obj.response && obj.response.body;
+                    var totalCount = body && body.totalCount != null ? Number(body.totalCount) : null;
+
+                    var item = body && body.items && body.items.item;
+                    var items = [];
+                    if (item) items = Array.isArray(item) ? item : [item];
+
+                    return {
+                        items: items,
+                        totalCount: isFinite(totalCount) ? totalCount : null,
+                        pageNo: pageNo,
+                        numOfRows: numOfRows,
+                    };
+                })
+                .catch(function (err) {
+                    console.error('[fetchStopsFromDb] fail:', err);
+                    return { items: [], totalCount: null, pageNo: pageNo, numOfRows: numOfRows };
+                });
+        }
+
+        // =========================================================
+        // ✅ 전체를 pageNo로 끝까지 가져오는 헬퍼
+        // - ✅ offset 기반 루프(added===0) 방식 제거 → "pageNo 증가" + "totalCount 기반 종료"
+        // - ✅ 중복 제거 키를 "nodeid/nodeId" 1개로 고정 (DB count 그대로 맞추기 핵심)
+        // =========================================================
+        function fetchAllStopsFromDb(cityCode, keyword, type) {
+            var BATCH = 1000; // 안정권
+            var MAX_TOTAL = 200000; // 안전장치
+            var MAX_PAGES = 500; // 안전장치
+
+            var all = [];
+            var seen = new Set();
+
+            // ✅ DB에서 정류장 고유키로 쓸 필드 1개로 고정 (중복 증가 방지)
+            function pickStopId(row) {
+                // ⭐ 여기서 stop_id, id, nodeno 등을 섞으면 같은 정류장이 다른 키로 들어올 수 있음
+                return row && (row.nodeid || row.nodeId);
+            }
+
+            function step(pageNo, knownTotalCount) {
+                if (pageNo > MAX_PAGES) {
+                    console.warn('[fetchAllStopsFromDb] reached MAX_PAGES, stop.');
+                    return Promise.resolve(all);
+                }
+                if (all.length >= MAX_TOTAL) {
+                    console.warn('[fetchAllStopsFromDb] reached MAX_TOTAL, stop.');
+                    return Promise.resolve(all);
+                }
+
+                var offset = (pageNo - 1) * BATCH;
+
+                return fetchStopsFromDb(cityCode, keyword, type, BATCH, offset).then(function (pack) {
+                    var items = pack && pack.items ? pack.items : [];
+                    var totalCount = pack && pack.totalCount != null ? pack.totalCount : knownTotalCount;
+
+                    // ✅ 페이지가 비면 종료
+                    if (!items.length) return all;
+
+                    for (var i = 0; i < items.length; i++) {
+                        var r = items[i];
+                        var id = pickStopId(r);
+
+                        // ✅ id가 없으면 "DB 원본 그대로" 기준을 못 맞추니 제외(권장)
+                        //    (원한다면 all.push(r)로 포함 가능하지만 그럼 count가 달라질 수 있음)
+                        if (id == null || String(id).trim() === '') continue;
+
+                        var key = String(id).trim();
+                        if (!seen.has(key)) {
+                            seen.add(key);
+                            all.push(r);
                         }
                     }
 
-                    return step();
+                    // ✅ totalCount가 있으면 "충분히 모이면 종료"
+                    if (totalCount != null && isFinite(totalCount)) {
+                        if (all.length >= totalCount) return all;
+                    }
+
+                    // ✅ 다음 페이지
+                    return step(pageNo + 1, totalCount);
                 });
             }
 
-            return step().catch(function (err) {
+            return step(1, null).catch(function (err) {
                 console.error('[fetchAllStopsFromDb] fail:', err);
-
-                // ✅ fallback: offset이 지원 안 되거나 실패하면 limit 크게 한 번만 시도
-                return fetchStopsFromDb(cityCode, keyword, type, 10000, 0).catch(function () {
-                    return [];
-                });
+                return [];
             });
         }
 
         // =========================================================
-        // ✅ 정류장 검색 (DB 기반으로 통일) - 수정본
+        // ✅ stopModeFilter (ng-repeat filter 용)
+        // - mode=BUS 일 때 kind/type이 비어있으면 BUS로 "표시"만 허용 (DB 데이터 자체를 바꾸지는 않음)
+        // - mode=TRAM 일 때는 TRAM만 엄격하게
+        // =========================================================
+        $scope.stopModeFilter = function (s) {
+            try {
+                var mode = String(($scope.path && $scope.path.mode) || 'MIXED').toUpperCase();
+                if (mode === 'MIXED') return true;
+
+                var k = String((s && (s.kind || s.type || s.stopType || '')) || '')
+                    .toUpperCase()
+                    .trim();
+
+                // ✅ 표시용 처리: 버스정류장은 kind가 비어있는 경우가 많으니 BUS로 보여주기
+                if (!k && mode === 'BUS') return true;
+
+                return k === mode;
+            } catch (e) {
+                return true;
+            }
+        };
+
+        // =========================================================
+        // ✅ DB row → 화면/로직 공통 필드로 정규화 (중복 정의 제거: 여기 1개만 사용)
+        // - ⚠️ "kind 기본값 BUS 강제"를 제거 (BUS count가 DB와 다르게 보이는 원인 중 하나)
+        // =========================================================
+        function normalizeStopAny(stop) {
+            if (!stop) return null;
+
+            var nodeid = stop.nodeid || stop.nodeId;
+            var name = stop.name || stop.nodenm || stop.nodeNm || stop.stopName || stop.sttnNm || stop.nm || '';
+
+            var rawLat = stop.lat || stop.gpslati || stop.gpsLat || stop.latitude;
+            var rawLon = stop.lon || stop.gpslong || stop.gpsLong || stop.longitude || stop.lng;
+
+            var lat = parseFloat(rawLat);
+            var lon = parseFloat(rawLon);
+
+            // ✅ DB 값 존중: kind/type이 있으면 쓰고, 없으면 빈값 유지
+            var kind = String(stop.kind || stop.type || stop.stopType || '')
+                .toUpperCase()
+                .trim();
+
+            var out = angular.extend({}, stop, {
+                nodeid: nodeid,
+                name: name,
+                kind: kind,
+                type: kind,
+                lat: isFinite(lat) ? lat : stop.lat,
+                lon: isFinite(lon) ? lon : stop.lon,
+                _key: String(nodeid != null ? nodeid : '').trim(), // BUS count 맞추려면 nodeid만 key
+            });
+
+            if (!out.nodenm) out.nodenm = out.name;
+            if (!out.nodeNm) out.nodeNm = out.name;
+
+            return out;
+        }
+
+        // =========================================================
+        // ✅ 정류장 검색 (DB + TRAM 전역데이터 + MIXED 합치기 완성본)
+        // - BUS   : DB만 (BUS만 남김)
+        // - TRAM  : tram-data.js 전역 배열만 (자동 탐색)
+        // - MIXED : BUS(DB) + TRAM(전역) 합쳐서 표시
         // =========================================================
         $scope.searchStops = function () {
-            const kw = ($scope.keyword || '').trim();
+            var kw = ($scope.keyword || '').trim();
             initMap();
 
+            // ✅ 현재 모드
+            var mode = String(($scope.path && $scope.path.mode) || 'MIXED').toUpperCase();
+
+            // ---------------------------------------------------------
+            // 공통 유틸
+            // ---------------------------------------------------------
             function pickLatLon(stop) {
-                const rawLat = stop.gpslati || stop.gpsLat || stop.lat || stop.latitude || stop.gpsLati || stop.gpslAti;
-                const rawLon = stop.gpslong || stop.gpsLong || stop.lon || stop.lng || stop.longitude || stop.gpsLongi || stop.gpsLongt;
-
-                const lat = parseFloat(rawLat);
-                const lon = parseFloat(rawLon);
-
+                var s = normalizeStopAny(stop);
+                if (!s) return null;
+                var lat = parseFloat(s.lat);
+                var lon = parseFloat(s.lon);
                 if (isFinite(lat) && isFinite(lon)) return { lat: lat, lon: lon };
                 return null;
+            }
+
+            function pickNodeIdForArrival(stop) {
+                var s = normalizeStopAny(stop);
+                return s && s.nodeid ? String(s.nodeid).trim() : null;
             }
 
             function resetSelectionAndLayers() {
@@ -2186,12 +2399,202 @@
                 if (routeVectorSource) routeVectorSource.clear();
             }
 
-            // ✅ keyword 비면: 전체 목록(DB) 끝까지 가져오기
-            if (!kw) {
-                setStatus('info', '전체 정류장(DB) 불러오는 중...', 0);
+            // ---------------------------------------------------------
+            // ✅ 트램 전역 데이터 "자동 탐색" (전역 변수명 모르더라도 잡아오게)
+            // ---------------------------------------------------------
+            function guessTramRaw() {
+                // 1) 흔한 후보들
+                var direct = window.TRAM_STOPS || window.TRAM_STATIONS || window.TRAM_NODES || window.tramStops || window.tramStations;
 
-                return fetchAllStopsFromDb(CITY_CODE, '', null)
-                    .then(function (list) {
+                if (Array.isArray(direct) && direct.length) return direct;
+
+                // 2) 전역(window)에서 "배열" 중 트램 같아보이는 걸 탐색
+                //    - 보통 14개
+                //    - 원소가 객체이고, name/lat/lon/nodeid 같은 필드가 있을 확률
+                try {
+                    var keys = Object.keys(window || {});
+                    var candidates = [];
+
+                    for (var i = 0; i < keys.length; i++) {
+                        var k = keys[i];
+                        var v = window[k];
+                        if (!Array.isArray(v)) continue;
+                        if (!v.length) continue;
+
+                        // 크기 힌트(트램 14개 근처)
+                        if (v.length >= 10 && v.length <= 30) {
+                            var one = v[0];
+                            if (one && typeof one === 'object') {
+                                // 트램 정거장일 법한 필드 힌트
+                                var hasName = 'name' in one || 'nodenm' in one || 'nodeNm' in one || 'sttnNm' in one;
+                                var hasCoord = 'lat' in one || 'gpslati' in one || 'lon' in one || 'gpslong' in one;
+                                if (hasName || hasCoord) {
+                                    candidates.push({ key: k, arr: v });
+                                }
+                            }
+                        }
+                    }
+
+                    // 후보 중 "14개에 가장 가까운" 배열을 선택
+                    if (candidates.length) {
+                        candidates.sort(function (a, b) {
+                            return Math.abs(a.arr.length - 14) - Math.abs(b.arr.length - 14);
+                        });
+                        console.info('[TRAM guess] picked =', candidates[0].key, 'len=', candidates[0].arr.length);
+                        return candidates[0].arr;
+                    }
+
+                    // 그래도 없으면 후보 로그
+                    console.warn('[TRAM guess] no candidates. window arrays not found (10~30 len objects).');
+                } catch (e) {
+                    console.warn('[TRAM guess] failed:', e);
+                }
+
+                return [];
+            }
+
+            function buildTramList(kw) {
+                var tramRaw = guessTramRaw();
+                var tramList = (Array.isArray(tramRaw) ? tramRaw : [])
+                    .map(function (x) {
+                        var s = normalizeStopAny(x);
+                        if (!s) return null;
+                        // ✅ 트램은 무조건 TRAM 고정
+                        s.kind = 'TRAM';
+                        s.type = 'TRAM';
+                        return s;
+                    })
+                    .filter(Boolean);
+
+                // ✅ 키워드가 있으면 이름 기반 필터
+                if (kw) {
+                    var q = kw.toLowerCase();
+                    tramList = tramList.filter(function (s) {
+                        var nm = String(s.name || s.nodenm || s.nodeNm || '').toLowerCase();
+                        return nm.indexOf(q) >= 0;
+                    });
+                }
+
+                return tramList;
+            }
+
+            // ---------------------------------------------------------
+            // ✅ TRAM 모드
+            // ---------------------------------------------------------
+            if (mode === 'TRAM') {
+                setStatus('info', kw ? '트램 정거장 검색 중...' : '트램 정거장 불러오는 중...', 0);
+
+                var tramOnly = buildTramList(kw);
+
+                $scope.$evalAsync(function () {
+                    $scope.stops = tramOnly;
+                });
+
+                ensureMapSize();
+
+                if (!tramOnly.length) {
+                    setStatus('error', '❗ 트램 정거장을 찾지 못했습니다. (tram-data.js 전역 배열/변수명 확인 필요)', 2500);
+                    resetSelectionAndLayers();
+                    return;
+                }
+
+                var firstT = tramOnly[0];
+                currentStopCoord = pickLatLon(firstT);
+                moveMapToStop(firstT, true);
+
+                currentNodeId = null; // 트램은 도착정보/버스폴링 안함
+                setStatus('success', '✅ 트램 정거장 ' + tramOnly.length + '곳을 표시했습니다.', 2500);
+                return;
+            }
+
+            // ---------------------------------------------------------
+            // ✅ BUS / MIXED: DB 조회
+            // ---------------------------------------------------------
+            var type = null; // 서버 타입필터는 안 씀
+
+            // (공통) DB→BUS 리스트 만들기 (BUS만 남기기)
+            function buildBusListFromDb(res) {
+                var list = (Array.isArray(res) ? res : [])
+                    .map(function (x) {
+                        var s = normalizeStopAny(x);
+                        if (!s) return null;
+                        // ✅ DB쪽 kind/type 비는 경우가 많으니 BUS 고정
+                        if (!s.kind) s.kind = 'BUS';
+                        if (!s.type) s.type = 'BUS';
+                        return s;
+                    })
+                    .filter(Boolean);
+
+                // ✅ BUS 모드일 때 혹시 모를 섞임 방지 (BUS만)
+                list = list.filter(function (s) {
+                    var k = String(s.kind || s.type || '').toUpperCase();
+                    return k !== 'TRAM';
+                });
+
+                return list;
+            }
+
+            // ---------------------------------------------------------
+            // ✅ MIXED: (BUS(DB)) + (TRAM 전역) 합치기
+            // ---------------------------------------------------------
+            if (mode === 'MIXED') {
+                setStatus('info', kw ? '버스+트램 정류장 검색 중...' : '버스+트램 정류장 불러오는 중...', 0);
+
+                var tramList = buildTramList(kw);
+
+                return fetchAllStopsFromDb(CITY_CODE, kw || '', type)
+                    .then(function (res) {
+                        var busList = buildBusListFromDb(res);
+
+                        // ✅ 합치기: 버스 먼저 + 트램
+                        var merged = busList.concat(tramList);
+
+                        $scope.$evalAsync(function () {
+                            $scope.stops = merged;
+                        });
+
+                        ensureMapSize();
+
+                        if (!merged.length) {
+                            setStatus('error', '❗ 정류장을 찾지 못했습니다.', 2000);
+                            resetSelectionAndLayers();
+                            return;
+                        }
+
+                        // ✅ 지도 이동은 "버스가 있으면 버스", 없으면 트램
+                        var first = busList.length ? busList[0] : merged[0];
+                        currentStopCoord = pickLatLon(first);
+                        moveMapToStop(first, true);
+
+                        currentNodeId = pickNodeIdForArrival(first);
+
+                        // ✅ 버스면 도착정보/폴링
+                        if (currentNodeId) {
+                            loadArrivalAndBus(currentNodeId);
+                            startPolling();
+                        }
+
+                        setStatus('success', '✅ 버스 ' + busList.length + ' + 트램 ' + tramList.length + ' = 총 ' + merged.length + '곳', 2500);
+                    })
+                    .catch(function (err) {
+                        console.error('[BusController] MIXED 조회 실패:', err);
+                        setStatus('error', '❌ 버스+트램 정보를 불러오지 못했습니다.', 2500);
+                        resetSelectionAndLayers();
+                    });
+            }
+
+            // ---------------------------------------------------------
+            // ✅ BUS 모드: DB만
+            // ---------------------------------------------------------
+
+            // ✅ kw 비면 전체 목록
+            if (!kw) {
+                setStatus('info', '전체 정류장 불러오는 중...', 0);
+
+                return fetchAllStopsFromDb(CITY_CODE, '', type)
+                    .then(function (res) {
+                        var list = buildBusListFromDb(res);
+
                         $scope.$evalAsync(function () {
                             $scope.stops = list;
                         });
@@ -2204,77 +2607,83 @@
                             return;
                         }
 
-                        const first = list[0];
+                        var first = list[0];
                         currentStopCoord = pickLatLon(first);
-
                         moveMapToStop(first, true);
 
-                        currentNodeId = first.nodeid || first.nodeId || first.nodeno || first.nodeNo;
+                        currentNodeId = pickNodeIdForArrival(first);
 
-                        setStatus('success', `✅ 전체 정류장(DB) ${list.length}곳을 불러왔습니다.`, 2500);
+                        setStatus('success', '✅ 전체 정류장 ' + list.length + '곳을 불러왔습니다.', 2500);
                     })
                     .catch(function (err) {
-                        console.error('[BusController] 전체 정류장(DB) 조회 실패:', err);
+                        console.error('[BusController] 전체 정류장 조회 실패:', err);
                         setStatus('error', '❌ 전체 정류장 정보를 불러오지 못했습니다.', 2500);
                         resetSelectionAndLayers();
                     });
             }
 
-            // ✅ keyword 있으면: 검색(DB)도 배치로(많이 뜨는 키워드 대비)
-            setStatus('info', '정류장(DB) 검색 중...', 0);
+            // ✅ kw 있으면 검색
+            setStatus('info', '정류장 검색 중...', 0);
 
-            return fetchAllStopsFromDb(CITY_CODE, kw, null)
-                .then(function (filtered) {
-                    $scope.stops = filtered;
+            return fetchAllStopsFromDb(CITY_CODE, kw, type)
+                .then(function (res) {
+                    var filtered = buildBusListFromDb(res);
+
+                    $scope.$evalAsync(function () {
+                        $scope.stops = filtered;
+                    });
+
                     ensureMapSize();
 
                     if (!filtered.length) {
-                        setStatus('error', `❗ "${kw}" 정류장을 찾지 못했습니다.`, 2000);
+                        setStatus('error', '❗ "' + kw + '" 정류장을 찾지 못했습니다.', 2000);
                         resetSelectionAndLayers();
                         return;
                     }
 
-                    const first = filtered[0];
+                    var first = filtered[0];
                     currentStopCoord = pickLatLon(first);
-
                     moveMapToStop(first, true);
 
-                    currentNodeId = first.nodeid || first.nodeId || first.nodeno || first.nodeNo;
+                    currentNodeId = pickNodeIdForArrival(first);
 
                     if (currentNodeId) {
                         loadArrivalAndBus(currentNodeId);
                         startPolling();
                     }
 
-                    setStatus('success', `✅ "${kw}" 관련 정류장(DB) ${filtered.length}곳을 찾았습니다.`, 2500);
+                    setStatus('success', '✅ "' + kw + '" 관련 정류장 ' + filtered.length + '곳을 찾았습니다.', 2500);
                 })
                 .catch(function (err) {
-                    console.error('[BusController] 정류장(DB) 검색 실패:', err);
+                    console.error('[BusController] 정류장 검색 실패:', err);
                     setStatus('error', '❌ 정류장 정보를 불러오지 못했습니다.', 2500);
                     resetSelectionAndLayers();
                 });
         };
 
         // =========================================================
-        // ✅ 정류장 목록 클릭
+        // ✅ 정류장 목록 클릭 (정규화 + selectedStop 세팅 보장)
+        // - ✅ normalizeStopAny를 재정의하지 말고 위 함수 재사용
         // =========================================================
         $scope.focusStop = function (stop) {
             if (!stop) return;
 
-            $scope.keyword = stop.nodenm || stop.nodeNm || $scope.keyword;
+            var s = normalizeStopAny(stop);
+            if (!s) return;
 
-            (function setCurrentStopFrom(s) {
-                const rawLat = s.gpslati || s.gpsLat || s.lat || s.latitude;
-                const rawLon = s.gpslong || s.gpsLong || s.lon || s.lng || s.longitude;
-                const lat = parseFloat(rawLat);
-                const lon = parseFloat(rawLon);
+            $scope.selectedStop = s;
+            $scope.keyword = s.name || $scope.keyword;
+
+            (function setCurrentStopFrom(x) {
+                var lat = parseFloat(x.lat);
+                var lon = parseFloat(x.lon);
                 if (isFinite(lat) && isFinite(lon)) currentStopCoord = { lat: lat, lon: lon };
                 else currentStopCoord = null;
-            })(stop);
+            })(s);
 
-            moveMapToStop(stop, true);
+            moveMapToStop(s, true);
 
-            currentNodeId = stop.nodeid || stop.nodeId || stop.nodeno || stop.nodeNo;
+            currentNodeId = s.nodeid ? String(s.nodeid).trim() : null;
 
             if (currentNodeId) {
                 loadArrivalAndBus(currentNodeId);
@@ -2335,54 +2744,287 @@
 
         // =========================================================
 
-        // ✅✅✅ [여기에 추가] "raw routePath" 캐시/함수들 (loadRoutePath 바깥!)
-        const routePathRawIndex = {}; // routeId -> { list, byNodeId }
-        const routePathRawPromise = {}; // routeId -> Promise
+        // ✅✅✅ "raw routePath" 캐시/함수들 (loadRoutePath 바깥!)
+        const routePathRawIndex = {}; // key(city:routeId) -> { list, byNodeId, coords, cityCode, routeId }
+        const routePathRawPromise = {}; // key(city:routeId) -> Promise
 
         function loadRoutePathRaw(routeId, cityCode) {
-            cityCode = String(cityCode || CITY_CODE || 25);
-            routeId = String(routeId || '').trim();
-            if (!routeId) return $q.resolve(null);
+            // ✅ cityCode 기본값 보정
+            const cc = String(cityCode || (typeof CITY_CODE !== 'undefined' ? CITY_CODE : 25) || 25).trim();
+            const rid = String(routeId || '').trim();
+            if (!rid) return $q.resolve(null);
 
-            if (routePathRawIndex[routeId]) return $q.resolve(routePathRawIndex[routeId]);
-            if (routePathRawPromise[routeId]) return routePathRawPromise[routeId];
+            // ✅ 캐시 키: cityCode 포함
+            const cacheKey = cc + ':' + rid;
 
-            routePathRawPromise[routeId] = $http
-                .get('/api/bus/routePath', { params: { cityCode: cityCode, routeId: routeId, pageNo: 1, numOfRows: 2000 } })
+            if (routePathRawIndex[cacheKey]) return $q.resolve(routePathRawIndex[cacheKey]);
+            if (routePathRawPromise[cacheKey]) return routePathRawPromise[cacheKey];
+
+            // ✅ 안전: numOfRows는 서버 제한 걸릴 수 있으니 너무 크게 못 올리면 여기서 조절
+            const NUM = 2000;
+
+            // ---------------------------------------------------------
+            // ✅ (추가) stopId -> {lon,lat} 를 찾아주는 인덱스 생성 (fallback용)
+            // 1) $scope.stops(검색/로드된 정류장 목록) 기반
+            // 2) 지도에 찍힌 정류장 feature 기반 (있으면)
+            function buildStopCoordIndex() {
+                const idx = new Map();
+
+                // ---- helper: put ----
+                function put(id, lon, lat) {
+                    id = String(id || '').trim();
+                    lon = Number(lon);
+                    lat = Number(lat);
+                    if (!id) return;
+                    if (!isFinite(lat) || !isFinite(lon)) return;
+                    if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
+                    if (!idx.has(id)) idx.set(id, { lon: lon, lat: lat });
+                }
+
+                // 1) stops 배열 후보들 우선순위로 탐색
+                try {
+                    const candidates =
+                        (typeof $scope !== 'undefined' && $scope && Array.isArray($scope.allStops) && $scope.allStops) ||
+                        (typeof $scope !== 'undefined' && $scope && Array.isArray($scope.stops) && $scope.stops) ||
+                        (typeof $rootScope !== 'undefined' && $rootScope && Array.isArray($rootScope.stops) && $rootScope.stops) ||
+                        [];
+
+                    candidates.forEach(function (s) {
+                        if (!s) return;
+
+                        const id = String(s.stopId || s.nodeid || s.nodeId || s.id || s.nodeno || s.nodeNo || '').trim();
+
+                        const lat = s.lat ?? s.gpslati ?? s.gpsLati ?? s.gpsY ?? s.y ?? s.mapY;
+                        const lon = s.lng ?? s.lon ?? s.gpslong ?? s.gpsLong ?? s.gpsX ?? s.x ?? s.mapX;
+
+                        put(id, lon, lat);
+                    });
+                } catch (e) {}
+
+                // 2) 지도 정류장 feature에서 좌표 보강 (더 정확)
+                try {
+                    const src = window.__stopVectorSource || window.stopVectorSource || (typeof stopVectorSource !== 'undefined' ? stopVectorSource : null) || (typeof stopsVectorSource !== 'undefined' ? stopsVectorSource : null) || null;
+
+                    const map = getInnerOlMap && getInnerOlMap();
+                    const viewProj = map && map.getView && map.getView().getProjection ? map.getView().getProjection() : null;
+
+                    if (src && src.getFeatures && window.ol && ol.proj && ol.proj.toLonLat) {
+                        const fs = src.getFeatures() || [];
+                        fs.forEach(function (f) {
+                            if (!f || !f.get) return;
+
+                            // 가능한 키들 최대 흡수
+                            const stopObj = f.get('stop') || f.get('data') || f.get('item') || f.get('payload') || null;
+
+                            const sid = String(f.get('stopId') || f.get('nodeId') || f.get('nodeid') || f.get('id') || (stopObj && (stopObj.stopId || stopObj.nodeid || stopObj.nodeId || stopObj.id)) || '').trim();
+
+                            if (!sid) return;
+
+                            const g = f.getGeometry && f.getGeometry();
+                            if (!g || !g.getCoordinates) return;
+
+                            const xy = g.getCoordinates();
+                            if (!xy || xy.length < 2) return;
+
+                            // ✅ projection 명시 (NGII projection에서도 안전)
+                            const ll = viewProj ? ol.proj.toLonLat(xy, viewProj) : ol.proj.toLonLat(xy);
+                            put(sid, ll && ll[0], ll && ll[1]);
+                        });
+                    }
+                } catch (e) {}
+
+                return idx;
+            }
+
+            // ---------------------------------------------------------
+            // ✅ (추가) routePath 아이템에서 nodeId / ord 추출 유틸
+            // ---------------------------------------------------------
+            function getNodeId(p) {
+                return String(p && (p.nodeid || p.nodeId || p.nodeno || p.nodeNo || p.node_id || '')).trim();
+            }
+            function getOrd(p, fallbackIdx) {
+                const v = p && (p.nodeord ?? p.nodeOrd ?? p.nodeseq ?? p.nodeSeq ?? p.seq ?? p.ord);
+                const n = parseInt(v, 10);
+                return isFinite(n) ? n : fallbackIdx;
+            }
+
+            routePathRawPromise[cacheKey] = $http
+                .get('/api/bus/routePath', {
+                    params: { cityCode: cc, routeId: rid, pageNo: 1, numOfRows: NUM },
+                })
                 .then(function (res) {
-                    const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
-                    const body = ((data || {}).response || {}).body || {};
-                    let list = (body.items && body.items.item) || [];
+                    let data = res && res.data;
+
+                    // ✅ res.data가 string이면 JSON 파싱
+                    if (typeof data === 'string') {
+                        try {
+                            data = JSON.parse(data);
+                        } catch (e) {
+                            console.warn('[loadRoutePathRaw] JSON.parse failed:', e, data && data.slice ? data.slice(0, 160) : data);
+                            return null;
+                        }
+                    }
+
+                    // ✅ 다양한 구조 커버
+                    const root = data || {};
+                    const body = (root.response && root.response.body) || root.body || root;
+
+                    // 1차 후보
+                    let list = (body.items && body.items.item) || (body.items && body.items) || body.list || body.data || root.items || root.list || root.data || root;
+
+                    // 단일 객체면 배열화
+                    if (!Array.isArray(list)) list = list ? [list] : [];
+                    if (!list.length) {
+                        console.warn('[loadRoutePathRaw] empty list:', { cc, rid, keys: Object.keys(body || {}) });
+                        return null;
+                    }
+
+                    // ✅ wrapper 섞인 케이스 평탄화
+                    function flattenList(arr) {
+                        const out = [];
+                        (arr || []).forEach(function (x) {
+                            if (!x) return;
+
+                            // 1) 바로 노드처럼 보이는 객체
+                            if (x.nodeid || x.nodeId || x.nodeno || x.nodeNo || x.gpslati || x.gpslong || x.gpsX || x.gpsY) {
+                                out.push(x);
+                                return;
+                            }
+
+                            // 2) wrapper 형태
+                            const maybe = (x.items && x.items.item) || x.item || x.list || x.data;
+
+                            if (Array.isArray(maybe)) {
+                                maybe.forEach(function (y) {
+                                    if (y) out.push(y);
+                                });
+                                return;
+                            }
+
+                            if (maybe && typeof maybe === 'object') {
+                                out.push(maybe);
+                                return;
+                            }
+                        });
+                        return out.length ? out : arr;
+                    }
+
+                    list = flattenList(list);
                     if (!Array.isArray(list)) list = list ? [list] : [];
                     if (!list.length) return null;
 
-                    // nodeId -> {ord, item} 로 인덱싱
+                    // ✅ nodeId -> { ord, item } 인덱싱
                     const byNodeId = new Map();
-                    list.forEach(function (p) {
-                        const nodeId = String(p.nodeid || p.nodeId || p.nodeno || p.nodeNo || '').trim();
-                        if (!nodeId) return;
 
-                        const ord = parseInt(p.nodeord || p.nodeOrd || p.nodeseq || p.nodeSeq || p.seq || p.ord || 0, 10);
-                        if (!byNodeId.has(nodeId)) byNodeId.set(nodeId, { ord: ord, item: p });
-                        else {
-                            const prev = byNodeId.get(nodeId);
-                            if (!isFinite(prev.ord) || (isFinite(ord) && ord < prev.ord)) byNodeId.set(nodeId, { ord: ord, item: p });
+                    // ✅ 1차 coords(응답에 좌표가 있을 때만)
+                    const coordsWgs84 = []; // [ [lon,lat], ... ]
+
+                    function pickLonLat(p) {
+                        if (!p) return null;
+
+                        const latRaw = p.gpslati ?? p.gpsLati ?? p.gpsY ?? p.lat ?? p.latitude ?? p.y ?? p.mapY ?? p.tmY ?? p.posY;
+
+                        const lonRaw = p.gpslong ?? p.gpsLong ?? p.gpsX ?? p.lon ?? p.longitude ?? p.x ?? p.mapX ?? p.tmX ?? p.posX;
+
+                        const lat = Number(latRaw);
+                        const lon = Number(lonRaw);
+                        if (!isFinite(lat) || !isFinite(lon)) return null;
+
+                        // WGS84 범위만
+                        if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) return { lon, lat };
+
+                        return null;
+                    }
+
+                    list.forEach(function (p, idx) {
+                        if (!p) return;
+
+                        const nodeId = getNodeId(p);
+
+                        // ord
+                        const ord = getOrd(p, idx);
+
+                        if (nodeId) {
+                            if (!byNodeId.has(nodeId)) byNodeId.set(nodeId, { ord: ord, item: p });
+                            else {
+                                const prev = byNodeId.get(nodeId);
+                                if (!isFinite(prev.ord) || ord < prev.ord) byNodeId.set(nodeId, { ord: ord, item: p });
+                            }
                         }
+
+                        // coords(응답에 있으면)
+                        const ll = pickLonLat(p);
+                        if (ll) coordsWgs84.push([ll.lon, ll.lat]);
                     });
 
-                    const info = { list: list, byNodeId: byNodeId };
-                    routePathRawIndex[routeId] = info;
+                    // ---------------------------------------------------------
+                    // ✅✅✅ (핵심 추가) coords가 비었으면 nodeId 순서로 stop 좌표로 채우기
+                    // ---------------------------------------------------------
+                    if (coordsWgs84.length < 2) {
+                        const stopIdx = buildStopCoordIndex();
+
+                        // byNodeId를 ord 기준으로 정렬해서 coords 구성
+                        const ordered = Array.from(byNodeId.entries())
+                            .map(function (kv) {
+                                return { nodeId: kv[0], ord: kv[1] && kv[1].ord };
+                            })
+                            .sort(function (a, b) {
+                                return (a.ord || 0) - (b.ord || 0);
+                            });
+
+                        const rebuilt = [];
+                        ordered.forEach(function (x) {
+                            const c = stopIdx.get(x.nodeId);
+                            if (c && isFinite(c.lat) && isFinite(c.lon)) rebuilt.push([c.lon, c.lat]);
+                        });
+
+                        if (rebuilt.length >= 2) {
+                            // ✅ coords를 fallback으로 채움
+                            rebuilt.forEach(function (ll) {
+                                coordsWgs84.push(ll);
+                            });
+                            console.log('[loadRoutePathRaw] coords rebuilt by stopIndex:', {
+                                cacheKey,
+                                rebuilt: rebuilt.length,
+                                stopIndexSize: stopIdx.size,
+                            });
+                        } else {
+                            console.warn('[loadRoutePathRaw] coords missing (no lon/lat in api, and stopIndex miss)', {
+                                cacheKey,
+                                byNodeId: byNodeId.size,
+                                stopIndex: stopIdx.size,
+                            });
+                        }
+                    }
+
+                    const info = {
+                        list: list,
+                        byNodeId: byNodeId,
+                        coords: coordsWgs84, // ✅ 이제 최소 2개 이상이 되도록 노력함
+                        cityCode: cc,
+                        routeId: rid,
+                    };
+
+                    console.log('[loadRoutePathRaw] ok:', {
+                        cacheKey,
+                        listLen: list.length,
+                        nodeIndex: byNodeId.size,
+                        coords: coordsWgs84.length,
+                        sample: list[0],
+                    });
+
+                    routePathRawIndex[cacheKey] = info;
                     return info;
                 })
                 .catch(function (err) {
-                    console.warn('[BusController] loadRoutePathRaw fail:', err);
+                    console.warn('[loadRoutePathRaw] fail:', { cc, rid, err: err });
                     return null;
                 })
                 .finally(function () {
-                    delete routePathRawPromise[routeId];
+                    delete routePathRawPromise[cacheKey];
                 });
 
-            return routePathRawPromise[routeId];
+            return routePathRawPromise[cacheKey];
         }
 
         function estimateDiffSecByOrd(fromItem, toItem, fallbackSec) {
@@ -2401,218 +3043,393 @@
             return sec;
         }
 
-        // ✅ 경로 로딩 Promise 캐시
+        // =========================================================
+        // ✅ 전역 캐시(없으면 반드시 선언되어 있어야 함)
+        // =========================================================
+
+        function makeCacheKey(cityCode, routeId) {
+            const cc = String(cityCode || (typeof CITY_CODE !== 'undefined' ? CITY_CODE : 25) || 25).trim();
+            const rid = String(routeId || '').trim();
+            return cc + ':' + rid;
+        }
+
+        // =========================================================
+        // ✅ draw helper (cacheKey 기반) : "실제 폴리라인 생성" 담당
+        // - routeVectorSource는 ensureRouteLayer()에서 window.__routeVectorSource로 노출됨
+        // =========================================================
+        function tryDrawFromCacheKey(cacheKey, opts) {
+            opts = opts || {};
+
+            ensureRouteLayer();
+
+            const src = window.__routeVectorSource;
+            if (!src || !src.addFeature || !window.ol || !ol.geom) {
+                console.warn('[tryDrawFromCacheKey] route source missing');
+                return false;
+            }
+
+            const info = routePathIndex[cacheKey];
+            if (!info || !info.dirs) {
+                console.warn('[tryDrawFromCacheKey] no cache:', cacheKey, info);
+                return false;
+            }
+
+            const dirs = info.dirs || {};
+            const coordsProj = (dirs.ALL && dirs.ALL.length >= 2 && dirs.ALL) || (dirs.UP && dirs.UP.length >= 2 && dirs.UP) || (dirs.DOWN && dirs.DOWN.length >= 2 && dirs.DOWN) || null;
+
+            if (!coordsProj || coordsProj.length < 2) {
+                console.warn('[tryDrawFromCacheKey] empty coords:', cacheKey, Object.keys(dirs || {}));
+                return false;
+            }
+
+            // ✅ 기존 선 지우고(원하면 주석)
+            if (typeof clearRouteLayer === 'function') clearRouteLayer();
+            else src.clear(true);
+
+            // ✅ 네 프로젝트에 addPathLineToRouteLayer 있으면 그걸 우선 사용(스타일/속성 유지)
+            if (typeof addPathLineToRouteLayer === 'function') {
+                addPathLineToRouteLayer('BUS', coordsProj, {
+                    routeId: info.routeId,
+                    cityCode: info.cityCode,
+                    cacheKey: cacheKey,
+                    kind: 'routeLine',
+                });
+            } else {
+                // fallback: 직접 feature 추가
+                const line = new ol.geom.LineString(coordsProj);
+                const feat = new ol.Feature({ geometry: line });
+                if (feat.set) {
+                    feat.set('pathKind', 'BUS');
+                    feat.set('routeId', info.routeId);
+                    feat.set('cityCode', info.cityCode);
+                    feat.set('cacheKey', cacheKey);
+                    feat.set('kind', 'routeLine');
+                }
+                if (typeof feat.setStyle === 'function') feat.setStyle(null);
+                src.addFeature(feat);
+            }
+
+            // ✅ fit 옵션이면 화면 맞추기
+            if (opts.fit) {
+                const map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
+                const view = map && map.getView ? map.getView() : null;
+                if (view && ol.extent && src.getExtent) {
+                    try {
+                        const ext = src.getExtent();
+                        view.fit(ext, { padding: [30, 30, 30, 30], duration: 200, maxZoom: 17 });
+                    } catch (e) {}
+                }
+            }
+
+            console.log('[tryDrawFromCacheKey] drawn:', cacheKey, 'features=', src.getFeatures ? src.getFeatures().length : '?');
+            return true;
+        }
+
+        // =========================================================
+        // ✅ 경로 로딩 Promise 캐시 (+ raw fallback + draw 옵션 지원)
+        // - cacheKey = cityCode:routeId
+        // - routePathIndex[cacheKey] = { dirs, proj, cityCode, routeId }
+        // - opts.draw=true 이면 캐시 채운 후 그리기까지 수행
         // =========================================================
         function loadRoutePath(routeId, opts) {
             opts = opts || {};
-            // const draw = !!opts.draw;  // ❌ 더 이상 여기서 draw로 직접 그리지 않음
+            const draw = !!opts.draw;
 
-            if (!routeId) return $q.resolve(null);
+            const rid = String(routeId || '').trim();
+            if (!rid) return $q.resolve(null);
 
-            // ✅ 캐시 있으면 바로 반환 (그리기는 호출자가 drawBusRouteFromIndex로)
-            if (routePathIndex[routeId]) {
-                return $q.resolve(routePathIndex[routeId]);
+            const cc = String(opts.cityCode || (typeof CITY_CODE !== 'undefined' ? CITY_CODE : 25) || 25).trim();
+            const cacheKey = makeCacheKey(cc, rid);
+
+            // ✅ 캐시 있으면 즉시 반환 (+ draw 옵션이면 즉시 그림)
+            if (routePathIndex[cacheKey]) {
+                if (draw) {
+                    try {
+                        tryDrawFromCacheKey(cacheKey, opts);
+                    } catch (e) {}
+                }
+                return $q.resolve(routePathIndex[cacheKey]);
             }
 
-            // ✅ 이미 로딩 중이면 그 Promise 그대로 반환
-            if (routePathPromise[routeId]) {
-                return routePathPromise[routeId];
+            // ✅ 로딩 중이면 그 Promise 재사용
+            if (routePathPromise[cacheKey]) {
+                return routePathPromise[cacheKey].then(function (cached) {
+                    if (draw && cached) {
+                        try {
+                            tryDrawFromCacheKey(cacheKey, opts);
+                        } catch (e) {}
+                    }
+                    return cached;
+                });
             }
 
-            const map = getInnerOlMap();
+            const map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
             if (!map || !window.ol) return $q.resolve(null);
 
-            // ✅ 레이어 보장(캐시만 채워도 나중에 그릴 때 필요)
             ensureRouteLayer();
 
             const defer = $q.defer();
-            routePathPromise[routeId] = defer.promise;
+            routePathPromise[cacheKey] = defer.promise;
 
-            $http
-                .get('/api/bus/routePath', {
-                    params: { cityCode: CITY_CODE, routeId: routeId, pageNo: 1, numOfRows: 500 },
-                })
-                .then(function (res) {
-                    let data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
-                    let body = ((data || {}).response || {}).body || {};
-                    let list = (body.items && body.items.item) || [];
-                    if (!Array.isArray(list)) list = list ? [list] : [];
+            // ---------- 유틸 ----------
+            function normDirKey(v) {
+                const s = String(v || '').toUpperCase();
+                if (s === '0' || s === 'UP' || s === 'U' || s.includes('상')) return 'UP';
+                if (s === '1' || s === 'DOWN' || s === 'D' || s.includes('하')) return 'DOWN';
+                return 'ALL';
+            }
 
-                    if (!list.length) {
-                        routePathIndex[routeId] = null;
+            function pickDirKey(p) {
+                return normDirKey(p && (p.updowncd ?? p.upDownCd ?? p.upDown ?? p.updown ?? p.dir ?? p.direction ?? p.directionType ?? p.updn ?? 'ALL'));
+            }
+
+            function pickLonLat(p) {
+                if (!p) return null;
+                const latRaw = p.gpslati ?? p.gpsLati ?? p.gpsLat ?? p.gpsY ?? p.lat ?? p.latitude ?? p.y ?? p.mapY ?? p.posY ?? p.tmY;
+                const lonRaw = p.gpslong ?? p.gpsLong ?? p.gpsLon ?? p.gpsX ?? p.lon ?? p.longitude ?? p.x ?? p.mapX ?? p.posX ?? p.tmX;
+                const lat = Number(latRaw);
+                const lon = Number(lonRaw);
+                if (!isFinite(lat) || !isFinite(lon)) return null;
+                if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+                return { lon: lon, lat: lat };
+            }
+
+            function buildFromLonLatList(coordsLonLat, proj) {
+                if (!coordsLonLat || coordsLonLat.length < 2) return null;
+
+                // 중복 제거
+                const filtered = [];
+                let prevLon = null,
+                    prevLat = null;
+
+                coordsLonLat.forEach(function (xy) {
+                    const lon = Number(xy && xy[0]);
+                    const lat = Number(xy && xy[1]);
+                    if (!isFinite(lon) || !isFinite(lat)) return;
+
+                    const rLon = Math.round(lon * 1e6) / 1e6;
+                    const rLat = Math.round(lat * 1e6) / 1e6;
+                    if (prevLon === rLon && prevLat === rLat) return;
+
+                    filtered.push([lon, lat]);
+                    prevLon = rLon;
+                    prevLat = rLat;
+                });
+
+                if (filtered.length < 2) return null;
+
+                const dense = typeof densifyCoords === 'function' ? densifyCoords(filtered, 1) : filtered;
+                const smooth = typeof chaikinSmooth === 'function' ? chaikinSmooth(dense, 1) : dense;
+
+                const projected = smooth.map(function (xy) {
+                    const lon = xy[0],
+                        lat = xy[1];
+                    if (proj && ol.proj && ol.proj.transform) return ol.proj.transform([lon, lat], 'EPSG:4326', proj);
+                    return [lon, lat];
+                });
+
+                return projected && projected.length >= 2 ? projected : null;
+            }
+
+            // =========================================================
+            // ✅ 실제 로딩은 "raw" 기반으로 통일 (너가 이미 만들어둔 loadRoutePathRaw 사용)
+            // =========================================================
+            (typeof loadRoutePathRaw === 'function' ? loadRoutePathRaw(rid, cc) : $q.resolve(null))
+                .then(function (raw) {
+                    if (!raw || !raw.list || !raw.list.length) {
+                        console.warn('[loadRoutePath] raw empty:', { cc: cc, rid: rid, raw: raw });
+                        routePathIndex[cacheKey] = null;
                         defer.resolve(null);
                         return;
                     }
 
-                    const groups = new Map();
-                    list.forEach(function (p) {
-                        const rawKey = String(p.updowncd ?? p.upDownCd ?? p.upDown ?? p.updown ?? p.dir ?? p.direction ?? p.directionType ?? 'ALL');
-                        const key = normDirKey(rawKey);
-                        if (!groups.has(key)) groups.set(key, []);
-                        groups.get(key).push(p);
-                    });
+                    const list = raw.list;
 
                     const view = map.getView && map.getView();
-                    const proj = view && view.getProjection ? view.getProjection() : mapProjection;
+                    const proj = (view && view.getProjection && view.getProjection()) || mapProjection;
 
+                    // 그룹핑(dir)
+                    const groups = new Map();
+                    list.forEach(function (p) {
+                        const k = pickDirKey(p);
+                        if (!groups.has(k)) groups.set(k, []);
+                        groups.get(k).push(p);
+                    });
+
+                    // dirs 생성
                     const dirCoordsMap = {};
-
                     groups.forEach(function (arr, k) {
                         if (!arr || arr.length < 2) return;
 
                         arr.sort(function (a, b) {
-                            const aOrd = parseInt(a.nodeord || a.nodeOrd || a.nodeseq || a.nodeSeq || a.seq || a.ord || 0, 10);
-                            const bOrd = parseInt(b.nodeord || b.nodeOrd || b.nodeseq || b.nodeSeq || b.seq || b.ord || 0, 10);
+                            const aOrdRaw = a && (a.nodeord ?? a.nodeOrd ?? a.nodeseq ?? a.nodeSeq ?? a.seq ?? a.ord);
+                            const bOrdRaw = b && (b.nodeord ?? b.nodeOrd ?? b.nodeseq ?? b.nodeSeq ?? b.seq ?? b.ord);
+                            const aOrd = isFinite(parseInt(aOrdRaw, 10)) ? parseInt(aOrdRaw, 10) : 0;
+                            const bOrd = isFinite(parseInt(bOrdRaw, 10)) ? parseInt(bOrdRaw, 10) : 0;
                             return aOrd - bOrd;
                         });
 
                         const coordsLonLat = [];
-                        let prevLon = null,
-                            prevLat = null;
-
-                        arr.forEach(function (p) {
-                            const rawLat = p.gpslati || p.gpsLat || p.y || p.lat || p.latitude;
-                            const rawLon = p.gpslong || p.gpsLong || p.x || p.lon || p.longitude;
-
-                            const lat = parseFloat(rawLat);
-                            const lon = parseFloat(rawLon);
-                            if (!isFinite(lat) || !isFinite(lon)) return;
-
-                            const rLon = Math.round(lon * 1e6) / 1e6;
-                            const rLat = Math.round(lat * 1e6) / 1e6;
-                            if (prevLon === rLon && prevLat === rLat) return;
-
-                            coordsLonLat.push([lon, lat]);
-                            prevLon = rLon;
-                            prevLat = rLat;
+                        arr.forEach(function (p2) {
+                            const ll = pickLonLat(p2);
+                            if (ll) coordsLonLat.push([ll.lon, ll.lat]);
                         });
 
-                        if (coordsLonLat.length < 2) return;
-
-                        const dense = densifyCoords(coordsLonLat, 1);
-                        const smooth = chaikinSmooth(dense, 1);
-
-                        const projectedCoords = smooth.map(function (xy) {
-                            const lon = xy[0],
-                                lat = xy[1];
-                            if (proj && ol.proj && ol.proj.transform) return ol.proj.transform([lon, lat], 'EPSG:4326', proj);
-                            return [lon, lat];
-                        });
-
-                        dirCoordsMap[k] = projectedCoords;
+                        const projected = buildFromLonLatList(coordsLonLat, proj);
+                        if (projected && projected.length >= 2) dirCoordsMap[k] = projected;
                     });
 
-                    routePathIndex[routeId] = { dirs: dirCoordsMap, proj: proj };
+                    // ALL 보정
+                    if ((!dirCoordsMap.ALL || dirCoordsMap.ALL.length < 2) && (dirCoordsMap.UP || dirCoordsMap.DOWN)) {
+                        const up = dirCoordsMap.UP && dirCoordsMap.UP.length >= 2 ? dirCoordsMap.UP : null;
+                        const down = dirCoordsMap.DOWN && dirCoordsMap.DOWN.length >= 2 ? dirCoordsMap.DOWN : null;
+                        if (up) dirCoordsMap.ALL = up;
+                        else if (down) dirCoordsMap.ALL = down;
+                    }
 
-                    // ✅❌ 절대 drawRouteFromCache 호출하지 않음
-                    defer.resolve(routePathIndex[routeId]);
+                    const cached = {
+                        dirs: dirCoordsMap,
+                        proj: proj,
+                        cityCode: cc,
+                        routeId: rid,
+                        cacheKey: cacheKey,
+                        _rawLen: list.length,
+                    };
+
+                    routePathIndex[cacheKey] = cached;
+
+                    console.log('[loadRoutePath] cached:', {
+                        cacheKey: cacheKey,
+                        rawLen: list.length,
+                        keys: Object.keys(dirCoordsMap || {}),
+                        allLen: dirCoordsMap.ALL ? dirCoordsMap.ALL.length : 0,
+                    });
+
+                    if (draw) {
+                        try {
+                            tryDrawFromCacheKey(cacheKey, opts);
+                        } catch (e) {}
+                    }
+
+                    defer.resolve(cached);
                 })
                 .catch(function (err) {
-                    console.warn('[BusController] 노선 경로 조회 실패:', err);
+                    console.warn('[loadRoutePath] fail:', { cc: cc, rid: rid, err: err });
+                    routePathIndex[cacheKey] = null;
                     defer.resolve(null);
                 })
                 .finally(function () {
-                    delete routePathPromise[routeId];
+                    delete routePathPromise[cacheKey];
                 });
 
             return defer.promise;
         }
 
-        function drawRouteFromCache(routeId) {
-            if (!routeId) return;
-            const info = routePathIndex[routeId];
-            if (!info || !info.dirs) return;
+        // =========================================================
+        // ✅ 공통: routeId -> load(cache) -> draw (옵션)
+        // - 여기서 draw:true를 주면 loadRoutePath가 알아서 그림까지 함
+        // =========================================================
+        function drawBusRouteByRouteId(routeId, opt) {
+            opt = opt || {};
+            const rid = String(routeId || '').trim();
+            if (!rid) return $q.resolve(null);
 
-            ensureRouteLayer();
-            if (!routeVectorSource) return;
+            const cc = String(opt.cityCode || (typeof CITY_CODE !== 'undefined' ? CITY_CODE : 25) || 25).trim();
+            const cacheKey = makeCacheKey(cc, rid);
 
-            routeVectorSource.clear();
-
-            const dirCoordsMap = info.dirs;
-
-            let bestKey = null;
-            let bestLen = 0;
-            Object.keys(dirCoordsMap).forEach(function (k) {
-                const len = (dirCoordsMap[k] || []).length;
-                if (len > bestLen) {
-                    bestLen = len;
-                    bestKey = k;
+            return loadRoutePath(rid, {
+                cityCode: cc,
+                draw: true, // ✅ load 안에서 draw까지 처리
+                fit: !!opt.fit, // ✅ fit도 draw helper가 처리
+                from: opt.reason || 'drawBusRouteByRouteId',
+            }).then(function (cached) {
+                if (!cached) {
+                    console.warn('[drawBusRouteByRouteId] cached null:', cacheKey);
+                    return null;
                 }
+                // 디버그: feature 개수
+                try {
+                    const src = window.__routeVectorSource;
+                    const cnt = src && src.getFeatures ? src.getFeatures().length : -1;
+                    console.log('[drawBusRouteByRouteId] ok:', { cacheKey: cacheKey, features: cnt });
+                } catch (e) {}
+                return cached;
             });
-
-            if (bestKey && dirCoordsMap[bestKey] && dirCoordsMap[bestKey].length >= 2) {
-                const line = new ol.geom.LineString(dirCoordsMap[bestKey]);
-                const f = new ol.Feature({ geometry: line, routeId: routeId, dirKey: bestKey });
-                routeVectorSource.addFeature(f);
-            }
         }
 
         // =========================================================
         // ✅ 도착정보 목록에서 버스 클릭
+        // - 기존 로직 유지하면서 "폴리라인"은 drawBusRouteByRouteId로 통일
         // =========================================================
         $scope.focusBus = function (arrival) {
-            if (!arrival || !arrival.routeNo) return;
+            if (!arrival) return;
 
-            const targetNo = String(arrival.routeNo);
-            const map = getInnerOlMap();
-            if (!map || !busVectorSource) return;
+            const targetNo = String(arrival.routeNo || arrival.routeno || arrival.route_no || arrival.routeNoNm || '').trim();
+
+            // ✅ routeId: 실제 routePath용
+            const arrivalRouteId = String(arrival.routeid || arrival.routeId || arrival.busRouteId || (arrival._raw && (arrival._raw.routeid || arrival._raw.routeId || arrival._raw.busRouteId)) || '').trim();
+
+            // ✅ 후보 없어도 routeId만 있으면 그리기 시도 가능
+            if (!arrivalRouteId) {
+                console.warn('[focusBus] arrivalRouteId empty:', arrival);
+                return;
+            }
+
+            const map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
+            if (!map || !busVectorSource) {
+                // 버스 피처 없어도 routeId만으로는 그릴 수 있음
+                return drawBusRouteByRouteId(arrivalRouteId, { fit: true, reason: 'arrival-click(no-map-or-busSource)' });
+            }
 
             const features = busVectorSource.getFeatures ? busVectorSource.getFeatures() : [];
-            const candidates = [];
 
-            for (let i = 0; i < features.length; i++) {
-                const f = features[i];
-                const rn = String(f.get('routeNo') || '');
-                if (rn === targetNo) candidates.push(f);
-            }
-            if (!candidates.length) return;
-
-            let targetFeature = candidates[0];
-
-            if (currentStopCoord) {
-                let bestDist = Infinity;
-                const stopLat = currentStopCoord.lat;
-                const stopLon = currentStopCoord.lon;
-
-                candidates.forEach(function (f) {
-                    const b = f.get('bus');
-                    if (!b) return;
-
-                    const rawLat = b.gpslati || b.gpsLati || b.gpsY || b.lat || b.latitude;
-                    const rawLon = b.gpslong || b.gpsLong || b.gpsX || b.lon || b.longitude;
-
-                    const lat = parseFloat(rawLat);
-                    const lon = parseFloat(rawLon);
-                    if (!isFinite(lat) || !isFinite(lon)) return;
-
-                    const dLat = lat - stopLat;
-                    const dLon = lon - stopLon;
-                    const dist2 = dLat * dLat + dLon * dLon;
-
-                    if (dist2 < bestDist) {
-                        bestDist = dist2;
-                        targetFeature = f;
-                    }
-                });
+            // routeNo 정규화
+            function normalizeRouteNo(v) {
+                return String(v || '')
+                    .replace(/\s+/g, '')
+                    .replace(/번/g, '')
+                    .trim();
             }
 
-            const geom = targetFeature.getGeometry && targetFeature.getGeometry();
-            if (!geom || !geom.getCoordinates) return;
+            const targetNoNorm = normalizeRouteNo(targetNo);
 
-            const coord = geom.getCoordinates();
+            // 후보 찾기(있으면 map center만 이동)
+            let moved = false;
+            if (features && features.length) {
+                const candidates = [];
+                for (let i = 0; i < features.length; i++) {
+                    const f = features[i];
+                    const fRouteNo = normalizeRouteNo(f.get && (f.get('routeNo') || f.get('routeno') || f.get('route_no') || (f.get('bus') && f.get('bus').routeno)));
+                    const fRouteId = String((f.get && (f.get('routeid') || f.get('routeId') || f.get('busRouteId'))) || (f.get && f.get('bus') && (f.get('bus').routeid || f.get('bus').routeId || f.get('bus').busRouteId)) || '').trim();
 
-            try {
-                const view = map.getView && map.getView();
-                if (!view) return;
+                    if (targetNoNorm && fRouteNo && fRouteNo === targetNoNorm) candidates.push(f);
+                    else if (arrivalRouteId && fRouteId && fRouteId === arrivalRouteId) candidates.push(f);
+                }
 
-                view.setCenter(coord);
+                // 첫 후보로 화면 이동(선택 UX용)
+                if (candidates.length) {
+                    try {
+                        const geom = candidates[0].getGeometry && candidates[0].getGeometry();
+                        const coord = geom && geom.getCoordinates ? geom.getCoordinates() : null;
+                        const view = map.getView && map.getView();
+                        if (view && coord) {
+                            view.setCenter(coord);
+                            const z = view.getZoom ? view.getZoom() : null;
+                            if (!z || z < 15) view.setZoom(15);
+                            moved = true;
+                        }
+                    } catch (e) {}
+                }
+            }
 
-                const currentZoom = view.getZoom ? view.getZoom() : null;
-                if (!currentZoom || currentZoom < 15) view.setZoom(15);
+            console.log('[focusBus] click:', {
+                targetNo: targetNoNorm,
+                arrivalRouteId: arrivalRouteId,
+                movedToBus: moved,
+            });
 
-                const routeId = targetFeature.get('routeId');
-                if (routeId) loadRoutePath(routeId, { draw: true });
-            } catch (e) {}
+            // ✅✅✅ 폴리라인은 여기 한 줄로 끝
+            return drawBusRouteByRouteId(arrivalRouteId, { fit: true, reason: 'arrival-click' });
         };
 
         // =========================================================
@@ -3216,6 +4033,86 @@
 
             $scope.collecting = false;
             setCollectStatus('ok', '수집 중지됨');
+        };
+
+        // ✅ 자동수집 JOB 등록
+        $scope.registerAutoCollect = function () {
+            try {
+                const c = $scope.collect || {};
+
+                const cityCode = Number(c.cityCode || 25);
+                const periodSec = Number(c.periodSec || 10);
+
+                const fromStopId = String((c.from && c.from.stopId) || c.fromStopId || '').trim();
+                const toStopId = String((c.to && c.to.stopId) || c.toStopId || '').trim();
+
+                const fromStopName = String((c.from && (c.from.name || c.from.nodenm || c.from.nodeNm)) || c.fromStopName || '').trim();
+                const toStopName = String((c.to && (c.to.name || c.to.nodenm || c.to.nodeNm)) || c.toStopName || '').trim();
+
+                const mode = String(c.mode || 'BUS').trim(); // BUS / TRAM / BUS_TRAM 등 네 정책대로
+
+                if (!fromStopId || !toStopId) {
+                    alert('출발/도착 정류장을 먼저 선택하세요.');
+                    return;
+                }
+
+                const body = {
+                    cityCode,
+                    fromStopId,
+                    toStopId,
+                    fromStopName,
+                    toStopName,
+                    mode,
+                    periodSec,
+                };
+
+                $scope.collectStatus = 'JOB 등록 중...';
+                $http.post('/api/buscollect/register', body).then(
+                    function (res) {
+                        $scope.collectStatus = '✅ 자동수집 JOB 등록 완료 (서버가 켜져있는 동안 자동 저장됨)';
+                        // 원하면 JOB 목록 갱신도
+                        $scope.loadJobs && $scope.loadJobs();
+                    },
+                    function (err) {
+                        $scope.collectStatus = '❌ JOB 등록 실패: ' + ((err.data && err.data.message) || err.statusText);
+                    }
+                );
+            } catch (e) {
+                $scope.collectStatus = '❌ 예외: ' + e.message;
+            }
+        };
+
+        // ✅ 자동수집 JOB 해제
+        $scope.disableAutoCollect = function () {
+            const c = $scope.collect || {};
+            const cityCode = Number(c.cityCode || 25);
+
+            const fromStopId = String((c.from && c.from.stopId) || c.fromStopId || '').trim();
+            const toStopId = String((c.to && c.to.stopId) || c.toStopId || '').trim();
+            const mode = String(c.mode || 'BUS').trim();
+
+            if (!fromStopId || !toStopId) {
+                alert('출발/도착 정류장을 먼저 선택하세요.');
+                return;
+            }
+
+            $scope.collectStatus = 'JOB 해제 중...';
+            $http.post('/api/buscollect/disable', { cityCode, fromStopId, toStopId, mode }).then(
+                function () {
+                    $scope.collectStatus = '✅ 자동수집 JOB 해제 완료';
+                    $scope.loadJobs && $scope.loadJobs();
+                },
+                function (err) {
+                    $scope.collectStatus = '❌ JOB 해제 실패: ' + ((err.data && err.data.message) || err.statusText);
+                }
+            );
+        };
+
+        // (선택) JOB 목록 확인용
+        $scope.loadJobs = function () {
+            $http.get('/api/buscollect/jobs?enabled=1').then(function (res) {
+                $scope.jobs = res.data && res.data.items ? res.data.items : [];
+            });
         };
 
         $scope.testCollectOnce = function () {
