@@ -26,35 +26,55 @@ public class BusCollectController {
     }
 
     /**
-     * ✅ OBS(관측치) 저장
-     * - 실제 수집 결과(소요시간 diffSec가 존재하는 데이터)를 bus_collect에 저장
+     * ✅ OBS/LOG 저장
+     * - OBS(진짜 관측치): mode=ARRIVAL_TO_EDGE 같은 케이스 -> diffSec > 0 필수
+     * - LOG(공통노선 없음 등): mode=API_NO_COMMON_SAVE_BOTH_STOPS -> diffSec=0도 허용
+     *
      * - routeId="JOB" 는 여기서 금지 (JOB 등록은 /register 사용)
      */
     @PostMapping("/save")
     public ResponseEntity<?> save(@RequestBody BusCollectReq req) {
         try {
-            // 🔒 방어: JOB는 save로 넣지 말고 register로 넣게 강제
             if ("JOB".equalsIgnoreCase(s(req.getRouteId()))) {
                 throw new IllegalArgumentException("JOB 등록은 /api/buscollect/register 로 하세요.");
             }
 
-            // diff_sec는 반드시 1 이상 (0이면 관측치 의미가 없음)
-            if (req.getDiffSec() == null || req.getDiffSec() <= 0) {
-                throw new IllegalArgumentException("diffSec(소요시간 초)는 1 이상이어야 합니다.");
+            // 필수값 최소 체크 (LOG도 저장하려면 diffSec 강제하면 안 됨)
+            if (req.getCityCode() == null) throw new IllegalArgumentException("cityCode가 필요합니다.");
+            if (isBlank(req.getRouteId())) throw new IllegalArgumentException("routeId가 필요합니다.");
+            if (isBlank(req.getFromStopId())) throw new IllegalArgumentException("fromStopId가 필요합니다.");
+            if (isBlank(req.getToStopId())) throw new IllegalArgumentException("toStopId가 필요합니다.");
+            if (isBlank(req.getMode())) req.setMode("LOG");
+
+            // ✅ OBS 판별: 너가 “진짜 이동 소요시간 관측치”로 쓰는 모드만 강제
+            boolean isObsMode =
+                    "ARRIVAL_TO_EDGE".equalsIgnoreCase(s(req.getMode()))
+                 || "API_COMMON_ROUTE".equalsIgnoreCase(s(req.getMode()));
+
+            if (isObsMode) {
+                // OBS는 반드시 의미있는 diffSec
+                if (req.getDiffSec() == null || req.getDiffSec() <= 0) {
+                    throw new IllegalArgumentException("OBS 모드는 diffSec(소요시간 초)가 1 이상이어야 합니다.");
+                }
+            } else {
+                // LOG는 diffSec가 없거나 0이어도 저장되게
+                if (req.getDiffSec() == null || req.getDiffSec() < 0) req.setDiffSec(0);
             }
 
-            // OBS는 enabled=0 고정(로그성 데이터)
+            // LOG/OBS 둘 다 enabled=0 고정(로그성 데이터)
             req.setEnabled(0);
 
-            // OBS에서는 period/last_run은 의미 없음 -> 무시(DAO가 last_run_at NULL 저장)
-            if (req.getPeriodSec() != null) req.setPeriodSec(null);
+            // LOG/OBS는 period/last_run은 의미 없음 -> periodSec는 NULL로 저장(깔끔)
+            req.setPeriodSec(null);
 
             long id = busCollectDao.insert(req);
 
             Map<String, Object> out = new HashMap<>();
             out.put("ok", true);
             out.put("id", id);
-            out.put("message", "OBS 저장 완료");
+            out.put("mode", req.getMode());
+            out.put("diffSec", req.getDiffSec());
+            out.put("message", isObsMode ? "OBS 저장 완료" : "LOG 저장 완료");
             return ResponseEntity.ok(out);
 
         } catch (IllegalArgumentException iae) {
@@ -66,19 +86,10 @@ public class BusCollectController {
 
     /**
      * ✅ 자동수집 JOB 등록/갱신
-     * - 규칙:
-     *   route_id = "JOB"
-     *   enabled  = 1
-     *   period_sec 설정
-     *   diff_sec = 0 (JOB는 관측치가 아님)
-     *
-     * 서버가 켜져있을 때 스케줄러는:
-     * enabled=1 AND route_id='JOB' 만 읽어서 자동 수집함.
      */
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody BusCollectReq req) {
         try {
-            // 필수값 체크
             if (req.getCityCode() == null) throw new IllegalArgumentException("cityCode가 필요합니다.");
             if (isBlank(req.getFromStopId())) throw new IllegalArgumentException("fromStopId가 필요합니다.");
             if (isBlank(req.getToStopId())) throw new IllegalArgumentException("toStopId가 필요합니다.");
@@ -92,13 +103,10 @@ public class BusCollectController {
             req.setFromArrSec(null);
             req.setToArrSec(null);
 
-            // 자동수집 ON
             req.setEnabled(1);
 
-            // 주기 기본값 (최소 5초)
             if (req.getPeriodSec() == null || req.getPeriodSec() < 5) req.setPeriodSec(10);
 
-            // ✅ upsert (없으면 INSERT, 있으면 UPDATE)
             long id = busCollectDao.upsertJob(req);
 
             Map<String, Object> out = new HashMap<>();
@@ -116,9 +124,6 @@ public class BusCollectController {
         }
     }
 
-    /**
-     * ✅ 자동수집 JOB 해제 (enabled=0)
-     */
     @PostMapping("/disable")
     public ResponseEntity<?> disable(@RequestBody BusCollectReq req) {
         try {
@@ -147,11 +152,6 @@ public class BusCollectController {
         }
     }
 
-    /**
-     * ✅ 등록된 자동수집 JOB 목록 조회 (확인/디버깅용)
-     * - enabled 파라미터 없으면 전체
-     * - enabled=1 이면 ON만, enabled=0 이면 OFF만
-     */
     @GetMapping("/jobs")
     public ResponseEntity<?> jobs(@RequestParam(name = "enabled", required = false) Integer enabled) {
         try {
@@ -168,7 +168,6 @@ public class BusCollectController {
         }
     }
 
-    // ----------------- response helper -----------------
     private ResponseEntity<Map<String, Object>> bad(String msg) {
         Map<String, Object> out = new HashMap<>();
         out.put("ok", false);
@@ -184,7 +183,6 @@ public class BusCollectController {
         return ResponseEntity.internalServerError().body(out);
     }
 
-    // ----------------- util -----------------
     private static boolean isBlank(String s) {
         return s == null || s.trim().isEmpty();
     }

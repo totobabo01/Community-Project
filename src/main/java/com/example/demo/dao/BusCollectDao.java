@@ -26,7 +26,7 @@ public class BusCollectDao {
         this.dataSource = dataSource;
     }
 
-    // ✅ OBS 저장
+    // ✅ OBS 저장 (관측치 로그)
     public long insert(BusCollectReq req) throws Exception {
         if (req == null) throw new IllegalArgumentException("body is null");
         if (req.getCityCode() == null) throw new IllegalArgumentException("cityCode is required");
@@ -35,19 +35,25 @@ public class BusCollectDao {
         if (isBlank(req.getToStopId())) throw new IllegalArgumentException("toStopId is required");
         if (req.getDiffSec() == null) throw new IllegalArgumentException("diffSec is required");
 
-        if (isBlank(req.getMode())) req.setMode("ARRIVAL_TO_EDGE");
+        // 🔒 2중 방어: JOB는 insert로 못 넣게
+        if ("JOB".equalsIgnoreCase(req.getRouteId().trim())) {
+            throw new IllegalArgumentException("routeId=JOB 는 insert 대상이 아닙니다. /upsertJob을 사용하세요.");
+        }
 
+        if (isBlank(req.getMode())) req.setMode("OBS");
+
+        // ✅✅ period_sec 는 NOT NULL 이므로, OBS insert에서는 아예 컬럼에서 빼서 DEFAULT(10) 사용
         String sql = """
             INSERT INTO bus_collect
             (city_code, route_id, route_no,
              from_stop_id, to_stop_id, from_stop_name, to_stop_name,
              from_arr_sec, to_arr_sec, diff_sec, mode,
-             enabled, period_sec, last_run_at)
+             enabled, last_run_at)
             VALUES
             (?, ?, ?,
              ?, ?, ?, ?,
              ?, ?, ?, ?,
-             ?, ?, ?)
+             ?, ?)
         """;
 
         try (Connection con = dataSource.getConnection();
@@ -68,17 +74,16 @@ public class BusCollectDao {
             if (req.getToArrSec() == null) ps.setNull(9, Types.INTEGER);
             else ps.setInt(9, req.getToArrSec());
 
+            // diffSec는 0도 허용(공통노선 없는 케이스 기록용)
             ps.setInt(10, req.getDiffSec());
             ps.setString(11, req.getMode());
 
+            // OBS는 기본 enabled=0
             int enabled = (req.getEnabled() == null ? 0 : req.getEnabled());
-            int periodSec = (req.getPeriodSec() == null ? 10 : req.getPeriodSec());
-
             ps.setInt(12, enabled);
-            ps.setInt(13, periodSec);
 
             // OBS는 last_run_at NULL
-            ps.setNull(14, Types.TIMESTAMP);
+            ps.setNull(13, Types.TIMESTAMP);
 
             ps.executeUpdate();
 
@@ -89,7 +94,7 @@ public class BusCollectDao {
         }
     }
 
-    // ✅ JOB 등록/갱신
+    // ✅ JOB 등록/갱신 (enabled=1, route_id='JOB')
     public long upsertJob(BusCollectReq req) throws Exception {
         if (req == null) throw new IllegalArgumentException("body is null");
         if (req.getCityCode() == null) throw new IllegalArgumentException("cityCode is required");
@@ -175,7 +180,6 @@ public class BusCollectDao {
         }
     }
 
-    // ✅ JOB 해제
     public int disableJob(int cityCode, String fromStopId, String toStopId, String mode) throws Exception {
         if (isBlank(fromStopId)) throw new IllegalArgumentException("fromStopId is required");
         if (isBlank(toStopId)) throw new IllegalArgumentException("toStopId is required");
@@ -201,7 +205,6 @@ public class BusCollectDao {
         }
     }
 
-    // ✅ JOB 목록
     public List<Map<String, Object>> listJobs(Integer enabled) throws Exception {
         String base = """
             SELECT id, city_code, from_stop_id, to_stop_id,
@@ -226,8 +229,6 @@ public class BusCollectDao {
         }
     }
 
-    // ✅✅✅ (추가) AutoCollectService가 실행 후 마지막 실행시각 갱신용
-    // AutoCollectService에서 busCollectDao.touchLastRunAt(jobId) 호출하는 부분 때문에 필요함
     public int touchLastRunAt(long jobId) throws Exception {
         String sql = "UPDATE bus_collect SET last_run_at = NOW() WHERE id = ?";
         try (Connection con = dataSource.getConnection();
@@ -237,7 +238,6 @@ public class BusCollectDao {
         }
     }
 
-    // --- util ---
     private static boolean isBlank(String s) {
         return s == null || s.trim().isEmpty();
     }

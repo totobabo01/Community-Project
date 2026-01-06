@@ -457,6 +457,20 @@
     // ───────────────── Bus + Users (홈 탭) ─────────────────
     // AngularJS 컨트롤러 등록: 이름은 'BusController', DI로 여러 서비스 주입
     app.controller('BusController', function ($scope, $http, $timeout, $location, $q, $interval, $rootScope) {
+        // ✅ 선택한 노선만 보이게 할 때 사용하는 상태값
+        let __selectedRouteNo = null; // 예: "101"
+        let __filterOnlySelectedRoute = false; // true면 선택 노선만 보임
+
+        function setBusRouteFilter(routeNo, enabled) {
+            __selectedRouteNo = routeNo == null ? null : String(routeNo).replace(/\s+/g, '').replace(/번/g, '').trim();
+            __filterOnlySelectedRoute = !!enabled;
+
+            // ✅ 스타일 다시 먹이기
+            try {
+                if (busVectorLayer) busVectorLayer.changed();
+            } catch (e) {}
+        }
+
         const CITY_CODE = 25; // 대전 TAGO 도시 코드
         const POLL_MS = 10000; // 도착정보 + 버스 위치 폴링 주기(ms)
 
@@ -1043,8 +1057,104 @@
         }
 
         // =========================================================
-        // ✅ 버스 파란 화살표 마커 레이어
+        // ✅ Bus Vector Layer (버스 마커 레이어)
+        // - 선택한 "버스 1대"만 강조/고정
+        // - 선택한 "노선만 남기기"도 가능
         // =========================================================
+
+        // ✅ 컨트롤러 스코프 전역 상태(중복 선언 금지!)
+        let __selectedBusKey = null; // "버스 1대" 식별키(가장 가까운 버스 선택 결과)
+
+        // ✅ 라벨/표시용 옵션(원하면)
+        let __hideOthersOpacity = 0.1; // 나머지 버스 희미하게(0이면 완전 숨김)
+
+        // routeNo 정규화
+        function __normalizeRouteNo(v) {
+            return String(v || '')
+                .replace(/\s+/g, '')
+                .replace(/번/g, '')
+                .trim();
+        }
+
+        // 버스 1대 고정키 만들기(가능한 필드들로 최대한 안정적으로)
+        function __makeBusKey(busObj) {
+            if (!busObj) return null;
+
+            // 1) 차량번호/차량ID 같은 고유키 우선
+            const car = busObj.vehicleno || busObj.vehicleNo || busObj.carNo || busObj.carno || busObj.busNo || busObj.busno || busObj.plateno || busObj.plateNo;
+
+            if (car) return 'CAR:' + String(car).trim();
+
+            // 2) 없으면 routeId + 현재 좌표로 근사키
+            const rid = busObj.routeid || busObj.routeId || busObj.busRouteId || '';
+            const lat = Number(busObj.gpslati || busObj.gpsLati || busObj.lat || busObj.latitude || busObj.gpsY);
+            const lon = Number(busObj.gpslong || busObj.gpsLong || busObj.lon || busObj.longitude || busObj.gpsX);
+
+            if (rid && isFinite(lat) && isFinite(lon)) {
+                // 좌표는 너무 민감하니까 반올림
+                const rLat = Math.round(lat * 1e5) / 1e5;
+                const rLon = Math.round(lon * 1e5) / 1e5;
+                return 'RID:' + String(rid).trim() + '@' + rLon + ',' + rLat;
+            }
+
+            // 3) 최후: routeId만
+            if (rid) return 'RID:' + String(rid).trim();
+
+            return null;
+        }
+
+        // ✅ 외부(예: focusBus)에서 호출할 API
+        function setSelectedRoute(routeNo, enabled) {
+            __selectedRouteNo = routeNo == null ? null : __normalizeRouteNo(routeNo);
+            __filterOnlySelectedRoute = !!enabled;
+
+            try {
+                if (busVectorLayer) busVectorLayer.changed();
+            } catch (e) {}
+        }
+
+        function setSelectedBusKey(busKey) {
+            __selectedBusKey = busKey || null;
+            try {
+                if (busVectorLayer) busVectorLayer.changed();
+            } catch (e) {}
+        }
+
+        function clearBusSelection() {
+            __selectedBusKey = null;
+            __selectedRouteNo = null;
+            __filterOnlySelectedRoute = false;
+            try {
+                if (busVectorLayer) busVectorLayer.changed();
+            } catch (e) {}
+        }
+
+        // ---------------------------------------------------------
+        // ✅ 버스 스타일(캐시)
+        // ---------------------------------------------------------
+        let __BUS_STYLES__ = null;
+
+        function __ensureBusStyles() {
+            if (__BUS_STYLES__) return;
+
+            __BUS_STYLES__ = {
+                // 기본(일반 버스)
+                normal: busArrowStyle, // 네가 이미 쓰는 스타일(함수/Style 둘 다 가능)
+
+                // 선택 버스(굵게/강조) - busArrowStyle이 함수면 별도로 만들어야 함
+                selected: function (feature) {
+                    // busArrowStyle이 "Style 객체"면 복제해서 width만 키우는게 좋음
+                    // 근데 네 프로젝트에서 busArrowStyle이 뭔지 모르니,
+                    // 가장 안전하게는 normal을 그대로 쓰고 zIndex 올리거나, 별도 스타일 생성
+                    // 여기선 간단히 "normal"을 사용
+                    return typeof busArrowStyle === 'function' ? busArrowStyle(feature) : busArrowStyle;
+                },
+            };
+        }
+
+        // ---------------------------------------------------------
+        // ✅ Bus Layer 생성
+        // ---------------------------------------------------------
         function ensureBusVectorLayer() {
             const map = getInnerOlMap();
             if (!map) return;
@@ -1052,42 +1162,76 @@
             if (!window.ol || !ol.layer || !ol.source || !ol.geom || !ol.style) return;
             if (busVectorLayer && busVectorSource) return;
 
+            __ensureBusStyles();
+
             busVectorSource = new ol.source.Vector();
+
             busVectorLayer = new ol.layer.Vector({
                 source: busVectorSource,
-                style: busArrowStyle,
+
+                // ✅ 핵심: 스타일을 "함수"로 바꿔서 필터/강조 가능
+                style: function (feature) {
+                    // feature에서 bus 객체 얻기
+                    const bus = feature && feature.get ? feature.get('bus') || feature.get('data') || feature.get('item') : null;
+
+                    // routeNo 추출
+                    const fRouteNo = __normalizeRouteNo((feature.get && (feature.get('routeNo') || feature.get('routeno') || feature.get('route_no'))) || (bus && (bus.routeno || bus.routeNo || bus.route_no)) || '');
+
+                    // 1) "선택 노선만" 모드면, 해당 노선 아닌 버스는 숨김/희미하게
+                    if (__filterOnlySelectedRoute && __selectedRouteNo) {
+                        if (!fRouteNo || fRouteNo !== __selectedRouteNo) {
+                            // 완전 숨김(렌더 안 함)
+                            // return null;
+
+                            // 또는 "희미하게"
+                            if (__hideOthersOpacity <= 0) return null;
+                            // 희미 스타일(간단 버전): 기존 스타일 그대로 쓰되 opacity 적용이 어렵다면 null로 숨기는 게 가장 깔끔
+                            return null;
+                        }
+                    }
+
+                    // 2) "선택 버스 1대"가 있으면 그 버스만 강조, 나머지는 숨김/희미하게
+                    if (__selectedBusKey) {
+                        const key = __makeBusKey(bus) || String((feature.get && feature.get('busKey')) || '');
+                        if (key && key === __selectedBusKey) {
+                            return __BUS_STYLES__.selected(feature);
+                        }
+                        // 선택 버스만 남기고 싶으면 null
+                        return null;
+                    }
+
+                    // 기본
+                    return __BUS_STYLES__.normal ? __BUS_STYLES__.normal(feature) : null;
+                },
+
                 zIndex: 30,
             });
+
             map.addLayer(busVectorLayer);
+
+            // ✅ 추가: "버스 레이어" 태그 달기 (경로만 보기에서 끄려고)
+            try {
+                busVectorLayer.set('tag', 'bus');
+            } catch (e) {}
+
+            // ✅ 디버그용
+            window.__busVectorLayer = busVectorLayer;
+            window.__busVectorSource = busVectorSource;
+            window.__setSelectedRoute = setSelectedRoute;
+            window.__setSelectedBusKey = setSelectedBusKey;
+            window.__clearBusSelection = clearBusSelection;
         }
 
         // =========================================================
-        // ✅ Route Layer (버스/도보/트램/트램공구) 공통 레이어
+        // ✅ Route Layer (너 코드 거의 그대로 / 문제 없음)
         // =========================================================
-
-        // 전역(컨트롤러 스코프) 변수라고 가정
-        // var routeVectorLayer = null;
-        // var routeVectorSource = null;
-        // var mapProjection = ...; // 이미 쓰고 있음
-        // function getInnerOlMap(){...} // 이미 쓰고 있음
-
-        // ✅ 스타일은 매번 새로 만들면 성능도 떨어지고, 미묘하게 참조 꼬임도 생김 → 캐시
         let __ROUTE_STYLES__ = null;
 
-        // ✅ pathKind 정규화
         function normRouteKind(k) {
             const s = String(k || '').toUpperCase();
-
-            // 공구
             if (s === 'TRAM_TOOL' || s === 'TRAMTOOL' || s === 'TOOL' || s === 'TRAM_TOOL_ROUTE') return 'TRAM_TOOL';
-
-            // 도보
             if (s === 'WALK' || s === 'WALKING' || s === 'FOOT' || s === 'PED' || s === 'PEDESTRIAN') return 'WALK';
-
-            // 트램 최단
             if (s === 'TRAM' || s === 'RAIL' || s === 'TRAIN') return 'TRAM';
-
-            // 기본 = 버스
             return 'BUS';
         }
 
@@ -1095,44 +1239,21 @@
             const map = getInnerOlMap && getInnerOlMap();
             if (!map || !window.ol || !ol.layer || !ol.source || !ol.geom || !ol.style) return false;
 
-            // 이미 있으면 OK
             if (routeVectorLayer && routeVectorSource) return true;
 
-            // ✅ 스타일 캐시 생성(최초 1회)
             if (!__ROUTE_STYLES__) {
                 __ROUTE_STYLES__ = {
                     BUS: new ol.style.Style({
-                        stroke: new ol.style.Stroke({
-                            color: '#2563eb',
-                            width: 5,
-                            lineCap: 'round',
-                            lineJoin: 'round',
-                        }),
+                        stroke: new ol.style.Stroke({ color: '#2563eb', width: 5, lineCap: 'round', lineJoin: 'round' }),
                     }),
                     WALK: new ol.style.Style({
-                        stroke: new ol.style.Stroke({
-                            color: '#111827',
-                            width: 3,
-                            lineCap: 'round',
-                            lineJoin: 'round',
-                            lineDash: [8, 8],
-                        }),
+                        stroke: new ol.style.Stroke({ color: '#111827', width: 3, lineCap: 'round', lineJoin: 'round', lineDash: [8, 8] }),
                     }),
                     TRAM: new ol.style.Style({
-                        stroke: new ol.style.Stroke({
-                            color: '#ec4899',
-                            width: 6,
-                            lineCap: 'round',
-                            lineJoin: 'round',
-                        }),
+                        stroke: new ol.style.Stroke({ color: '#ec4899', width: 6, lineCap: 'round', lineJoin: 'round' }),
                     }),
                     TRAM_TOOL: new ol.style.Style({
-                        stroke: new ol.style.Stroke({
-                            color: '#111827',
-                            width: 6,
-                            lineCap: 'round',
-                            lineJoin: 'round',
-                        }),
+                        stroke: new ol.style.Stroke({ color: '#111827', width: 6, lineCap: 'round', lineJoin: 'round' }),
                     }),
                 };
             }
@@ -1143,12 +1264,9 @@
                 source: routeVectorSource,
                 style: function (feature) {
                     const kind = normRouteKind(feature && feature.get ? feature.get('pathKind') : '');
-
-                    // 공구 우선
                     if (kind === 'TRAM_TOOL') return __ROUTE_STYLES__.TRAM_TOOL;
                     if (kind === 'WALK') return __ROUTE_STYLES__.WALK;
                     if (kind === 'TRAM') return __ROUTE_STYLES__.TRAM;
-
                     return __ROUTE_STYLES__.BUS;
                 },
                 zIndex: 15,
@@ -1156,11 +1274,8 @@
 
             map.addLayer(routeVectorLayer);
 
-            // ✅ 디버그용 전역 핸들 (콘솔에서 확인 가능)
             window.__routeVectorLayer = routeVectorLayer;
             window.__routeVectorSource = routeVectorSource;
-
-            // ✅ 콘솔에서 map 접근도 가능하게(원하면)
             window.__getInnerOlMap = getInnerOlMap;
 
             return true;
@@ -3357,79 +3472,214 @@
             });
         }
 
-        // =========================================================
-        // ✅ 도착정보 목록에서 버스 클릭
-        // - 기존 로직 유지하면서 "폴리라인"은 drawBusRouteByRouteId로 통일
-        // =========================================================
         $scope.focusBus = function (arrival) {
             if (!arrival) return;
 
-            const targetNo = String(arrival.routeNo || arrival.routeno || arrival.route_no || arrival.routeNoNm || '').trim();
+            var targetNo = String(arrival.routeNo || arrival.routeno || arrival.route_no || arrival.routeNoNm || '').trim();
 
             // ✅ routeId: 실제 routePath용
-            const arrivalRouteId = String(arrival.routeid || arrival.routeId || arrival.busRouteId || (arrival._raw && (arrival._raw.routeid || arrival._raw.routeId || arrival._raw.busRouteId)) || '').trim();
+            var arrivalRouteId = String(arrival.routeid || arrival.routeId || arrival.busRouteId || (arrival._raw && (arrival._raw.routeid || arrival._raw.routeId || arrival._raw.busRouteId)) || '').trim();
 
-            // ✅ 후보 없어도 routeId만 있으면 그리기 시도 가능
             if (!arrivalRouteId) {
                 console.warn('[focusBus] arrivalRouteId empty:', arrival);
                 return;
             }
 
-            const map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
-            if (!map || !busVectorSource) {
-                // 버스 피처 없어도 routeId만으로는 그릴 수 있음
-                return drawBusRouteByRouteId(arrivalRouteId, { fit: true, reason: 'arrival-click(no-map-or-busSource)' });
-            }
+            var map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
 
-            const features = busVectorSource.getFeatures ? busVectorSource.getFeatures() : [];
-
-            // routeNo 정규화
+            // routeNo 정규화: "802번" -> "802"
             function normalizeRouteNo(v) {
                 return String(v || '')
                     .replace(/\s+/g, '')
                     .replace(/번/g, '')
                     .trim();
             }
+            var targetNoNorm = normalizeRouteNo(targetNo);
 
-            const targetNoNorm = normalizeRouteNo(targetNo);
+            // ---------------------------
+            // ✅ 버스(실시간 위치) 쪽 처리 (있으면 하고, 없어도 아래 노선 작업은 무조건 수행)
+            // ---------------------------
+            var moved = false;
+            var selectedFeature = null;
 
-            // 후보 찾기(있으면 map center만 이동)
-            let moved = false;
-            if (features && features.length) {
-                const candidates = [];
-                for (let i = 0; i < features.length; i++) {
-                    const f = features[i];
-                    const fRouteNo = normalizeRouteNo(f.get && (f.get('routeNo') || f.get('routeno') || f.get('route_no') || (f.get('bus') && f.get('bus').routeno)));
-                    const fRouteId = String((f.get && (f.get('routeid') || f.get('routeId') || f.get('busRouteId'))) || (f.get && f.get('bus') && (f.get('bus').routeid || f.get('bus').routeId || f.get('bus').busRouteId)) || '').trim();
+            if (map && busVectorSource && busVectorSource.getFeatures) {
+                var features = busVectorSource.getFeatures() || [];
 
-                    if (targetNoNorm && fRouteNo && fRouteNo === targetNoNorm) candidates.push(f);
-                    else if (arrivalRouteId && fRouteId && fRouteId === arrivalRouteId) candidates.push(f);
-                }
+                if (features && features.length) {
+                    var candidates = [];
 
-                // 첫 후보로 화면 이동(선택 UX용)
-                if (candidates.length) {
-                    try {
-                        const geom = candidates[0].getGeometry && candidates[0].getGeometry();
-                        const coord = geom && geom.getCoordinates ? geom.getCoordinates() : null;
-                        const view = map.getView && map.getView();
-                        if (view && coord) {
-                            view.setCenter(coord);
-                            const z = view.getZoom ? view.getZoom() : null;
-                            if (!z || z < 15) view.setZoom(15);
-                            moved = true;
+                    for (var i = 0; i < features.length; i++) {
+                        var f = features[i];
+                        if (!f || !f.get) continue;
+
+                        var fRouteNo = normalizeRouteNo(f.get('routeNo') || f.get('routeno') || f.get('route_no') || (f.get('bus') && f.get('bus').routeno) || '');
+
+                        var fRouteId = String(f.get('routeid') || f.get('routeId') || f.get('busRouteId') || (f.get('bus') && (f.get('bus').routeid || f.get('bus').routeId || f.get('bus').busRouteId)) || '').trim();
+
+                        if (targetNoNorm && fRouteNo && fRouteNo === targetNoNorm) candidates.push(f);
+                        else if (arrivalRouteId && fRouteId && fRouteId === arrivalRouteId) candidates.push(f);
+                    }
+
+                    if (candidates && candidates.length) {
+                        selectedFeature = candidates[0];
+
+                        // currentStopCoord 기준 가장 가까운 버스 선택
+                        var hasStop = currentStopCoord && typeof currentStopCoord === 'object' && isFinite(Number(currentStopCoord.lat)) && (isFinite(Number(currentStopCoord.lon)) || isFinite(Number(currentStopCoord.lng)));
+
+                        if (hasStop) {
+                            var stopLat = Number(currentStopCoord.lat);
+                            var stopLon = isFinite(Number(currentStopCoord.lon)) ? Number(currentStopCoord.lon) : Number(currentStopCoord.lng);
+
+                            var best = Infinity;
+
+                            for (var j = 0; j < candidates.length; j++) {
+                                var cf = candidates[j];
+                                if (!cf || !cf.get) continue;
+
+                                var b = cf.get('bus');
+                                if (!b) continue;
+
+                                var lat = parseFloat(b.gpslati || b.gpsLati || b.gpsY || b.lat || b.latitude);
+                                var lon = parseFloat(b.gpslong || b.gpsLong || b.gpsX || b.lon || b.longitude);
+
+                                if (!isFinite(lat) || !isFinite(lon)) continue;
+
+                                var dLat = lat - stopLat;
+                                var dLon = lon - stopLon;
+                                var dist2 = dLat * dLat + dLon * dLon;
+
+                                if (dist2 < best) {
+                                    best = dist2;
+                                    selectedFeature = cf;
+                                }
+                            }
+
+                            console.log('[focusBus] nearest bus selected:', { bestDist2: best, stopLat: stopLat, stopLon: stopLon });
                         }
-                    } catch (e) {}
+
+                        // 선택 버스 위치로 이동(있으면)
+                        try {
+                            var geom = selectedFeature.getGeometry && selectedFeature.getGeometry();
+                            var coord = geom && geom.getCoordinates ? geom.getCoordinates() : null;
+
+                            var view = map.getView && map.getView();
+                            if (view && coord) {
+                                view.setCenter(coord);
+                                var z = view.getZoom ? view.getZoom() : null;
+                                if (!z || z < 15) view.setZoom(15);
+                                moved = true;
+                            }
+                        } catch (e) {}
+
+                        // 선택 버스 1대만 남기기(옵션)
+                        try {
+                            if (typeof setSelectedBusKey === 'function') {
+                                var busObj = selectedFeature.get && selectedFeature.get('bus');
+                                var key = (typeof __makeBusKey === 'function' && __makeBusKey(busObj)) || (selectedFeature.get && selectedFeature.get('busKey')) || null;
+
+                                if (key) setSelectedBusKey(key);
+                            }
+                        } catch (e) {}
+                    }
                 }
             }
 
             console.log('[focusBus] click:', {
                 targetNo: targetNoNorm,
                 arrivalRouteId: arrivalRouteId,
-                movedToBus: moved,
+                movedToNearestBus: moved,
+                hasSelectedFeature: !!selectedFeature,
             });
 
-            // ✅✅✅ 폴리라인은 여기 한 줄로 끝
-            return drawBusRouteByRouteId(arrivalRouteId, { fit: true, reason: 'arrival-click' });
+            // =========================================================
+            // ✅✅✅ 여기부터 "노선 기준" 작업은 무조건 수행
+            // 0) 기존 점(정류장) 레이어 강제 숨김 (연관없는 빨간점 제거 핵심)
+            // 1) 노선 폴리라인(화살표) 그리기
+            // 2) 노선 정류장만 표시
+            // 3) 폴리라인 쪽으로 확대(재시도)
+            // =========================================================
+
+            // 0) 기존 정류장 점 레이어 강제 숨김 (이게 없으면 "그대로"가 계속 나올 수 있음)
+            try {
+                if (typeof hideAllPointLayersOnMap === 'function') hideAllPointLayersOnMap();
+            } catch (e) {
+                console.warn('[focusBus] hideAllPointLayersOnMap error:', e);
+            }
+
+            // 1) 폴리라인(화살표) 그리기
+            var drawRet = null;
+            try {
+                drawRet = drawBusRouteByRouteId(arrivalRouteId, { fit: false, reason: 'arrival-click' });
+            } catch (e) {
+                console.warn('[focusBus] drawBusRouteByRouteId error:', e);
+            }
+
+            // 2) 노선 정류장만 표시
+            try {
+                if (typeof applyRouteStopFilter === 'function') {
+                    $timeout(function () {
+                        try {
+                            applyRouteStopFilter(arrivalRouteId);
+                        } catch (e2) {
+                            console.warn('[focusBus] applyRouteStopFilter inner error:', e2);
+                        }
+                    }, 0);
+                } else {
+                    console.warn('[focusBus] applyRouteStopFilter is not a function');
+                }
+            } catch (e) {
+                console.warn('[focusBus] applyRouteStopFilter error:', e);
+            }
+
+            // 3) 폴리라인 쪽으로 확대
+            function tryFitRouteOnce(tag) {
+                if (typeof fitRouteLayerExtent === 'function') {
+                    try {
+                        var ok = fitRouteLayerExtent({ padding: [90, 90, 90, 90], duration: 250 });
+                        console.log('[focusBus] fitRouteLayerExtent:', ok, tag);
+                        return !!ok;
+                    } catch (e) {
+                        console.warn('[focusBus] fitRouteLayerExtent error:', e);
+                        return false;
+                    }
+                }
+
+                // fallback: drawBusRouteByRouteId에 fit 맡기기
+                try {
+                    drawBusRouteByRouteId(arrivalRouteId, { fit: true, reason: 'arrival-click(fallback-fit:' + tag + ')' });
+                    console.log('[focusBus] fallback fit tried:', tag);
+                    return true;
+                } catch (e) {
+                    console.warn('[focusBus] fallback fit error:', e);
+                    return false;
+                }
+            }
+
+            if (drawRet && typeof drawRet.then === 'function') {
+                drawRet
+                    .then(function () {
+                        $timeout(function () {
+                            tryFitRouteOnce('then');
+                        }, 0);
+                    })
+                    .catch(function (e) {
+                        console.warn('[focusBus] drawRet promise error:', e);
+                        $timeout(function () {
+                            tryFitRouteOnce('then-catch');
+                        }, 200);
+                    });
+            } else {
+                (function retryFit(attempt) {
+                    var ok = tryFitRouteOnce('retry-' + attempt);
+                    if (ok) return;
+                    if (attempt >= 6) return;
+                    $timeout(function () {
+                        retryFit(attempt + 1);
+                    }, 250);
+                })(1);
+            }
+
+            return;
         };
 
         // =========================================================
@@ -3955,7 +4205,9 @@
 
         // ---------------------------------------------------------
         // ✅ arrival API (출발 기준 routeId 확보용)
-        function fetchArrivalForStop(cityCode, stopId) {
+        // - "app.js에서 함수 없음" 문제 방지: $scope에 붙여서 어디서든 접근 가능하게
+        // ---------------------------------------------------------
+        $scope.fetchArrivalForStop = function (cityCode, stopId) {
             return $http
                 .get('/api/bus/arrival', {
                     params: {
@@ -3972,13 +4224,76 @@
                     if (!Array.isArray(list)) list = list ? [list] : [];
                     return list;
                 });
+        };
+
+        // ✅ 전역/루트스코프 노출 (핵심)
+        $rootScope.fetchArrivalForStop = $scope.fetchArrivalForStop;
+        window.fetchArrivalForStop = $scope.fetchArrivalForStop;
+
+        /* =========================================================
+   ✅ 여기(수집 로직 시작하기 전)에 추가하세요: ETA 뽑기 유틸
+   ========================================================= */
+
+        function pickInt(obj, keys) {
+            for (var i = 0; i < keys.length; i++) {
+                var k = keys[i];
+                var v = obj && obj[k];
+                if (v === null || v === undefined) continue;
+                var n = parseInt(String(v).trim(), 10);
+                if (isFinite(n)) return n;
+            }
+            return null;
+        }
+
+        function getBestEtaSec(arrList) {
+            if (!Array.isArray(arrList) || !arrList.length) return null;
+
+            var best = null;
+            for (var i = 0; i < arrList.length; i++) {
+                var x = arrList[i];
+                var sec = pickInt(x, ['arrtime', 'arrTime', 'remaintime', 'remainTime', 'arrsec', 'arrSec', 'arrivalSec', 'arrmsgSec']);
+                if (!sec || sec <= 0) continue;
+                if (best === null || sec < best) best = sec;
+            }
+            return best;
+        }
+
+        function secToMmSs(sec) {
+            sec = Number(sec);
+            if (!isFinite(sec) || sec <= 0) return '-';
+            var m = Math.floor(sec / 60);
+            var s = sec % 60;
+            return m + '분 ' + s + '초';
         }
 
         // ================== 수집(폴링) ==================
         let collectTimer = null;
         let collectToken = 0;
 
-        $scope.collecting = false;
+        $scope.collecting = false; // UI: 수집 ON/OFF
+        $scope.collectPaused = false; // UI: 일시중지 상태
+        $scope.collectAutoBoot = true; // "페이지 진입하면 자동 시작" 정책
+        $scope.collectSaveToDb = true; // 기본: DB 저장 ON (원하면 UI 토글로 바꿔도 됨)
+
+        // UI 표시용 (너 HTML에 이미 쓰는 것들)
+        $scope.collectStatusText = '';
+        $scope.collectBatchInfo = '';
+        $scope.collectCycleInfo = '';
+        $scope.collectSavedCount = 0;
+        $scope.collectLastAt = null;
+
+        // ---------------------------------------------------------
+        // ✅ 상태메시지 유틸 (setCollectStatus가 없으면 fallback)
+        function setCollectStatusSafe(type, msg) {
+            try {
+                if (typeof setCollectStatus === 'function') {
+                    setCollectStatus(type, msg);
+                    return;
+                }
+            } catch (e) {}
+            // fallback
+            $scope.collectStatusText = msg || '';
+        }
 
         // ---------------------------------------------------------
         // ✅ 수집 시작 가능 조건
@@ -3992,54 +4307,179 @@
                 const period = parseInt(c.periodSec, 10);
                 const periodOk = isFinite(period) && period >= 5;
 
-                // ✅ routeId 조건 제거 (출발/도착만 있으면 OK)
+                // ✅ 출발/도착 + 주기만 있으면 OK
                 return fromOk && toOk && periodOk;
             } catch (e) {
                 return false;
             }
         };
 
-        $scope.startCollect = function () {
-            const sec = Number($scope.collect && $scope.collect.periodSec);
-            if (!sec || sec < 5) {
-                setCollectStatus('error', '주기(초)는 5 이상이어야 해요.');
+        // ---------------------------------------------------------
+        // ✅ 내부: 타이머 정리
+        function cancelCollectTimer() {
+            if (collectTimer) {
+                try {
+                    $interval.cancel(collectTimer);
+                } catch (e) {}
+                collectTimer = null;
+            }
+        }
+
+        // ---------------------------------------------------------
+        // ✅ 수집 1tick 실행(공통)
+        // - saveToDb: true면 DB 저장까지(collectOnce 내부에서 처리)
+        // - token: 중지/재개 간 레이스 방지
+        function runCollectTick(saveToDb, myToken, reason) {
+            if (myToken !== collectToken) return;
+            if (!$scope.collecting) return;
+            if ($scope.collectPaused) return;
+
+            // 수집 조건 불충족이면 자동 중단(“대기” 상태로)
+            if (!$scope.canStartCollect()) {
+                $scope.collecting = false;
+                cancelCollectTimer();
+                setCollectStatusSafe('info', '출발/도착/주기 조건이 부족해서 수집 대기중');
+                $scope.collectCycleInfo = '대기중';
                 return;
             }
 
-            if (collectTimer) $interval.cancel(collectTimer);
-            collectTimer = null;
+            const c = $scope.collect || {};
+            const sec = Number(c.periodSec || 10);
+
+            $scope.collectCycleInfo = `주기: ${sec}s`;
+            $scope.collectLastAt = new Date();
+
+            // ✅ 여기서 진짜 수집/저장 실행
+            // collectOnce 내부에서:
+            // - arrival 호출
+            // - 계산
+            // - saveToDb면 서버 저장 API 호출(INSERT) 까지 해야 DB가 쌓임
+            try {
+                const ret = $scope.collectOnce && $scope.collectOnce(!!saveToDb, myToken);
+
+                // collectOnce가 Promise면 UI 갱신
+                if (ret && typeof ret.then === 'function') {
+                    ret.then(function (r) {
+                        if (myToken !== collectToken) return;
+                        // ✅ r에 결과를 넣는다면 여기서 누적카운트 올리기 가능
+                        // 예: r.saved === true, r.savedCount 등
+                        if (r && r.saved) $scope.collectSavedCount += 1;
+                        $scope.collectBatchInfo = r && r.msg ? r.msg : '수집 완료';
+                    }).catch(function (e) {
+                        if (myToken !== collectToken) return;
+                        $scope.collectBatchInfo = '수집 실패';
+                        console.warn('[collect] collectOnce error:', e);
+                    });
+                }
+            } catch (e) {
+                console.warn('[collect] collectOnce throw:', e);
+            }
+        }
+
+        // ---------------------------------------------------------
+        // ✅ 자동 시작(버튼 없이)
+        // - 조건 충족이면 즉시 시작
+        // - 조건 미충족이면 "대기" 상태로 있다가, 조건 충족 순간 자동 시작
+        function ensureCollectAutoBoot() {
+            if (!$scope.collectAutoBoot) return;
+
+            // 이미 돌고 있으면 스킵
+            if ($scope.collecting && collectTimer) return;
+
+            if ($scope.canStartCollect()) {
+                // 조건 충족 -> 자동 시작
+                $scope.startCollect(); // 아래 startCollect는 saveToDb 기본 true
+            } else {
+                // 조건 미충족 -> 대기 메시지
+                setCollectStatusSafe('info', '출발/도착 선택 시 자동으로 수집이 시작됩니다.');
+                $scope.collectCycleInfo = '대기중';
+            }
+        }
+
+        // ---------------------------------------------------------
+        // ✅ 수집 시작 (UI 버튼 없어도 코드로 호출됨)
+        $scope.startCollect = function () {
+            const sec = Number($scope.collect && $scope.collect.periodSec);
+            if (!sec || sec < 5) {
+                setCollectStatusSafe('error', '주기(초)는 5 이상이어야 해요.');
+                return;
+            }
+
+            if (!$scope.canStartCollect()) {
+                setCollectStatusSafe('info', '출발/도착/주기 조건이 부족해서 수집 대기중');
+                return;
+            }
+
+            cancelCollectTimer();
 
             $scope.collecting = true;
+            $scope.collectPaused = false;
 
             collectToken++;
             const myToken = collectToken;
 
-            setCollectStatus('ok', '수집 시작됨 (자동 저장 ON)');
+            setCollectStatusSafe('ok', $scope.collectSaveToDb ? '자동 수집 시작 (DB 저장 ON)' : '자동 수집 시작 (저장 OFF)');
 
-            $scope.collectOnce(true, myToken);
+            // 즉시 1번 실행
+            runCollectTick($scope.collectSaveToDb, myToken, 'start');
 
+            // 주기 실행
             collectTimer = $interval(function () {
-                $scope.collectOnce(true, myToken);
+                runCollectTick($scope.collectSaveToDb, myToken, 'interval');
             }, sec * 1000);
         };
 
+        // ---------------------------------------------------------
+        // ✅ 수집 중지 (UI: 중지 버튼)
         $scope.stopCollect = function () {
-            if (collectTimer) {
-                $interval.cancel(collectTimer);
-                collectTimer = null;
-            }
-
-            collectToken++;
+            cancelCollectTimer();
+            collectToken++; // 진행중 Promise/루프 무효화
 
             $scope.collecting = false;
-            setCollectStatus('ok', '수집 중지됨');
+            $scope.collectPaused = false;
+
+            setCollectStatusSafe('ok', '수집 중지됨');
+            $scope.collectBatchInfo = '';
+            $scope.collectCycleInfo = '중지';
         };
 
-        // ✅ 자동수집 JOB 등록
+        // ---------------------------------------------------------
+        // ✅ 수집 일시중지/재개 (UI: 재개/중지 버튼만 남길 때 핵심)
+        $scope.pauseCollect = function () {
+            if (!$scope.collecting) {
+                setCollectStatusSafe('info', '수집이 시작되지 않았어요.');
+                return;
+            }
+            $scope.collectPaused = true;
+            setCollectStatusSafe('ok', '일시중지됨');
+        };
+
+        $scope.resumeCollect = function () {
+            if (!$scope.collecting) {
+                // 자동 정책: resume 누르면 start로 동작하게
+                ensureCollectAutoBoot();
+                return;
+            }
+            $scope.collectPaused = false;
+            setCollectStatusSafe('ok', '재개됨');
+        };
+
+        // ---------------------------------------------------------
+        // ✅ 디버그용: 1회 실행
+        $scope.testCollectOnce = function () {
+            collectToken++;
+            const myToken = collectToken;
+            $scope.collecting = true;
+            $scope.collectPaused = false;
+            runCollectTick(true, myToken, 'test');
+        };
+
+        // ---------------------------------------------------------
+        // ✅ (옵션) 서버에 "JOB 등록" 방식(서버만 켜도 자동수집) — 프론트 수집과 별개
+        //    이건 네가 만든 /api/buscollect/register가 진짜 서버 스케줄러를 등록할 때만 의미 있음.
         $scope.registerAutoCollect = function () {
             try {
                 const c = $scope.collect || {};
-
                 const cityCode = Number(c.cityCode || 25);
                 const periodSec = Number(c.periodSec || 10);
 
@@ -4049,40 +4489,30 @@
                 const fromStopName = String((c.from && (c.from.name || c.from.nodenm || c.from.nodeNm)) || c.fromStopName || '').trim();
                 const toStopName = String((c.to && (c.to.name || c.to.nodenm || c.to.nodeNm)) || c.toStopName || '').trim();
 
-                const mode = String(c.mode || 'BUS').trim(); // BUS / TRAM / BUS_TRAM 등 네 정책대로
+                const mode = String(c.mode || 'BUS').trim();
 
                 if (!fromStopId || !toStopId) {
-                    alert('출발/도착 정류장을 먼저 선택하세요.');
+                    setCollectStatusSafe('error', '출발/도착 정류장을 먼저 선택하세요.');
                     return;
                 }
 
-                const body = {
-                    cityCode,
-                    fromStopId,
-                    toStopId,
-                    fromStopName,
-                    toStopName,
-                    mode,
-                    periodSec,
-                };
+                const body = { cityCode, fromStopId, toStopId, fromStopName, toStopName, mode, periodSec };
 
-                $scope.collectStatus = 'JOB 등록 중...';
+                $scope.collectStatusText = 'JOB 등록 중...';
                 $http.post('/api/buscollect/register', body).then(
-                    function (res) {
-                        $scope.collectStatus = '✅ 자동수집 JOB 등록 완료 (서버가 켜져있는 동안 자동 저장됨)';
-                        // 원하면 JOB 목록 갱신도
+                    function () {
+                        $scope.collectStatusText = '✅ 자동수집 JOB 등록 완료 (서버가 켜져있는 동안 자동 저장됨)';
                         $scope.loadJobs && $scope.loadJobs();
                     },
                     function (err) {
-                        $scope.collectStatus = '❌ JOB 등록 실패: ' + ((err.data && err.data.message) || err.statusText);
+                        $scope.collectStatusText = '❌ JOB 등록 실패: ' + ((err.data && err.data.message) || err.statusText);
                     }
                 );
             } catch (e) {
-                $scope.collectStatus = '❌ 예외: ' + e.message;
+                $scope.collectStatusText = '❌ 예외: ' + e.message;
             }
         };
 
-        // ✅ 자동수집 JOB 해제
         $scope.disableAutoCollect = function () {
             const c = $scope.collect || {};
             const cityCode = Number(c.cityCode || 25);
@@ -4092,32 +4522,50 @@
             const mode = String(c.mode || 'BUS').trim();
 
             if (!fromStopId || !toStopId) {
-                alert('출발/도착 정류장을 먼저 선택하세요.');
+                setCollectStatusSafe('error', '출발/도착 정류장을 먼저 선택하세요.');
                 return;
             }
 
-            $scope.collectStatus = 'JOB 해제 중...';
+            $scope.collectStatusText = 'JOB 해제 중...';
             $http.post('/api/buscollect/disable', { cityCode, fromStopId, toStopId, mode }).then(
                 function () {
-                    $scope.collectStatus = '✅ 자동수집 JOB 해제 완료';
+                    $scope.collectStatusText = '✅ 자동수집 JOB 해제 완료';
                     $scope.loadJobs && $scope.loadJobs();
                 },
                 function (err) {
-                    $scope.collectStatus = '❌ JOB 해제 실패: ' + ((err.data && err.data.message) || err.statusText);
+                    $scope.collectStatusText = '❌ JOB 해제 실패: ' + ((err.data && err.data.message) || err.statusText);
                 }
             );
         };
 
-        // (선택) JOB 목록 확인용
         $scope.loadJobs = function () {
             $http.get('/api/buscollect/jobs?enabled=1').then(function (res) {
                 $scope.jobs = res.data && res.data.items ? res.data.items : [];
             });
         };
 
-        $scope.testCollectOnce = function () {
-            return $scope.collectOnce(true, collectToken);
-        };
+        // ---------------------------------------------------------
+        // ✅ 페이지 진입 시 자동 부팅 + 출발/도착 선택 순간 자동 시작
+        //  - start 버튼 없이도 동작하게 만드는 핵심
+        (function initAutoCollectBoot() {
+            // 1) 최초 1번 시도
+            $timeout(function () {
+                ensureCollectAutoBoot();
+            }, 0);
+
+            // 2) 출발/도착/주기 변경 감지 → 조건 만족 순간 자동 시작
+            $scope.$watchGroup(['collect.fromStopId', 'collect.toStopId', 'collect.from.stopId', 'collect.to.stopId', 'collect.periodSec'], function () {
+                // 이미 돌고 있으면 굳이 다시 시작하지 않음
+                if ($scope.collecting && collectTimer) return;
+                ensureCollectAutoBoot();
+            });
+
+            // 3) 컨트롤러 파괴 시 타이머 정리
+            $scope.$on('$destroy', function () {
+                cancelCollectTimer();
+                collectToken++;
+            });
+        })();
 
         // ---------------------------------------------------------
         // ✅ arrival API (출발/도착 기준)
@@ -4159,7 +4607,7 @@
                 const rid = pickRouteId(x);
                 const rno = pickRouteNo(x);
                 const sec = pickArrSec(x);
-                if (!rid || !rno) return; // ✅ route 정보도 API에서 있어야 저장
+                if (!rid || !rno) return;
                 if (sec == null) return;
 
                 if (!best || sec < best.sec) {
@@ -4220,16 +4668,18 @@
         }
 
         // ---------------------------------------------------------
-        // ✅ 수집 1회 실행 (API ONLY)
+        // ✅ 수집 1회 실행 (API ONLY + (선택) DB 저장)
         // ---------------------------------------------------------
         $scope.collectOnce = function (saveToDb, tokenFromCaller) {
-            // ✅ boolean normalize
+            // ✅ boolean normalize (기본 true)
             saveToDb = saveToDb !== false;
 
             const myToken = tokenFromCaller == null ? collectToken : tokenFromCaller;
 
-            // 수집 중단/토큰 변경이면 중단
-            if (saveToDb && (!$scope.collecting || myToken !== collectToken)) return;
+            // ✅ 수집 중지/토큰 변경이면 중단 (저장 모드일 때만 강하게 중단)
+            if (saveToDb && (!$scope.collecting || myToken !== collectToken)) {
+                return $q.resolve(null);
+            }
 
             $scope.collect = $scope.collect || {};
             if ($scope.collect._saving == null) $scope.collect._saving = false;
@@ -4239,198 +4689,217 @@
             const fromStopId = String(($scope.collect.from && $scope.collect.from.stopId) || $scope.collect.fromStopId || '').trim();
             const toStopId = String(($scope.collect.to && $scope.collect.to.stopId) || $scope.collect.toStopId || '').trim();
 
-            if (!fromStopId) return setCollectStatus('error', '출발 정류장을 선택해야 해요.');
-            if (!toStopId) return setCollectStatus('error', '도착 정류장을 선택해야 해요.');
-
-            function formatEta(sec) {
-                sec = Math.max(0, Math.floor(Number(sec) || 0));
-                var m = Math.floor(sec / 60);
-                return '약 ' + m + '분 (' + sec + 's)';
+            if (!fromStopId) {
+                setCollectStatusSafe ? setCollectStatusSafe('error', '출발 정류장을 선택해야 해요.') : setCollectStatus('error', '출발 정류장을 선택해야 해요.');
+                return $q.resolve(null);
+            }
+            if (!toStopId) {
+                setCollectStatusSafe ? setCollectStatusSafe('error', '도착 정류장을 선택해야 해요.') : setCollectStatus('error', '도착 정류장을 선택해야 해요.');
+                return $q.resolve(null);
             }
 
             // ---------------------------
             // ✅ 실행 시작 (API ONLY)
             // ---------------------------
-            setCollectStatus('ok', saveToDb ? '수집 + DB 저장 중...(API ONLY)' : '수집 중...(저장 안 함)');
+            try {
+                setCollectStatus('ok', saveToDb ? '수집 + DB 저장 중...(API ONLY)' : '수집 중...(저장 안 함)');
+            } catch (e) {
+                if (typeof setCollectStatusSafe === 'function') setCollectStatusSafe('ok', saveToDb ? '수집 + DB 저장 중...(API ONLY)' : '수집 중...(저장 안 함)');
+            }
 
-            const pFrom = fetchArrivalForStop(cityCode, fromStopId);
-            const pTo = fetchArrivalForStop(cityCode, toStopId);
+            const pFrom = $scope.fetchArrivalForStop(cityCode, fromStopId);
+            const pTo = $scope.fetchArrivalForStop(cityCode, toStopId);
 
-            return $q.all([pFrom, pTo]).then(function (arr) {
-                if (saveToDb && (myToken !== collectToken || !$scope.collecting)) {
-                    console.warn('[collectOnce] canceled by stopCollect (before compute)');
-                    return;
-                }
+            return $q
+                .all([pFrom, pTo])
+                .then(function (arr) {
+                    if (saveToDb && (myToken !== collectToken || !$scope.collecting)) {
+                        console.warn('[collectOnce] canceled by stopCollect (before compute)');
+                        return null;
+                    }
 
-                const fromList = arr[0] || [];
-                const toList = arr[1] || [];
+                    const fromList = arr[0] || [];
+                    const toList = arr[1] || [];
 
-                // ✅🔥 FIX: 출발/도착 이름 fallback 보강
-                // collectFromSelected(선택객체) → collect.from(정류장 객체) → collect.fromStopName(문자열)
-                const fromName =
-                    ($scope.collectFromSelected && ($scope.collectFromSelected.name || $scope.collectFromSelected.nodenm || $scope.collectFromSelected.nodeNm)) ||
-                    ($scope.collect.from && ($scope.collect.from.name || $scope.collect.from.nodenm || $scope.collect.from.nodeNm)) ||
-                    $scope.collect.fromStopName ||
-                    '';
+                    // ---------------------------------------------------------
+                    // ✅ [추가] 출발/도착 ETA(가장 빠른 도착 초) + "분/초" 텍스트 세팅
+                    // ---------------------------------------------------------
+                    const fromEtaSec = getBestEtaSec(fromList);
+                    const toEtaSec = getBestEtaSec(toList);
 
-                const toName =
-                    ($scope.collectToSelected && ($scope.collectToSelected.name || $scope.collectToSelected.nodenm || $scope.collectToSelected.nodeNm)) ||
-                    ($scope.collect.to && ($scope.collect.to.name || $scope.collect.to.nodenm || $scope.collect.to.nodeNm)) ||
-                    $scope.collect.toStopName ||
-                    '';
+                    $scope.collectFromEtaSec = fromEtaSec;
+                    $scope.collectToEtaSec = toEtaSec;
 
-                // ✅ 1) 공통 노선(= “이동 소요시간 의미” 유지 가능) → API 값만 저장
-                const bestCommon = pickBestCommonRoute(fromList, toList);
-                if (bestCommon) {
+                    $scope.collectFromEtaText = secToMmSs(fromEtaSec);
+                    $scope.collectToEtaText = secToMmSs(toEtaSec);
+
+                    // ✅🔥 출발/도착 이름 fallback 보강
+                    const fromName =
+                        ($scope.collectFromSelected && ($scope.collectFromSelected.name || $scope.collectFromSelected.nodenm || $scope.collectFromSelected.nodeNm)) ||
+                        ($scope.collect.from && ($scope.collect.from.name || $scope.collect.from.nodenm || $scope.collect.from.nodeNm)) ||
+                        $scope.collect.fromStopName ||
+                        '';
+
+                    const toName =
+                        ($scope.collectToSelected && ($scope.collectToSelected.name || $scope.collectToSelected.nodenm || $scope.collectToSelected.nodeNm)) ||
+                        ($scope.collect.to && ($scope.collect.to.name || $scope.collect.to.nodenm || $scope.collect.to.nodeNm)) ||
+                        $scope.collect.toStopName ||
+                        '';
+
+                    // ✅ 1) 공통 노선(= 이동 의미 유지 가능) → API 값만 저장
+                    const bestCommon = pickBestCommonRoute(fromList, toList);
+                    if (bestCommon) {
+                        return saveApiOnlyResult(saveToDb, myToken, {
+                            cityCode,
+                            routeId: bestCommon.routeId,
+                            routeNo: bestCommon.routeNo,
+
+                            fromStopId,
+                            toStopId,
+                            fromStopName: fromName,
+                            toStopName: toName,
+
+                            fromArrSec: bestCommon.fromSec,
+                            toArrSec: bestCommon.toSec,
+                            diffSec: bestCommon.diffSec,
+
+                            mode: bestCommon.mode || 'API_COMMON_ROUTE',
+                            note: '공통노선(API) 기준',
+                        });
+                    }
+
+                    // ✅ 2) 공통 노선이 없어도 저장: 각 정류장 최단 도착 1개씩 (API ONLY)
+                    const bestFrom = pickBestArrivalItem(fromList);
+                    const bestTo = pickBestArrivalItem(toList);
+
+                    if (!bestFrom || !bestTo) {
+                        setCollectStatus('error', 'API 도착정보에서 routeId/routeNo/arrtime을 충분히 얻지 못해 저장할 수 없습니다.');
+                        return null;
+                    }
+
+                    const fromArrSec = bestFrom.sec;
+                    const toArrSec = bestTo.sec;
+                    const diffSec = Math.max(0, (toArrSec || 0) - (fromArrSec || 0));
+
+                    setCollectStatus('ok', '⚠ 공통노선이 없어 “각 정류장 도착시간(API)”으로 저장합니다. (이동시간 추정 없음)');
+
                     return saveApiOnlyResult(saveToDb, myToken, {
                         cityCode,
-                        routeId: bestCommon.routeId,
-                        routeNo: bestCommon.routeNo,
+
+                        // ✅ 출발 정류장 기준(bestFrom) — 추정 금지
+                        routeId: bestFrom.routeId,
+                        routeNo: bestFrom.routeNo,
+
                         fromStopId,
                         toStopId,
                         fromStopName: fromName,
                         toStopName: toName,
-                        fromArrSec: bestCommon.fromSec,
-                        toArrSec: bestCommon.toSec,
-                        diffSec: bestCommon.diffSec,
-                        mode: bestCommon.mode,
-                        note: '공통노선(API) 기준',
+
+                        fromArrSec,
+                        toArrSec,
+                        diffSec,
+
+                        mode: 'API_NO_COMMON_SAVE_BOTH_STOPS',
+
+                        // 확장용(백엔드가 무시해도 OK)
+                        toRouteId: bestTo.routeId,
+                        toRouteNo: bestTo.routeNo,
+                        note: '공통노선 없음 → 각 정류장 최단도착(API) 저장',
                     });
-                }
-
-                // ✅ 2) 공통 노선이 없어도 저장: 각 정류장 최단 도착 1개씩 (API ONLY)
-                const bestFrom = pickBestArrivalItem(fromList);
-                const bestTo = pickBestArrivalItem(toList);
-
-                if (!bestFrom || !bestTo) {
-                    setCollectStatus('error', 'API 도착정보에서 routeId/routeNo/arrtime을 충분히 얻지 못해 저장할 수 없습니다.');
-                    return;
-                }
-
-                const fromArrSec = bestFrom.sec;
-                const toArrSec = bestTo.sec;
-
-                // diffSec는 참고용(두 도착시간 차이)
-                const diffSec = Math.max(0, (toArrSec || 0) - (fromArrSec || 0));
-
-                setCollectStatus('ok', '⚠ 공통노선이 없어 “각 정류장 도착시간(API)”으로 저장합니다. (이동시간 추정 없음)');
-
-                return saveApiOnlyResult(saveToDb, myToken, {
-                    cityCode,
-                    // ✅ 출발 정류장 기준(bestFrom) — 추정 금지
-                    routeId: bestFrom.routeId,
-                    routeNo: bestFrom.routeNo,
-
-                    fromStopId,
-                    toStopId,
-                    fromStopName: fromName,
-                    toStopName: toName,
-
-                    fromArrSec,
-                    toArrSec,
-                    diffSec,
-
-                    mode: 'API_NO_COMMON_SAVE_BOTH_STOPS',
-
-                    // 확장용(백엔드가 무시해도 OK)
-                    toRouteId: bestTo.routeId,
-                    toRouteNo: bestTo.routeNo,
-                    note: '공통노선 없음 → 각 정류장 최단도착(API) 저장',
+                })
+                .catch(function (err) {
+                    console.error('[collectOnce] arrival fetch error:', err);
+                    try {
+                        setCollectStatus('error', '도착정보 API 호출 실패');
+                    } catch (e) {}
+                    return null;
                 });
-            });
-
-            // ---------------------------------------------------------
-            // ✅ DB 저장/화면 반영 (API ONLY 공통 처리)
-            // ---------------------------------------------------------
-            function saveApiOnlyResult(saveToDbArg, myTokenArg, obj) {
-                const routeId = String(obj.routeId || '').trim();
-                const routeNo = String(obj.routeNo || '').trim();
-
-                // ✅ 추정 금지: routeId/routeNo 없으면 저장하지 않음
-                if (!routeId || !routeNo) {
-                    setCollectStatus('error', 'routeId/routeNo를 API에서 얻지 못해 저장을 중단했습니다.');
-                    return;
-                }
-
-                const diffSec = Math.max(0, Math.floor(Number(obj.diffSec) || 0));
-
-                $scope.collect.routeId = routeId;
-                $scope.collect.routeNo = routeNo;
-
-                $scope.collectLast = {
-                    cityCode: obj.cityCode,
-                    routeId: routeId,
-                    routeNo: routeNo,
-                    fromStopId: obj.fromStopId,
-                    toStopId: obj.toStopId,
-                    fromStopName: obj.fromStopName,
-                    toStopName: obj.toStopName,
-                    fromArrSec: obj.fromArrSec,
-                    toArrSec: obj.toArrSec,
-                    diffSec: diffSec,
-                    pretty: formatEta(diffSec),
-                    collectedAt: new Date(),
-                    mode: obj.mode,
-                    note: obj.note || '',
-                    toRouteId: obj.toRouteId,
-                    toRouteNo: obj.toRouteNo,
-                };
-
-                if (!saveToDbArg) {
-                    setCollectStatus('ok', '수집 완료(API ONLY): ' + $scope.collectLast.pretty);
-                    return;
-                }
-
-                if (myTokenArg !== collectToken || !$scope.collecting) {
-                    console.warn('[collectOnce] canceled by stopCollect (before save)');
-                    return;
-                }
-
-                if ($scope.collect._saving) {
-                    console.warn('[collectOnce] skip: saving in progress');
-                    return;
-                }
-                $scope.collect._saving = true;
-
-                const dedupeKey = [obj.cityCode, routeId, obj.fromStopId, obj.toStopId, obj.fromArrSec, obj.toArrSec, diffSec, obj.mode, obj.toRouteId || '', obj.toRouteNo || ''].join('|');
-
-                const payload = {
-                    cityCode: Number(obj.cityCode),
-                    routeId: routeId,
-                    routeNo: routeNo,
-                    fromStopId: obj.fromStopId,
-                    toStopId: obj.toStopId,
-                    fromStopName: obj.fromStopName,
-                    toStopName: obj.toStopName,
-                    fromArrSec: obj.fromArrSec,
-                    toArrSec: obj.toArrSec,
-                    diffSec: diffSec,
-                    mode: obj.mode,
-                    collectedAt: new Date().toISOString(),
-                    dedupeKey: dedupeKey,
-
-                    // 확장 필드(백엔드가 지원하면 저장)
-                    toRouteId: obj.toRouteId,
-                    toRouteNo: obj.toRouteNo,
-                    note: obj.note || '',
-                };
-
-                return $http
-                    .post('/api/buscollect/save', payload)
-                    .then(function (res) {
-                        const data = res.data || {};
-                        if (data.saved === false) setCollectStatus('ok', '⏭ 중복이라 저장 안 함(API ONLY): ' + $scope.collectLast.pretty);
-                        else setCollectStatus('ok', '✅ 저장 완료(API ONLY): ' + $scope.collectLast.pretty);
-                    })
-                    .catch(function (err) {
-                        console.error('[collectOnce] DB save fail', err);
-                        setCollectStatus('error', 'DB 저장 실패');
-                    })
-                    .finally(function () {
-                        $scope.collect._saving = false;
-                    });
-            }
         };
+
+        // ---------------------------------------------------------
+        // ✅ API ONLY 결과 저장(또는 저장 안함)
+        // - saveToDb=false면 "결과 UI만 갱신"하고 끝
+        // - saveToDb=true면 서버 저장 API POST 시도 → 성공하면 DB에 쌓임
+        // ---------------------------------------------------------
+        function saveApiOnlyResult(saveToDb, myToken, payload) {
+            payload = payload || {};
+
+            // 토큰 체크 (저장모드일 때만 엄격)
+            if (saveToDb && (myToken !== collectToken || !$scope.collecting)) {
+                console.warn('[saveApiOnlyResult] canceled');
+                return $q.resolve(null);
+            }
+
+            // ✅ UI에 최신 결과 보이게(원하면 네 UI 변수에 맞춰 조정)
+            $scope.lastCollect = payload;
+            $scope.collectLastAt = new Date();
+            $scope.collectBatchInfo = (payload.mode || 'API') + ' 저장 준비';
+
+            // 저장 안 하면 여기서 종료
+            if (!saveToDb) {
+                $scope.collectBatchInfo = (payload.mode || 'API') + ' (저장 안 함)';
+                return $q.resolve({ saved: false, msg: 'not saved' });
+            }
+
+            // ✅ 중복 저장 방지 플래그
+            if ($scope.collect && $scope.collect._saving) {
+                console.warn('[saveApiOnlyResult] already saving - skip');
+                return $q.resolve(null);
+            }
+            $scope.collect._saving = true;
+
+            // ---------------------------------------------------------
+            // ✅ 여기서 "DB 저장"을 실제로 하는 POST가 필요함
+            // 서버에 뭐가 있는지 확실치 않아서 후보를 여러 개 시도
+            // ✅ 성공하는 엔드포인트가 있으면 그걸로 DB에 쌓임
+            // ---------------------------------------------------------
+            const SAVE_ENDPOINTS = [
+                '/api/buscollect/save',
+                '/api/buscollect/collect',
+                '/api/buscollect/append',
+                '/api/busCollect/save', // 혹시 카멜케이스
+                '/api/bus_collect/save', // 혹시 스네이크
+            ];
+
+            function tryPostAt(i) {
+                if (i >= SAVE_ENDPOINTS.length) {
+                    $scope.collect._saving = false;
+                    setCollectStatus('error', 'DB 저장 API를 찾지 못했습니다. (저장 엔드포인트 없음)');
+                    console.error('[saveApiOnlyResult] No working endpoint. Tried:', SAVE_ENDPOINTS);
+                    return $q.reject(new Error('No working save endpoint'));
+                }
+
+                const url = SAVE_ENDPOINTS[i];
+                return $http.post(url, payload).then(
+                    function (res) {
+                        // ✅ 성공
+                        console.log('[saveApiOnlyResult] saved via', url, res && res.data);
+
+                        $scope.collectSavedCount = Number($scope.collectSavedCount || 0) + 1;
+                        $scope.collectBatchInfo = '✅ DB 저장 성공 (' + url + ')';
+                        setCollectStatus('ok', '✅ DB 저장 성공');
+
+                        $scope.collect._saving = false;
+                        return { saved: true, url: url, data: res && res.data };
+                    },
+                    function (err) {
+                        // 실패면 다음 후보로
+                        console.warn('[saveApiOnlyResult] save failed at', url, err && (err.status || err));
+                        return tryPostAt(i + 1);
+                    }
+                );
+            }
+
+            return tryPostAt(0).catch(function (e) {
+                // 최종 실패
+                $scope.collect._saving = false;
+                $scope.collectBatchInfo = '❌ DB 저장 실패';
+                try {
+                    setCollectStatus('error', 'DB 저장 실패');
+                } catch (err) {}
+                return null;
+            });
+        }
 
         // =========================================================
         // ✅ 최단경로(데모) - 출발/도착 후보 검색 (DB 기반으로 변경)
@@ -4893,7 +5362,7 @@
         }
 
         // =========================================================
-        // ✅ 단일 모드 polyline 그리기 (기존 유지)
+        // ✅ 단일 모드 polyline 그리기 (기존 유지 + tag 추가)
         // =========================================================
         function drawPathPolylineLonLat(polyLonLat, mode) {
             const map = getInnerOlMap();
@@ -4906,6 +5375,13 @@
 
             if (!ensurePathLayer(m)) return false;
             if (!pathVectorSource) return false;
+
+            // ✅ 추가: path 레이어 tag (있으면 통일)
+            try {
+                if (typeof pathVectorLayer !== 'undefined' && pathVectorLayer && pathVectorLayer.set) {
+                    pathVectorLayer.set('tag', 'path');
+                }
+            } catch (e) {}
 
             pathVectorSource.clear(true);
             if (!Array.isArray(polyLonLat) || polyLonLat.length < 2) return false;
@@ -5186,10 +5662,16 @@
         }
 
         // =========================================================
-        // ✅ STOPS (정류장 마커) 레이어
+        // ✅ STOPS (정류장 마커) 레이어  (기존 + 필터 레이어 추가)
         // =========================================================
-        let stopsVectorSource = null;
+        let stopsVectorSource = null; // = 전체 정류장
         let stopsVectorLayer = null;
+
+        let filteredStopsSource = null; // ✅ 선택 노선 정류장만
+        let filteredStopsLayer = null;
+
+        // ✅ nodeId -> Feature 인덱스 (필터링 핵심)
+        let stopFeatureById = Object.create(null);
 
         function ensureStopsLayer() {
             const map = getInnerOlMap();
@@ -5202,17 +5684,50 @@
                     source: stopsVectorSource,
                     zIndex: 15,
                 });
+
+                // ✅ 추가: tag
+                try {
+                    stopsVectorLayer.set('tag', 'stops');
+                } catch (e) {}
+
                 map.addLayer(stopsVectorLayer);
             }
+
+            // ✅ 필터 레이어 추가
+            if (!filteredStopsSource) filteredStopsSource = new ol.source.Vector();
+            if (!filteredStopsLayer) {
+                filteredStopsLayer = new ol.layer.Vector({
+                    source: filteredStopsSource,
+                    zIndex: 16, // 위에 보이게
+                });
+
+                // ✅ 추가: tag (필터도 stops로 취급)
+                try {
+                    filteredStopsLayer.set('tag', 'stops');
+                } catch (e) {}
+
+                filteredStopsLayer.setVisible(false); // 기본 숨김
+                map.addLayer(filteredStopsLayer);
+            }
+
             return true;
         }
 
         function clearStopsOnMap() {
             if (stopsVectorSource) stopsVectorSource.clear(true);
+            if (filteredStopsSource) filteredStopsSource.clear(true);
+            stopFeatureById = Object.create(null);
+
+            // 기본 상태: 전체 보이기
+            if (stopsVectorLayer) stopsVectorLayer.setVisible(true);
+            if (filteredStopsLayer) filteredStopsLayer.setVisible(false);
         }
 
-        function drawStopMarker(lon, lat, color, label, kind) {
+        function drawStopMarker(lon, lat, color, label, kind, stopId) {
             if (!ensureStopsLayer()) return;
+
+            // ✅ 혹시 stopsVectorSource가 아직 없으면 방어
+            if (!stopsVectorSource) return;
 
             const xy = lonLatToMapXY(lon, lat);
             if (!xy) return;
@@ -5221,6 +5736,26 @@
 
             const isEnd = kind === 'FROM' || kind === 'TO';
             const radius = isEnd ? 9 : 6;
+
+            // ✅ nodeId 저장/인덱싱 (필터링할 때 필요)
+            let nodeId = '';
+            if (stopId !== undefined && stopId !== null) {
+                nodeId = String(stopId).trim();
+                // 흔한 쓰레기 값 방지
+                if (nodeId === 'undefined' || nodeId === 'null') nodeId = '';
+            }
+
+            // ✅ 같은 nodeId가 이미 있으면(중복 정류장 그리기), 필요하면 스킵
+            // - 중복이 많으면 성능/가독성 모두 나빠져서 보통 스킵이 더 좋아
+            if (nodeId && stopFeatureById[nodeId]) {
+                // 기존이 있으면 새로 추가하지 않고 종료 (원하면 주석 처리 가능)
+                return;
+            }
+
+            if (nodeId) {
+                f.set('nodeId', nodeId);
+                stopFeatureById[nodeId] = f;
+            }
 
             f.setStyle(
                 new ol.style.Style({
@@ -5231,7 +5766,7 @@
                     }),
                     text: label
                         ? new ol.style.Text({
-                              text: label,
+                              text: String(label),
                               offsetY: -18,
                               padding: [2, 4, 2, 4],
                               backgroundFill: new ol.style.Fill({ color: 'rgba(255,255,255,0.9)' }),
@@ -5244,7 +5779,189 @@
                 })
             );
 
+            // ✅ 항상 "전체 레이어"에 쌓는다 (필터는 clone으로 따로 띄움)
             stopsVectorSource.addFeature(f);
+        }
+
+        function hideAllPointLayersOnMap() {
+            const map = getInnerOlMap();
+            if (!map) return;
+
+            const layers = map.getLayers().getArray();
+            let hidden = 0;
+
+            layers.forEach(function (lyr) {
+                if (!lyr || !lyr.getSource) return;
+                const src = lyr.getSource();
+                if (!src || !src.getFeatures) return;
+
+                const feats = src.getFeatures();
+                if (!feats || !feats.length) return;
+
+                // Point가 대량이면 "정류장 점 레이어"로 보고 숨김
+                let pointCount = 0;
+                for (let i = 0; i < feats.length; i++) {
+                    const g = feats[i] && feats[i].getGeometry && feats[i].getGeometry();
+                    const t = g && g.getType && g.getType();
+                    if (t === 'Point' || t === 'MultiPoint') pointCount++;
+                    if (pointCount >= 50) break; // 50개 이상이면 정류장 점 레이어로 간주
+                }
+
+                if (pointCount >= 50) {
+                    lyr.setVisible(false);
+                    hidden++;
+                }
+            });
+
+            console.log('[hideAllPointLayersOnMap] hidden layers=', hidden);
+        }
+
+        // =========================================================
+        // ✅ 필터 적용/해제
+        // =========================================================
+        function extractRoutePathItems(res) {
+            const r = res && (res.data || res);
+            const body = r && (r.body || r.response || r.result || r);
+            const items = (body && body.items) || (body && body.itemList) || (body && body.list) || (body && body.msgBody && body.msgBody.itemList) || [];
+            return Array.isArray(items) ? items : [];
+        }
+        function getNodeIdFromRouteItem(x) {
+            return String(x.nodeid || x.nodeId || x.node_id || x.node || '').trim();
+        }
+
+        function applyRouteStopFilter(routeId) {
+            // ✅ (중요) 기존 빨간 점이 다른 레이어에 찍힌 경우가 많아서,
+            // Point 대량 레이어를 싹 숨겨버린 뒤 우리 레이어만 다시 그림
+            try {
+                if (typeof hideAllPointLayersOnMap === 'function') hideAllPointLayersOnMap();
+            } catch (e) {
+                console.warn('[filter] hideAllPointLayersOnMap error:', e);
+            }
+
+            if (!ensureStopsLayer()) return;
+
+            const rid = String(routeId || '').trim();
+            if (!rid) return;
+
+            console.log('[filter] routeId=', rid);
+
+            // ✅ 우리 stops 레이어는 무조건 보이게
+            try {
+                if (stopsVectorLayer) stopsVectorLayer.setVisible(true);
+                if (filteredStopsLayer) filteredStopsLayer.setVisible(false);
+            } catch (e) {}
+
+            // ✅ 1) 기존(우리 레이어) 정류장 전부 제거
+            clearStopsOnMap();
+
+            $http
+                .get('/api/bus/routePath', { params: { cityCode: CITY_CODE, routeId: rid } })
+                .then(function (res) {
+                    // ✅ items 추출: extractRoutePathItems 실패 대비 fallback
+                    let items = [];
+                    try {
+                        items = (typeof extractRoutePathItems === 'function' && extractRoutePathItems(res)) || [];
+                    } catch (e) {
+                        items = [];
+                    }
+
+                    // fallback: 흔한 응답 구조들
+                    if (!items.length) {
+                        const d = res && res.data;
+                        if (Array.isArray(d)) items = d;
+                        else if (d && Array.isArray(d.items)) items = d.items;
+                        else if (d && Array.isArray(d.item)) items = d.item;
+                        else if (d && d.response && d.response.body && Array.isArray(d.response.body.items)) items = d.response.body.items;
+                        else if (d && d.response && d.response.body && d.response.body.items && Array.isArray(d.response.body.items.item)) items = d.response.body.items.item;
+                    }
+
+                    console.log('[filter] routePath items =', items.length);
+
+                    if (!items.length) {
+                        console.warn('[filter] routePath empty or extract failed', res && res.data);
+                        return;
+                    }
+
+                    function getLon(it) {
+                        return Number(it.gpslong ?? it.gpsLong ?? it.lon ?? it.lng ?? it.gpsX);
+                    }
+                    function getLat(it) {
+                        return Number(it.gpslati ?? it.gpsLati ?? it.lat ?? it.gpsY);
+                    }
+                    function getId(it) {
+                        return String(it.nodeid || it.nodeId || it.node_id || it.node || '').trim();
+                    }
+                    function getName(it) {
+                        return String(it.nodenm || it.nodeNm || it.name || '').trim();
+                    }
+
+                    // ✅ 2) routePath 정류장만 지도에 다시 찍기
+                    let drawn = 0;
+
+                    for (let i = 0; i < items.length; i++) {
+                        const it = items[i] || {};
+                        const nid = getId(it);
+                        if (!nid) continue;
+
+                        const lon = getLon(it);
+                        const lat = getLat(it);
+
+                        // 좌표가 없으면 그릴 수 없음
+                        if (!isFinite(lon) || !isFinite(lat)) continue;
+
+                        const nm = getName(it);
+
+                        let kind = 'MID';
+                        if (i === 0) kind = 'FROM';
+                        else if (i === items.length - 1) kind = 'TO';
+
+                        let color = 'rgba(59,130,246,0.95)'; // 중간: 파랑
+                        let label = '';
+
+                        if (kind === 'FROM') {
+                            color = 'rgba(239,68,68,0.95)'; // 출발: 빨강
+                            label = nm || nid || '출발';
+                        } else if (kind === 'TO') {
+                            color = 'rgba(34,197,94,0.95)'; // 도착: 초록
+                            label = nm || nid || '도착';
+                        }
+
+                        // ✅ stopId(nodeId) 전달
+                        drawStopMarker(lon, lat, color, label, kind, nid);
+                        drawn++;
+                    }
+
+                    console.log('[filter] drawn stops =', drawn);
+
+                    if (drawn === 0) {
+                        console.warn('[filter] drawn=0 -> routePath에 좌표가 없거나 필드명이 다름');
+                        console.log('[filter] sample item:', items[0]);
+                        return;
+                    }
+
+                    // ✅ 3) 정류장 범위로 자동 확대
+                    const map = getInnerOlMap();
+                    if (map && stopsVectorSource) {
+                        const extent = stopsVectorSource.getExtent();
+                        if (extent && isFinite(extent[0])) {
+                            map.getView().fit(extent, { padding: [70, 70, 70, 70], duration: 250 });
+                        } else {
+                            console.warn('[filter] extent invalid', extent);
+                        }
+                    }
+
+                    console.log('[filter] done: only route stops are shown');
+                })
+                .catch(function (err) {
+                    console.error('[filter] routePath error', err);
+                });
+        }
+
+        function clearRouteStopFilter() {
+            if (!ensureStopsLayer()) return;
+            if (filteredStopsSource) filteredStopsSource.clear(true);
+            if (filteredStopsLayer) filteredStopsLayer.setVisible(false);
+            if (stopsVectorLayer) stopsVectorLayer.setVisible(true);
         }
 
         function drawStopsFromServer(stops, fromStopId, toStopId) {
@@ -5256,15 +5973,20 @@
 
             for (let i = 0; i < stops.length; i++) {
                 const s = stops[i] || {};
-                const stopId = String(s.stopId || '').trim();
-                const name = String(s.name || '').trim();
-                const lat = Number(s.lat);
-                const lon = Number(s.lon);
+
+                // ✅ 핵심: nodeId/stopId 필드명 변형 흡수
+                const stopId = String(s.nodeId || s.nodeid || s.node_id || s.stopId || s.stopid || s.id || '').trim();
+
+                const name = String(s.name || s.stopNm || s.nodenm || '').trim();
+                const lat = Number(s.lat ?? s.gpslati);
+                const lon = Number(s.lon ?? s.gpslong);
+
+                if (!stopId) continue; // ✅ id 없으면 필터 불가
                 if (!isFinite(lat) || !isFinite(lon)) continue;
 
                 let kind = 'MID';
-                if (stopId && fromId && stopId === fromId) kind = 'FROM';
-                else if (stopId && toId && stopId === toId) kind = 'TO';
+                if (fromId && stopId === fromId) kind = 'FROM';
+                else if (toId && stopId === toId) kind = 'TO';
                 else if (i === 0) kind = 'FROM';
                 else if (i === stops.length - 1) kind = 'TO';
 
@@ -5279,7 +6001,8 @@
                     label = name || stopId || '도착';
                 }
 
-                drawStopMarker(lon, lat, color, label, kind);
+                // ✅ 핵심: 마지막 인자로 stopId(nodeId)를 넘겨서 인덱싱되게 해야 함
+                drawStopMarker(lon, lat, color, label, kind, stopId);
             }
 
             const map = getInnerOlMap();
@@ -5318,18 +6041,21 @@
                     updateWhileInteracting: true,
                     declutter: false,
                 });
+
+                // ✅ 추가: tag
+                try {
+                    walkVectorLayer.set('tag', 'walk');
+                } catch (e) {}
+
                 map.addLayer(walkVectorLayer);
             } else {
-                // 꼬임 방지: source/style 강제
                 if (walkVectorLayer.getSource && walkVectorLayer.getSource() !== walkVectorSource) {
                     walkVectorLayer.setSource(walkVectorSource);
                 }
                 walkVectorLayer.setStyle(WALK_STYLE);
             }
 
-            // ✅ 최상단
             walkVectorLayer.setZIndex(9999);
-
             return true;
         }
 
@@ -5550,12 +6276,55 @@
 
         // =========================================================
         // ✅✅✅ [REAL] findShortestPath: 데모 하드코딩 제거 → API 호출
+        // (ES5 안전버전: ??, let/const, =>, optional chaining 제거)
         // =========================================================
         $scope.findShortestPath = function () {
+            // =========================
+            // ✅ 공통 안전 유틸
+            // =========================
+            function safeSetPathStatus(level, msg) {
+                try {
+                    if (typeof setPathStatus === 'function') return setPathStatus(level, msg);
+                    console.log('[PathStatus][' + level + ']', msg);
+                } catch (e) {
+                    console.log('[PathStatus][' + level + ']', msg);
+                }
+            }
+
+            function safeClearAll() {
+                try {
+                    if (typeof clearPathOnMap === 'function') clearPathOnMap();
+                } catch (e) {}
+                try {
+                    if (typeof clearStopsOnMap === 'function') clearStopsOnMap();
+                } catch (e) {}
+                try {
+                    if (typeof clearWalkOnMap === 'function') clearWalkOnMap();
+                } catch (e) {}
+            }
+
+            // =========================
             // ✅ 서버 필드명 변형 흡수 + fallback 계산용 헬퍼들
+            // =========================
             function pickTransfersCount(r) {
-                const v = (r && (r.transfersCount ?? r.transferCount ?? r.transferCnt ?? r.transCnt ?? r.transfers ?? r.transfer)) ?? 0;
-                const n = Number(v);
+                if (!r) return 0;
+
+                var v =
+                    r.transfersCount != null
+                        ? r.transfersCount
+                        : r.transferCount != null
+                        ? r.transferCount
+                        : r.transferCnt != null
+                        ? r.transferCnt
+                        : r.transCnt != null
+                        ? r.transCnt
+                        : r.transfers != null
+                        ? r.transfers
+                        : r.transfer != null
+                        ? r.transfer
+                        : 0;
+
+                var n = Number(v);
                 return isFinite(n) ? n : 0;
             }
 
@@ -5563,14 +6332,16 @@
                 if (!Array.isArray(pathArr) || pathArr.length < 2) return 0;
 
                 function pickMode(x) {
-                    return String((x && (x.mode ?? x.kind ?? x.type ?? x.vehicle ?? x.edgeType ?? x.transitType ?? '')) || '').toUpperCase();
+                    var v = x && (x.mode != null ? x.mode : x.kind != null ? x.kind : x.type != null ? x.type : x.vehicle != null ? x.vehicle : x.edgeType != null ? x.edgeType : x.transitType != null ? x.transitType : '');
+
+                    return String(v || '').toUpperCase();
                 }
 
-                let prev = pickMode(pathArr[0]);
-                let transfers = 0;
+                var prev = pickMode(pathArr[0]);
+                var transfers = 0;
 
-                for (let i = 1; i < pathArr.length; i++) {
-                    const cur = pickMode(pathArr[i]);
+                for (var i = 1; i < pathArr.length; i++) {
+                    var cur = pickMode(pathArr[i]);
                     if (cur && prev && cur !== prev) transfers++;
                     if (cur) prev = cur;
                 }
@@ -5579,48 +6350,59 @@
 
             // ✅ 두 좌표(lon/lat) 사이 거리(m)
             function distanceMeters(lon1, lat1, lon2, lat2) {
-                const R = 6371000;
-                const toRad = (d) => (d * Math.PI) / 180;
-                const dLat = toRad(lat2 - lat1);
-                const dLon = toRad(lon2 - lon1);
-                const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                var R = 6371000;
+                function toRad(d) {
+                    return (d * Math.PI) / 180;
+                }
+
+                var dLat = toRad(lat2 - lat1);
+                var dLon = toRad(lon2 - lon1);
+
+                var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+                var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
                 return R * c;
             }
 
-            // ✅ 도보시간 계산용 m/s
-            const WALK_SPEED_MPS = 1.25;
-
-            // ✅ TRAM 속도(m/s) - 필요하면 조절
-            const TRAM_SPEED_MPS = 6.94; // 약 25km/h
+            // ✅ 도보/트램 속도
+            var WALK_SPEED_MPS = 1.25;
+            var TRAM_SPEED_MPS = 6.94; // 약 25km/h
 
             // =========================================================
             // ✅ TRAM 전용: "노선 순서" 기반 그래프 (TRAM_ROUTE_FULL_HD) + 다익스트라
             // =========================================================
             function pickStopId(s) {
-                return String(s && (s.stopId ?? s.stop_id ?? s.nodeid ?? s.nodeId ?? s.id ?? '')).trim();
+                if (!s) return '';
+                var v = s.stopId != null ? s.stopId : s.stop_id != null ? s.stop_id : s.nodeid != null ? s.nodeid : s.nodeId != null ? s.nodeId : s.id != null ? s.id : '';
+                return String(v || '').trim();
             }
+
             function pickStopName(s) {
-                return String(s && (s.name ?? s.nodenm ?? s.nodeNm ?? '')).trim();
+                if (!s) return '';
+                var v = s.name != null ? s.name : s.nodenm != null ? s.nodenm : s.nodeNm != null ? s.nodeNm : '';
+                return String(v || '').trim();
             }
+
             function pickLonLat(s) {
-                const lon = Number(s && (s.lon ?? s.gpslong ?? s.gpsLong ?? s.lng));
-                const lat = Number(s && (s.lat ?? s.gpslati ?? s.gpsLat));
+                if (!s) return null;
+                var lon = Number(s.lon != null ? s.lon : s.gpslong != null ? s.gpslong : s.gpsLong != null ? s.gpsLong : s.lng != null ? s.lng : undefined);
+                var lat = Number(s.lat != null ? s.lat : s.gpslati != null ? s.gpslati : s.gpsLat != null ? s.gpsLat : undefined);
+
                 if (!isFinite(lon) || !isFinite(lat)) return null;
                 return [lon, lat];
             }
 
             // ✅ stopId -> {lon,lat,name} 맵 만들기 (TRAM_STOPS + TRAM_ROUTE_FULL_HD로 보강)
             function buildTramStopInfoMap() {
-                const m = {};
+                var m = {};
 
                 // 1) TRAM_STOPS 우선
-                const arr = window.TRAM_STOPS || window.tramStops || [];
+                var arr = window.TRAM_STOPS || window.tramStops || [];
                 if (Array.isArray(arr)) {
                     arr.forEach(function (s) {
-                        const id = pickStopId(s);
-                        const ll = pickLonLat(s);
-                        const name = pickStopName(s);
+                        var id = pickStopId(s);
+                        var ll = pickLonLat(s);
+                        var name = pickStopName(s);
                         if (id && ll) {
                             m[id] = { id: id, lon: ll[0], lat: ll[1], name: name || id };
                         }
@@ -5628,16 +6410,16 @@
                 }
 
                 // 2) TRAM_ROUTE_FULL_HD로 보강
-                const raw = window.TRAM_ROUTE_FULL_HD || [];
+                var raw = window.TRAM_ROUTE_FULL_HD || [];
                 if (Array.isArray(raw)) {
                     raw.forEach(function (p) {
                         if (!p || p.type !== 'station') return;
-                        const id = String(p.id ?? p.stopId ?? '').trim();
+                        var id = String((p.id != null ? p.id : p.stopId != null ? p.stopId : '') || '').trim();
                         if (!id) return;
 
-                        const lon = Number(p.lon ?? p.lng);
-                        const lat = Number(p.lat);
-                        const name = String(p.name || '').trim();
+                        var lon = Number(p.lon != null ? p.lon : p.lng);
+                        var lat = Number(p.lat);
+                        var name = String(p.name || '').trim();
 
                         if ((!m[id] || !isFinite(m[id].lon) || !isFinite(m[id].lat)) && isFinite(lon) && isFinite(lat)) {
                             m[id] = { id: id, lon: lon, lat: lat, name: name || id };
@@ -5650,14 +6432,14 @@
 
             // ✅ TRAM_ROUTE_FULL_HD에서 station id 순서 뽑기 (중복 제거)
             function getTramStationSequence() {
-                const raw = window.TRAM_ROUTE_FULL_HD || [];
-                const seq = [];
+                var raw = window.TRAM_ROUTE_FULL_HD || [];
+                var seq = [];
                 if (!Array.isArray(raw)) return seq;
 
-                for (let i = 0; i < raw.length; i++) {
-                    const p = raw[i];
+                for (var i = 0; i < raw.length; i++) {
+                    var p = raw[i];
                     if (!p || p.type !== 'station') continue;
-                    const id = String(p.id ?? p.stopId ?? '').trim();
+                    var id = String((p.id != null ? p.id : p.stopId != null ? p.stopId : '') || '').trim();
                     if (!id) continue;
                     if (seq.length && seq[seq.length - 1] === id) continue;
                     seq.push(id);
@@ -5667,9 +6449,9 @@
 
             // ✅ 노선 순서 기반 그래프 만들기(양방향)
             function buildTramGraphFromRoute() {
-                const stopMap = buildTramStopInfoMap();
-                const seq = getTramStationSequence();
-                const graph = {}; // id -> [{to, distM, timeS}]
+                var stopMap = buildTramStopInfoMap();
+                var seq = getTramStationSequence();
+                var graph = {}; // id -> [{to, distM, timeS}]
 
                 function addEdge(a, b, distM, timeS) {
                     if (!graph[a]) graph[a] = [];
@@ -5678,15 +6460,15 @@
 
                 if (seq.length < 2) return { graph: graph, stopMap: stopMap, seq: seq };
 
-                for (let i = 0; i < seq.length - 1; i++) {
-                    const aId = seq[i];
-                    const bId = seq[i + 1];
-                    const A = stopMap[aId];
-                    const B = stopMap[bId];
+                for (var i = 0; i < seq.length - 1; i++) {
+                    var aId = seq[i];
+                    var bId = seq[i + 1];
+                    var A = stopMap[aId];
+                    var B = stopMap[bId];
                     if (!A || !B) continue;
 
-                    const distM = distanceMeters(A.lon, A.lat, B.lon, B.lat);
-                    const timeS = Math.max(1, Math.round(distM / TRAM_SPEED_MPS));
+                    var distM = distanceMeters(A.lon, A.lat, B.lon, B.lat);
+                    var timeS = Math.max(1, Math.round(distM / TRAM_SPEED_MPS));
 
                     addEdge(aId, bId, distM, timeS);
                     addEdge(bId, aId, distM, timeS);
@@ -5696,10 +6478,10 @@
             }
 
             function dijkstra(graph, startId, endId, weightKey /* 'DIST'|'TIME' */) {
-                const dist = {};
-                const prev = {};
-                const visited = {};
-                const pq = [];
+                var dist = {};
+                var prev = {};
+                var visited = {};
+                var pq = [];
 
                 function costOfEdge(e) {
                     return weightKey === 'TIME' ? Number(e.timeS || 0) : Number(e.distM || 0);
@@ -5709,21 +6491,23 @@
                 pq.push({ id: startId, d: 0 });
 
                 while (pq.length) {
-                    pq.sort((a, b) => a.d - b.d);
-                    const cur = pq.shift();
-                    const u = cur.id;
+                    pq.sort(function (a, b) {
+                        return a.d - b.d;
+                    });
+                    var cur = pq.shift();
+                    var u = cur.id;
                     if (visited[u]) continue;
                     visited[u] = true;
 
                     if (u === endId) break;
 
-                    const edges = graph[u] || [];
-                    for (let i = 0; i < edges.length; i++) {
-                        const e = edges[i];
-                        const v = e && e.to;
+                    var edges = graph[u] || [];
+                    for (var i = 0; i < edges.length; i++) {
+                        var e = edges[i];
+                        var v = e && e.to;
                         if (!v) continue;
 
-                        const nd = (dist[u] || 0) + costOfEdge(e);
+                        var nd = (dist[u] || 0) + costOfEdge(e);
                         if (dist[v] == null || nd < dist[v]) {
                             dist[v] = nd;
                             prev[v] = { from: u, edge: e };
@@ -5734,14 +6518,14 @@
 
                 if (dist[endId] == null) return null;
 
-                const nodes = [];
-                let cur = endId;
-                nodes.push(cur);
-                while (cur !== startId) {
-                    const p = prev[cur];
+                var nodes = [];
+                var curId = endId;
+                nodes.push(curId);
+                while (curId !== startId) {
+                    var p = prev[curId];
                     if (!p) break;
-                    cur = p.from;
-                    nodes.push(cur);
+                    curId = p.from;
+                    nodes.push(curId);
                 }
                 nodes.reverse();
 
@@ -5749,10 +6533,10 @@
             }
 
             function buildTramResponse(fromId, toId, weightKey) {
-                const built = buildTramGraphFromRoute();
-                const graph = built.graph || {};
-                const stopMap = built.stopMap || {};
-                const seq = built.seq || [];
+                var built = buildTramGraphFromRoute();
+                var graph = built.graph || {};
+                var stopMap = built.stopMap || {};
+                var seq = built.seq || [];
 
                 if (!seq.length) {
                     return { found: false, message: 'TRAM_ROUTE_FULL_HD(station 순서) 데이터가 없습니다. tram-data.js 확인 필요' };
@@ -5762,20 +6546,20 @@
                     return { found: false, message: '트램 출발/도착 stopId가 stopMap(TRAM_STOPS/TRAM_ROUTE_FULL_HD)에 없습니다. (ID 확인 필요)' };
                 }
 
-                const res = dijkstra(graph, fromId, toId, weightKey);
+                var res = dijkstra(graph, fromId, toId, weightKey);
                 if (!res || !Array.isArray(res.nodes) || res.nodes.length < 2) {
                     return { found: false, message: '경로를 찾지 못했습니다. (트램 엣지 연결 부족 / 노선 순서 확인 필요)' };
                 }
 
-                let totalDistM = 0;
-                let totalTimeS = 0;
-                const polyline = [];
-                const stops = [];
-                const path = [];
+                var totalDistM = 0;
+                var totalTimeS = 0;
+                var polyline = [];
+                var stops = [];
+                var path = [];
 
-                for (let i = 0; i < res.nodes.length; i++) {
-                    const id = res.nodes[i];
-                    const s = stopMap[id];
+                for (var i = 0; i < res.nodes.length; i++) {
+                    var id = res.nodes[i];
+                    var s = stopMap[id];
 
                     if (s && isFinite(s.lon) && isFinite(s.lat)) {
                         polyline.push({ lon: s.lon, lat: s.lat });
@@ -5791,10 +6575,10 @@
                     });
 
                     if (i > 0) {
-                        const p = res.prev[id];
-                        if (p && p.edge) {
-                            totalDistM += Number(p.edge.distM || 0);
-                            totalTimeS += Number(p.edge.timeS || 0);
+                        var pp = res.prev[id];
+                        if (pp && pp.edge) {
+                            totalDistM += Number(pp.edge.distM || 0);
+                            totalTimeS += Number(pp.edge.timeS || 0);
                         }
                         path.push({ mode: 'TRAM', from: res.nodes[i - 1], to: id });
                     } else {
@@ -5815,39 +6599,44 @@
                 };
             }
 
-            // =========================================================
-            // ✅ MIXED 모드: r.path + r.stops 기반으로 (BUS=파랑, TRAM=핑크, WALK=검정 점선)
-            // - drawMixedSegmentsFromResult(r)가 "전역"에 이미 있다고 가정
-            //   (네가 전에 넣은 MIXED 레이어/함수 세트)
-            // =========================================================
-
+            // =========================
+            // ✅ 본 실행부
+            // =========================
             try {
                 $scope.pathResult = null;
 
                 // ✅ 지도 싹 초기화
-                clearPathOnMap();
-                if (typeof clearStopsOnMap === 'function') clearStopsOnMap();
-                if (typeof clearWalkOnMap === 'function') clearWalkOnMap();
+                safeClearAll();
 
-                // ✅ 선택이 raw로 들어왔을 가능성 방어
-                if ($scope.path.from && !$scope.path.from.stopId) $scope.path.from = normalizeStop($scope.path.from);
-                if ($scope.path.to && !$scope.path.to.stopId) $scope.path.to = normalizeStop($scope.path.to);
+                // ✅✅✅ (핵심 수정 1) path 객체 보장
+                if (!$scope.path) $scope.path = {};
 
-                if (!$scope.path.from || !$scope.path.to) {
-                    return setPathStatus('error', '출발/도착을 각각 선택해야 합니다.');
+                // ✅ 선택이 raw로 들어왔을 가능성 방어 (있을 때만)
+                if ($scope.path.from && !$scope.path.from.stopId && typeof normalizeStop === 'function') {
+                    $scope.path.from = normalizeStop($scope.path.from);
+                }
+                if ($scope.path.to && !$scope.path.to.stopId && typeof normalizeStop === 'function') {
+                    $scope.path.to = normalizeStop($scope.path.to);
                 }
 
-                if (!$scope.path.fromNodeId) $scope.path.fromNodeId = String($scope.path.from.stopId || '').trim();
-                if (!$scope.path.toNodeId) $scope.path.toNodeId = String($scope.path.to.stopId || '').trim();
+                // ✅✅✅ (핵심 수정 2) from/to 객체 없어도 nodeId만 있으면 진행
+                // - 프로젝트마다 fromStopId/toStopId 또는 fromId/toId로 저장한 경우를 흡수
+                if (!$scope.path.fromNodeId) {
+                    $scope.path.fromNodeId = String(($scope.path.from && $scope.path.from.stopId) || $scope.path.fromStopId || $scope.path.fromId || '').trim();
+                }
+                if (!$scope.path.toNodeId) {
+                    $scope.path.toNodeId = String(($scope.path.to && $scope.path.to.stopId) || $scope.path.toStopId || $scope.path.toId || '').trim();
+                }
 
+                // ✅ nodeId 기준으로만 검증
                 if (!($scope.path.fromNodeId && $scope.path.toNodeId)) {
-                    return setPathStatus('error', '출발/도착 nodeId가 비어있습니다. 후보를 다시 선택해 주세요.');
+                    return safeSetPathStatus('error', '출발/도착 nodeId가 비어있습니다. 후보를 다시 선택해 주세요.');
                 }
 
                 $scope.pathLoading = true;
-                setPathStatus('info', '최단경로 계산 중...(실제 계산)');
+                safeSetPathStatus('info', '최단경로 계산 중...(실제 계산)');
 
-                const params = {
+                var params = {
                     cityCode: CITY_CODE,
                     fromStopId: $scope.path.fromNodeId,
                     toStopId: $scope.path.toNodeId,
@@ -5856,22 +6645,32 @@
                 };
 
                 // ✅ TRAM이면 프론트 계산(buildTramResponse), BUS/MIXED는 서버 호출
-                const promise = String(params.mode).toUpperCase() === 'TRAM' ? $q.when({ data: buildTramResponse(params.fromStopId, params.toStopId, params.weight) }) : fetchShortestPathReal(params);
+                var promise;
+                if (String(params.mode).toUpperCase() === 'TRAM') {
+                    promise = $q.when({ data: buildTramResponse(params.fromStopId, params.toStopId, params.weight) });
+                } else {
+                    if (typeof fetchShortestPathReal !== 'function') {
+                        $scope.pathLoading = false;
+                        return safeSetPathStatus('error', 'fetchShortestPathReal 함수가 없습니다. (서버 최단경로 호출 함수 확인 필요)');
+                    }
+                    promise = fetchShortestPathReal(params);
+                }
 
-                return promise
-                    .then(function (res) {
-                        const r = res && res.data ? res.data : res || {};
+                function endLoading() {
+                    $scope.pathLoading = false;
+                }
+
+                return promise.then(
+                    function (res) {
+                        var r = res && res.data ? res.data : res || {};
                         console.log('[shortestPath raw]', r);
 
-                        // ✅✅✅ [핵심] 최종 모드 결정 (서버 응답 mode 우선, 없으면 params.mode)
-                        const modeUpper = String((r && (r.mode ?? r.kind ?? r.type)) || params.mode || '').toUpperCase();
-                        const isMixed = modeUpper === 'MIXED';
+                        var modeUpper = String((r && (r.mode != null ? r.mode : r.kind != null ? r.kind : r.type != null ? r.type : '')) || params.mode || '').toUpperCase();
 
-                        // ✅ 실패 처리
-                        if (r.found === false) {
-                            clearPathOnMap();
-                            if (typeof clearStopsOnMap === 'function') clearStopsOnMap();
-                            if (typeof clearWalkOnMap === 'function') clearWalkOnMap();
+                        var isMixed = modeUpper === 'MIXED';
+
+                        if (r && r.found === false) {
+                            safeClearAll();
 
                             $scope.pathResult = {
                                 found: false,
@@ -5883,33 +6682,34 @@
                                 stopIds: [],
                                 path: [],
                             };
-                            return setPathStatus('error', r.message || '경로를 찾지 못했습니다.');
+
+                            safeSetPathStatus('error', r.message || '경로를 찾지 못했습니다.');
+                            endLoading();
+                            return;
                         }
 
-                        const stopIds = Array.isArray(r.stopIds) ? r.stopIds : [];
-                        const pathArr = Array.isArray(r.path) ? r.path : [];
+                        var stopIds = Array.isArray(r.stopIds) ? r.stopIds : [];
+                        var pathArr = Array.isArray(r.path) ? r.path : [];
 
-                        const serverTransfers = pickTransfersCount(r);
-                        const computedTransfers = computeTransfersFromPath(pathArr);
-                        const finalTransfers = (serverTransfers > 0 ? serverTransfers : computedTransfers) || 0;
+                        var serverTransfers = pickTransfersCount(r);
+                        var computedTransfers = computeTransfersFromPath(pathArr);
+                        var finalTransfers = (serverTransfers > 0 ? serverTransfers : computedTransfers) || 0;
 
-                        // ✅ polyline 좌표 준비 (단일 BUS/TRAM에서 사용)
-                        let coordsLonLat = [];
+                        var coordsLonLat = [];
                         if (Array.isArray(r.polyline) && r.polyline.length >= 2) {
                             coordsLonLat = r.polyline
                                 .map(function (p) {
-                                    const lon = Number(p.lon);
-                                    const lat = Number(p.lat);
+                                    var lon = Number(p && p.lon);
+                                    var lat = Number(p && p.lat);
                                     return [lon, lat];
                                 })
                                 .filter(function (c) {
-                                    return isFinite(c[0]) && isFinite(c[1]);
+                                    return c && isFinite(c[0]) && isFinite(c[1]);
                                 });
                         }
 
-                        // ✅ 도보시간 계산 (출발->첫점, 마지막점->도착)
-                        let walkDistM = 0;
-                        let walkTimeS = 0;
+                        var walkDistM = 0;
+                        var walkTimeS = 0;
 
                         (function computeWalkFromEnds() {
                             if (!Array.isArray(coordsLonLat) || coordsLonLat.length < 2) {
@@ -5918,32 +6718,36 @@
                                 return;
                             }
 
-                            const first = coordsLonLat[0];
-                            const last = coordsLonLat[coordsLonLat.length - 1];
+                            var first = coordsLonLat[0];
+                            var last = coordsLonLat[coordsLonLat.length - 1];
 
-                            let fLon, fLat, tLon, tLat;
+                            var fLon, fLat, tLon, tLat;
 
                             if (Array.isArray(r.stops) && r.stops.length >= 2) {
-                                const s0 = r.stops[0];
-                                const sN = r.stops[r.stops.length - 1];
-                                fLon = Number(s0 && (s0.lon ?? s0.gpslong ?? s0.gpsLong));
-                                fLat = Number(s0 && (s0.lat ?? s0.gpslati ?? s0.gpsLat));
-                                tLon = Number(sN && (sN.lon ?? sN.gpslong ?? sN.gpsLong));
-                                tLat = Number(sN && (sN.lat ?? sN.gpslati ?? sN.gpsLat));
+                                var s0 = r.stops[0];
+                                var sN = r.stops[r.stops.length - 1];
+
+                                fLon = Number(s0 && (s0.lon != null ? s0.lon : s0.gpslong != null ? s0.gpslong : s0.gpsLong));
+                                fLat = Number(s0 && (s0.lat != null ? s0.lat : s0.gpslati != null ? s0.gpslati : s0.gpsLat));
+                                tLon = Number(sN && (sN.lon != null ? sN.lon : sN.gpslong != null ? sN.gpslong : sN.gpsLong));
+                                tLat = Number(sN && (sN.lat != null ? sN.lat : sN.gpslati != null ? sN.gpslati : sN.gpsLat));
                             } else {
-                                fLat = Number($scope.path.from.gpslati || $scope.path.from.gpsLat || $scope.path.from.lat);
-                                fLon = Number($scope.path.from.gpslong || $scope.path.from.gpsLong || $scope.path.from.lon);
-                                tLat = Number($scope.path.to.gpslati || $scope.path.to.gpsLat || $scope.path.to.lat);
-                                tLon = Number($scope.path.to.gpslong || $scope.path.to.gpsLong || $scope.path.to.lon);
+                                // from/to 객체 없을 수 있으니 방어
+                                var fromObj = $scope.path.from || {};
+                                var toObj = $scope.path.to || {};
+                                fLat = Number(fromObj.gpslati || fromObj.gpsLat || fromObj.lat);
+                                fLon = Number(fromObj.gpslong || fromObj.gpsLong || fromObj.lon);
+                                tLat = Number(toObj.gpslati || toObj.gpsLat || toObj.lat);
+                                tLon = Number(toObj.gpslong || toObj.gpsLong || toObj.lon);
                             }
 
                             if (isFinite(fLon) && isFinite(fLat) && first && isFinite(first[0]) && isFinite(first[1])) {
-                                const d1 = distanceMeters(fLon, fLat, first[0], first[1]);
+                                var d1 = distanceMeters(fLon, fLat, first[0], first[1]);
                                 if (d1 >= 5) walkDistM += d1;
                             }
 
                             if (isFinite(tLon) && isFinite(tLat) && last && isFinite(last[0]) && isFinite(last[1])) {
-                                const d2 = distanceMeters(last[0], last[1], tLon, tLat);
+                                var d2 = distanceMeters(last[0], last[1], tLon, tLat);
                                 if (d2 >= 5) walkDistM += d2;
                             }
 
@@ -5955,7 +6759,7 @@
                         })();
 
                         $scope.pathResult = {
-                            found: r.found !== false,
+                            found: r && r.found !== false,
                             totalDistM: Number(r.totalDistM || 0),
                             totalTimeS: Number(r.totalTimeS || 0),
                             walkTimeS: walkTimeS,
@@ -5967,60 +6771,24 @@
 
                         // =========================================================
                         // ✅ 1) 경로 그리기
-                        // - MIXED면: BUS(파랑) + TRAM(핑크) + WALK(점선) 구간별 렌더
-                        // - BUS/TRAM 단일이면: drawPathPolylineLonLat(coordsLonLat, modeUpper)
                         // =========================================================
-                        let okDraw = false;
+                        var okDraw = false;
 
                         if (isMixed) {
                             if (typeof drawMixedSegmentsFromResult === 'function') {
-                                okDraw = drawMixedSegmentsFromResult(r);
+                                okDraw = !!drawMixedSegmentsFromResult(r);
                             } else {
                                 okDraw = false;
-                                console.warn('[MIXED] drawMixedSegmentsFromResult 함수가 없습니다. MIXED 레이어 코드가 먼저 필요합니다.');
-                            }
-
-                            // ✅ MIXED에서도 "출발/도착 ↔ 첫/마지막 점" 도보 점선은 유지(빈공간 보강)
-                            // (이미 drawMixedSegmentsFromResult가 처리해도, 이건 UX상 도움 됨)
-                            if (typeof drawWalkDashed === 'function' && Array.isArray(r.stops) && r.stops.length >= 2) {
-                                const s0 = r.stops[0];
-                                const sN = r.stops[r.stops.length - 1];
-
-                                const firstLon = Number(s0 && (s0.lon ?? s0.gpslong ?? s0.gpsLong));
-                                const firstLat = Number(s0 && (s0.lat ?? s0.gpslati ?? s0.gpsLat));
-                                const lastLon = Number(sN && (sN.lon ?? sN.gpslong ?? sN.gpsLong));
-                                const lastLat = Number(sN && (sN.lat ?? sN.gpslati ?? sN.gpsLat));
-
-                                const fLon = Number($scope.path.from.gpslong || $scope.path.from.gpsLong || $scope.path.from.lon);
-                                const fLat = Number($scope.path.from.gpslati || $scope.path.from.gpsLat || $scope.path.from.lat);
-                                const tLon = Number($scope.path.to.gpslong || $scope.path.to.gpsLong || $scope.path.to.lon);
-                                const tLat = Number($scope.path.to.gpslati || $scope.path.to.gpsLat || $scope.path.to.lat);
-
-                                if (isFinite(fLon) && isFinite(fLat) && isFinite(firstLon) && isFinite(firstLat)) {
-                                    const d1 = distanceMeters(fLon, fLat, firstLon, firstLat);
-                                    if (d1 >= 5)
-                                        drawWalkDashed([
-                                            [fLon, fLat],
-                                            [firstLon, firstLat],
-                                        ]);
-                                }
-                                if (isFinite(tLon) && isFinite(tLat) && isFinite(lastLon) && isFinite(lastLat)) {
-                                    const d2 = distanceMeters(lastLon, lastLat, tLon, tLat);
-                                    if (d2 >= 5)
-                                        drawWalkDashed([
-                                            [lastLon, lastLat],
-                                            [tLon, tLat],
-                                        ]);
-                                }
+                                console.warn('[MIXED] drawMixedSegmentsFromResult 함수가 없습니다.');
                             }
                         } else {
                             if (Array.isArray(coordsLonLat) && coordsLonLat.length >= 2) {
-                                okDraw = typeof drawPathPolylineLonLat === 'function' ? drawPathPolylineLonLat(coordsLonLat, modeUpper) : false;
+                                okDraw = typeof drawPathPolylineLonLat === 'function' ? !!drawPathPolylineLonLat(coordsLonLat, modeUpper) : false;
                             }
                         }
 
                         if (!okDraw) {
-                            setPathStatus('info', '경로 계산은 됐지만 지도에 경로를 그리지 못했습니다. (MIXED는 r.path/r.stops, 단일은 polyline 좌표 확인 필요)');
+                            safeSetPathStatus('info', '경로 계산은 됐지만 지도에 경로를 그리지 못했습니다. (polyline / MIXED 함수 확인)');
                         }
 
                         // =========================================================
@@ -6028,65 +6796,28 @@
                         // =========================================================
                         if (typeof drawStopsFromServer === 'function' && Array.isArray(r.stops) && r.stops.length) {
                             drawStopsFromServer(r.stops, $scope.path.fromNodeId, $scope.path.toNodeId);
-                        } else {
-                            if (typeof drawStopMarker === 'function') {
-                                const fLat = Number($scope.path.from.gpslati || $scope.path.from.gpsLat || $scope.path.from.lat);
-                                const fLon = Number($scope.path.from.gpslong || $scope.path.from.gpsLong || $scope.path.from.lon);
-                                const tLat = Number($scope.path.to.gpslati || $scope.path.to.gpsLat || $scope.path.to.lat);
-                                const tLon = Number($scope.path.to.gpslong || $scope.path.to.gpsLong || $scope.path.to.lon);
+                        } else if (typeof drawStopMarker === 'function') {
+                            var fromObj2 = $scope.path.from || {};
+                            var toObj2 = $scope.path.to || {};
 
-                                if (isFinite(fLat) && isFinite(fLon)) drawStopMarker(fLon, fLat, '#ef4444', '출발', 'FROM');
-                                if (isFinite(tLat) && isFinite(tLon)) drawStopMarker(tLon, tLat, '#22c55e', '도착', 'TO');
-                            }
+                            var fLat3 = Number(fromObj2.gpslati || fromObj2.gpsLat || fromObj2.lat);
+                            var fLon3 = Number(fromObj2.gpslong || fromObj2.gpsLong || fromObj2.lon);
+                            var tLat3 = Number(toObj2.gpslati || toObj2.gpsLat || toObj2.lat);
+                            var tLon3 = Number(toObj2.gpslong || toObj2.gpsLong || toObj2.lon);
+
+                            if (isFinite(fLat3) && isFinite(fLon3)) drawStopMarker(fLon3, fLat3, '#ef4444', '출발', 'FROM');
+                            if (isFinite(tLat3) && isFinite(tLon3)) drawStopMarker(tLon3, tLat3, '#22c55e', '도착', 'TO');
                         }
 
-                        // =========================================================
-                        // ✅ 3) 단일(BUS/TRAM)일 때만 "끝단 도보" 점선
-                        // (MIXED는 위에서 drawMixedSegmentsFromResult + 보강 점선 처리)
-                        // =========================================================
-                        if (!isMixed && typeof drawWalkDashed === 'function' && Array.isArray(coordsLonLat) && coordsLonLat.length >= 2) {
-                            const first = coordsLonLat[0];
-                            const last = coordsLonLat[coordsLonLat.length - 1];
+                        // 상태 문구 (from/to 없을 수 있으니 방어)
+                        var fromName =
+                            $scope.path && $scope.path.from && ($scope.path.from.name || $scope.path.from.nodenm || $scope.path.from.nodeNm)
+                                ? $scope.path.from.name || $scope.path.from.nodenm || $scope.path.from.nodeNm
+                                : $scope.path.fromNodeId || '-';
 
-                            let fLon, fLat, tLon, tLat;
+                        var toName = $scope.path && $scope.path.to && ($scope.path.to.name || $scope.path.to.nodenm || $scope.path.to.nodeNm) ? $scope.path.to.name || $scope.path.to.nodenm || $scope.path.to.nodeNm : $scope.path.toNodeId || '-';
 
-                            if (Array.isArray(r.stops) && r.stops.length >= 2) {
-                                const s0 = r.stops[0];
-                                const sN = r.stops[r.stops.length - 1];
-                                fLon = Number(s0 && s0.lon);
-                                fLat = Number(s0 && s0.lat);
-                                tLon = Number(sN && sN.lon);
-                                tLat = Number(sN && sN.lat);
-                            } else {
-                                fLat = Number($scope.path.from.gpslati || $scope.path.from.gpsLat || $scope.path.from.lat);
-                                fLon = Number($scope.path.from.gpslong || $scope.path.from.gpsLong || $scope.path.from.lon);
-                                tLat = Number($scope.path.to.gpslati || $scope.path.to.gpsLat || $scope.path.to.lat);
-                                tLon = Number($scope.path.to.gpslong || $scope.path.to.gpsLong || $scope.path.to.lon);
-                            }
-
-                            if (isFinite(fLon) && isFinite(fLat) && first && isFinite(first[0]) && isFinite(first[1])) {
-                                const d1 = distanceMeters(fLon, fLat, first[0], first[1]);
-                                if (d1 >= 5)
-                                    drawWalkDashed([
-                                        [fLon, fLat],
-                                        [first[0], first[1]],
-                                    ]);
-                            }
-
-                            if (isFinite(tLon) && isFinite(tLat) && last && isFinite(last[0]) && isFinite(last[1])) {
-                                const d2 = distanceMeters(last[0], last[1], tLon, tLat);
-                                if (d2 >= 5)
-                                    drawWalkDashed([
-                                        [last[0], last[1]],
-                                        [tLon, tLat],
-                                    ]);
-                            }
-                        }
-
-                        const fromName = $scope.path && $scope.path.from && ($scope.path.from.name || $scope.path.from.nodenm || $scope.path.from.nodeNm) ? $scope.path.from.name || $scope.path.from.nodenm || $scope.path.from.nodeNm : '-';
-                        const toName = $scope.path && $scope.path.to && ($scope.path.to.name || $scope.path.to.nodenm || $scope.path.to.nodeNm) ? $scope.path.to.name || $scope.path.to.nodenm || $scope.path.to.nodeNm : '-';
-
-                        setPathStatus(
+                        safeSetPathStatus(
                             'ok',
                             '최단경로 계산 완료: ' +
                                 fromName +
@@ -6096,61 +6827,92 @@
                                 modeUpper +
                                 ', 거리 ' +
                                 (($scope.pathResult && $scope.pathResult.totalDistM) || 0) +
-                                'm, 시간 ' +
+                                'm' +
+                                ', 시간 ' +
                                 (($scope.pathResult && $scope.pathResult.totalTimeS) || 0) +
-                                's, 도보 ' +
+                                's' +
+                                ', 도보 ' +
                                 (($scope.pathResult && $scope.pathResult.walkTimeS) || 0) +
-                                's, 환승 ' +
+                                's' +
+                                ', 환승 ' +
                                 finalTransfers +
                                 '회)'
                         );
-                    })
-                    .catch(function (err) {
+
+                        endLoading();
+                    },
+                    function (err) {
                         console.error('[findShortestPath] fail:', err);
-                        clearPathOnMap();
-                        if (typeof clearStopsOnMap === 'function') clearStopsOnMap();
-                        if (typeof clearWalkOnMap === 'function') clearWalkOnMap();
-                        setPathStatus('error', '최단경로 계산 실패: ' + (err && err.message ? err.message : '서버 오류'));
-                    })
-                    .finally(function () {
-                        $scope.pathLoading = false;
-                    });
+                        safeClearAll();
+                        safeSetPathStatus('error', '최단경로 계산 실패: ' + (err && err.message ? err.message : '서버 오류'));
+                        endLoading();
+                    }
+                );
             } catch (e) {
                 console.error(e);
-                clearPathOnMap();
-                if (typeof clearStopsOnMap === 'function') clearStopsOnMap();
-                if (typeof clearWalkOnMap === 'function') clearWalkOnMap();
+                safeClearAll();
                 $scope.pathLoading = false;
-                setPathStatus('error', '최단경로 계산 중 오류가 발생했습니다.');
+                safeSetPathStatus('error', '최단경로 계산 중 오류가 발생했습니다.');
             }
         };
 
         // =========================================================
+        // ✅ "경로만 보기" 모드
+        // - stops/walk/버스(포인트 대량 레이어)는 숨기고
+        // - path + (mixed line들)은 남긴다
+        // =========================================================
+        $scope.onlyPathMode = false;
+
+        function setOnlyPathVisible(onlyPath) {
+            var map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
+            if (!map || !map.getLayers) return;
+
+            var layers = map.getLayers().getArray ? map.getLayers().getArray() : [];
+            for (var i = 0; i < layers.length; i++) {
+                var ly = layers[i];
+                if (!ly || !ly.setVisible) continue;
+
+                var tag = ly.get && ly.get('tag') ? String(ly.get('tag')) : '';
+                tag = tag.toLowerCase();
+
+                if (onlyPath) {
+                    // ✅ stops/walk/bus는 숨기고 path만 남김
+                    if (tag === 'stops' || tag === 'walk' || tag === 'bus') ly.setVisible(false);
+                    if (tag === 'path') ly.setVisible(true);
+                } else {
+                    // ✅ 원복
+                    if (tag === 'stops' || tag === 'walk' || tag === 'bus' || tag === 'path') ly.setVisible(true);
+                }
+            }
+
+            // (옵션) 혹시 tag 안 달린 포인트 대량 레이어가 남아있으면 추가로 숨김
+            if (onlyPath) {
+                try {
+                    if (typeof hideAllPointLayersOnMap === 'function') hideAllPointLayersOnMap();
+                } catch (e) {}
+            }
+        }
 
         // =========================================================
-        // ✅ "경로로 이동하기"는 지금 코드 그대로 써도 됨 (pathPolylineFeature/Extent 사용)
+        // ✅ "경로로 이동하기" 버튼 동작 (fit + 경로만 보기)
         // =========================================================
-
-        // ✅ "경로로 이동하기" 버튼 동작
         $scope.goToPathOnMap = function () {
             try {
-                const map = getInnerOlMap();
+                var map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
                 if (!map) return;
 
-                const view = map.getView && map.getView();
+                var view = map.getView && map.getView();
                 if (!view || !view.fit) return;
 
-                // 1) extent가 있으면 그걸로 fit (가장 안전)
-                let ext = $scope.pathPolylineExtent;
+                var ext = $scope.pathPolylineExtent;
 
-                // 2) extent가 없고 feature가 있으면 geometry에서 뽑기
                 if (!ext && $scope.pathPolylineFeature) {
-                    const geom = $scope.pathPolylineFeature.getGeometry && $scope.pathPolylineFeature.getGeometry();
+                    var geom = $scope.pathPolylineFeature.getGeometry && $scope.pathPolylineFeature.getGeometry();
                     if (geom && geom.getExtent) ext = geom.getExtent();
                 }
 
                 if (!ext) {
-                    setPathStatus('error', '이동할 경로 범위를 찾지 못했습니다. (polyline/extent 없음)');
+                    if (typeof setPathStatus === 'function') setPathStatus('error', '이동할 경로 범위를 찾지 못했습니다. (polyline/extent 없음)');
                     return;
                 }
 
@@ -6160,15 +6922,19 @@
                     maxZoom: 17,
                 });
 
-                setPathStatus('ok', '지도 영역을 경로로 맞췄습니다.');
+                // ✅✅✅ 추가: 경로만 보기 모드 ON
+                $scope.onlyPathMode = true;
+                setOnlyPathVisible(true);
+
+                if (typeof setPathStatus === 'function') setPathStatus('ok', '지도 영역을 경로로 맞췄습니다. (경로만 표시)');
             } catch (e) {
                 console.error('[goToPathOnMap] fail:', e);
-                setPathStatus('error', '경로로 이동 중 오류가 발생했습니다.');
+                if (typeof setPathStatus === 'function') setPathStatus('error', '경로로 이동 중 오류가 발생했습니다.');
             }
         };
 
         // =========================================================
-        // ✅ clearPath에 "지도 경로 제거"도 포함
+        // ✅ clearPath에 "지도 경로 제거" + polyline 캐시 제거까지 포함 (ES5)
         // =========================================================
         $scope.clearPath = function () {
             $scope.path.fromCandidates = [];
@@ -6179,88 +6945,130 @@
             $scope.path.toNodeId = null;
             $scope.pathResult = null;
 
-            clearPathOnMap();
+            // ✅ 추가: 경로 이동용 캐시도 초기화
+            $scope.pathPolylineReady = false;
+            $scope.pathPolylineFeature = null;
+            $scope.pathPolylineExtent = null;
 
-            setPathStatus('', '경로를 지웠습니다.');
+            if (typeof clearPathOnMap === 'function') clearPathOnMap();
+
+            if (typeof setPathStatus === 'function') setPathStatus('', '경로를 지웠습니다.');
         };
 
         // =========================================================
-        // ✅ 사용자 미니 관리
+        // ✅ 사용자 미니 관리 (ES5 안전버전)
+        // - Set/Map 제거: plain object 인덱스 사용
         // =========================================================
-        function buildKeySet(obj) {
-            if (!obj) return new Set();
-            const cand = [obj.user_id, obj.userId, obj.id, obj.email, obj.username, obj.name].filter(Boolean).map((s) => String(s).trim().toLowerCase());
-            return new Set(cand);
+        function buildKeyList(obj) {
+            if (!obj) return [];
+
+            var cand = [obj.user_id, obj.userId, obj.id, obj.email, obj.username, obj.name];
+
+            var out = [];
+            for (var i = 0; i < cand.length; i++) {
+                if (!cand[i]) continue;
+                var k = String(cand[i]).trim().toLowerCase();
+                if (!k) continue;
+                out.push(k);
+            }
+            return out;
         }
 
         function makeRoleIndex(roleRows) {
-            const idx = new Map();
-            (roleRows || []).forEach((r) => buildKeySet(r).forEach((k) => idx.set(k, { role: r.role })));
+            // key(lowercase) -> { role: 'ROLE_ADMIN' ... }
+            var idx = {};
+            var rows = roleRows || [];
+            for (var i = 0; i < rows.length; i++) {
+                var r = rows[i];
+                var keys = buildKeyList(r);
+                for (var j = 0; j < keys.length; j++) {
+                    idx[keys[j]] = { role: r && r.role };
+                }
+            }
             return idx;
         }
 
         function attachRolesToUsers(users, roleIndex) {
-            (users || []).forEach((u) => {
-                let matched = null;
-                buildKeySet(u).forEach((k) => {
-                    if (!matched && roleIndex.has(k)) matched = roleIndex.get(k);
-                });
+            var list = users || [];
+            for (var i = 0; i < list.length; i++) {
+                var u = list[i];
+                var matched = null;
 
-                const role = matched ? matched.role : null;
+                var keys = buildKeyList(u);
+                for (var j = 0; j < keys.length; j++) {
+                    var k = keys[j];
+                    if (!matched && roleIndex && roleIndex[k]) matched = roleIndex[k];
+                }
+
+                var role = matched ? matched.role : null;
                 u._role = role;
-                u._isAdmin = !!(role && String(role).toUpperCase().includes('ADMIN'));
-                u.roleLabel = roleToLabel(role);
-                u.roleClass = roleToClass(role);
-            });
+                u._isAdmin = !!(role && String(role).toUpperCase().indexOf('ADMIN') >= 0);
+
+                // roleToLabel/roleToClass는 기존 함수 사용
+                u.roleLabel = typeof roleToLabel === 'function' ? roleToLabel(role) : role || '사용자';
+                u.roleClass = typeof roleToClass === 'function' ? roleToClass(role) : 'badge-user';
+            }
         }
 
         $scope.loadUsers = function () {
-            setUserStatus('info', '⏳ 사용자 목록을 불러오는 중...');
+            if (typeof setUserStatus === 'function') setUserStatus('info', '⏳ 사용자 목록을 불러오는 중...');
 
-            const usersP = $http.get('/user').then((res) => normalizeList(res.data));
-            const rolesP = $http
+            var usersP = $http.get('/user').then(function (res) {
+                return typeof normalizeList === 'function' ? normalizeList(res.data) : Array.isArray(res.data) ? res.data : [];
+            });
+
+            var rolesP = $http
                 .get('/api/roles')
-                .then((res) => (Array.isArray(res.data) ? res.data : []))
-                .catch(() => []);
+                .then(function (res) {
+                    return Array.isArray(res.data) ? res.data : [];
+                })
+                .catch(function () {
+                    return [];
+                });
 
             $q.all([usersP, rolesP])
                 .then(function (arr) {
-                    const users = arr[0];
-                    const roles = arr[1];
+                    var users = arr[0] || [];
+                    var roles = arr[1] || [];
                     attachRolesToUsers(users, makeRoleIndex(roles));
                     $scope.users = users;
-                    setUserStatus('success', '👤 사용자 ' + $scope.users.length + '명 불러왔습니다.', 1500);
+
+                    if (typeof setUserStatus === 'function') {
+                        setUserStatus('success', '👤 사용자 ' + ($scope.users.length || 0) + '명 불러왔습니다.', 1500);
+                    }
                 })
                 .catch(function () {
-                    setUserStatus('error', '❌ 사용자 목록을 불러오지 못했습니다.', 2500);
+                    if (typeof setUserStatus === 'function') setUserStatus('error', '❌ 사용자 목록을 불러오지 못했습니다.', 2500);
                 });
         };
 
         $scope.createUser = function () {
-            const name = ($scope.newUser.name || '').trim();
-            const email = ($scope.newUser.email || '').trim();
+            var name = ($scope.newUser && $scope.newUser.name ? $scope.newUser.name : '').trim();
+            var email = ($scope.newUser && $scope.newUser.email ? $scope.newUser.email : '').trim();
 
-            if (!name || !email) return setUserStatus('error', '이름과 이메일을 모두 입력하세요.', 2000);
-            if (!/^[^@\s]+@[^\s@]+\.[^\s@]+$/.test(email)) return setUserStatus('error', '이메일 형식이 올바르지 않습니다.', 2000);
+            if (!name || !email) return typeof setUserStatus === 'function' ? setUserStatus('error', '이름과 이메일을 모두 입력하세요.', 2000) : null;
+            if (!/^[^@\s]+@[^\s@]+\.[^\s@]+$/.test(email)) return typeof setUserStatus === 'function' ? setUserStatus('error', '이메일 형식이 올바르지 않습니다.', 2000) : null;
 
-            setUserStatus('info', '⏳ 사용자 추가 중...');
+            if (typeof setUserStatus === 'function') setUserStatus('info', '⏳ 사용자 추가 중...');
 
             $http
-                .post('/user', { name, email })
+                .post('/user', { name: name, email: email })
                 .then(function (res) {
-                    const created = res.data || {};
+                    var created = res.data || {};
                     created.roleLabel = '사용자';
                     created.roleClass = 'badge-user';
                     created._isAdmin = false;
 
+                    if (!$scope.users) $scope.users = [];
                     $scope.users.unshift(created);
+
                     $scope.newUser = { name: '', email: '' };
 
-                    const id = created.user_id || created.userId || created.id || '알 수 없음';
-                    setUserStatus('success', '✅ 추가 완료 (ID: ' + id + ')', 1500);
+                    var id = created.user_id || created.userId || created.id || '알 수 없음';
+                    if (typeof setUserStatus === 'function') setUserStatus('success', '✅ 추가 완료 (ID: ' + id + ')', 1500);
                 })
                 .catch(function () {
-                    setUserStatus('error', '❌ 사용자 추가에 실패했습니다.', 2500);
+                    if (typeof setUserStatus === 'function') setUserStatus('error', '❌ 사용자 추가에 실패했습니다.', 2500);
                 });
         };
 
@@ -6279,56 +7087,66 @@
         };
 
         $scope.saveEdit = function (u) {
-            const idKey = u && (u.user_id || u.userId || u.id);
-            if (!idKey) return setUserStatus('error', 'ID를 찾을 수 없어 수정할 수 없습니다.', 2000);
+            var idKey = u && (u.user_id || u.userId || u.id);
+            if (!idKey) return typeof setUserStatus === 'function' ? setUserStatus('error', 'ID를 찾을 수 없어 수정할 수 없습니다.', 2000) : null;
 
-            const payload = {};
-            const name = (u._editName || '').trim();
-            const phone = (u._editPhone || '').trim();
-            const email = (u._editEmail || '').trim();
+            var payload = {};
+            var name = (u._editName || '').trim();
+            var phone = (u._editPhone || '').trim();
+            var email = (u._editEmail || '').trim();
 
             if (name && name !== u.name) payload.name = name;
             if (phone && phone !== (u.phone || u.tel || u.phoneNumber)) payload.phone = phone;
             if (email && email !== u.email) {
-                if (!/^[^@\s]+@[^\s@]+\.[^\s@]+$/.test(email)) return setUserStatus('error', '이메일 형식이 올바르지 않습니다.', 2000);
+                if (!/^[^@\s]+@[^\s@]+\.[^\s@]+$/.test(email)) return typeof setUserStatus === 'function' ? setUserStatus('error', '이메일 형식이 올바르지 않습니다.', 2000) : null;
                 payload.email = email;
             }
 
             if (!Object.keys(payload).length) return $scope.cancelEdit(u);
 
-            setUserStatus('info', '⏳ 수정 중... (ID: ' + idKey + ')', 0);
+            if (typeof setUserStatus === 'function') setUserStatus('info', '⏳ 수정 중... (ID: ' + idKey + ')', 0);
 
             $http
                 .put('/user/' + encodeURIComponent(idKey), payload)
                 .then(function (res) {
-                    const updated = res.data || {};
+                    var updated = res.data || {};
 
-                    u.name = updated.name ?? name ?? u.name;
-                    u.phone = updated.phone ?? phone ?? u.phone;
-                    u.email = updated.email ?? email ?? u.email;
+                    // ✅ ES5: null/undefined만 fallback 처리
+                    u.name = updated.name != null ? updated.name : name ? name : u.name;
+                    u.phone = updated.phone != null ? updated.phone : phone ? phone : u.phone;
+                    u.email = updated.email != null ? updated.email : email ? email : u.email;
 
                     $scope.cancelEdit(u);
-                    setUserStatus('success', '✅ 수정 완료 (ID: ' + idKey + ')', 1500);
+                    if (typeof setUserStatus === 'function') setUserStatus('success', '✅ 수정 완료 (ID: ' + idKey + ')', 1500);
                 })
                 .catch(function () {
-                    setUserStatus('error', '❌ 수정에 실패했습니다.', 2500);
+                    if (typeof setUserStatus === 'function') setUserStatus('error', '❌ 수정에 실패했습니다.', 2500);
                 });
         };
 
         $scope.deleteUser = function (u) {
-            const idKey = u && (u.user_id || u.userId || u.id);
-            if (!idKey) return setUserStatus('error', 'ID를 찾을 수 없어 삭제할 수 없습니다.', 2000);
+            var idKey = u && (u.user_id || u.userId || u.id);
+            if (!idKey) return typeof setUserStatus === 'function' ? setUserStatus('error', 'ID를 찾을 수 없어 삭제할 수 없습니다.', 2000) : null;
 
             if (!confirm('정말로 삭제할까요? (ID: ' + idKey + ')')) return;
 
             $http
                 .delete('/user/' + encodeURIComponent(idKey))
                 .then(function () {
-                    $scope.users = $scope.users.filter((row) => (row.user_id || row.userId || row.id) !== idKey);
-                    setUserStatus('success', '🗑️ 삭제 완료 (ID: ' + idKey + ')', 1500);
+                    // ES5: filter 화살표 제거
+                    var next = [];
+                    var list = $scope.users || [];
+                    for (var i = 0; i < list.length; i++) {
+                        var row = list[i];
+                        var rid = row && (row.user_id || row.userId || row.id);
+                        if (rid !== idKey) next.push(row);
+                    }
+                    $scope.users = next;
+
+                    if (typeof setUserStatus === 'function') setUserStatus('success', '🗑️ 삭제 완료 (ID: ' + idKey + ')', 1500);
                 })
                 .catch(function () {
-                    setUserStatus('error', '❌ 삭제에 실패했습니다.', 2500);
+                    if (typeof setUserStatus === 'function') setUserStatus('error', '❌ 삭제에 실패했습니다.', 2500);
                 });
         };
 
@@ -6337,10 +7155,12 @@
         };
 
         // =========================================================
-        // ✅✅✅ $destroy 단 한 번만: 폴링 + 수집 타이머 정리
+        // ✅✅✅ $destroy 단 한 번만: 폴링 + 수집 타이머 정리 (ES5)
         // =========================================================
         $scope.$on('$destroy', function () {
-            stopPolling();
+            try {
+                if (typeof stopPolling === 'function') stopPolling();
+            } catch (e) {}
 
             if (collectTimer) {
                 $interval.cancel(collectTimer);
@@ -6350,7 +7170,7 @@
             collectToken++;
             $scope.collecting = false;
         });
-    });
+    }); // ← 네가 붙여준 블록 끝의 컨트롤러 클로징 유지
 
     // ────────────────────────────────────────────────────────────────
     // ───────────────── 게시판 공통 (페이지네이션 + 서버 검색) ─────────────────

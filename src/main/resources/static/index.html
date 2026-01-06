@@ -620,6 +620,24 @@
                 justify-content: flex-end;
             }
 
+            /* ✅✅✅ 자동수집 상태 요약(추가) */
+            .collect-mini {
+                font-size: 12px;
+                line-height: 1.5;
+                padding: 8px 10px;
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                border-radius: 12px;
+                background: #fff;
+            }
+            .collect-mini .ok {
+                color: #16a34a;
+                font-weight: 900;
+            }
+            .collect-mini .off {
+                color: #ef4444;
+                font-weight: 900;
+            }
+
             .route-card {
                 border: 1px solid #eef2f7;
                 border-radius: 14px;
@@ -801,6 +819,14 @@
                 border: 2px solid #fbfdff;
             }
 
+            /* ✅✅✅ ETA(분/초) 표시용 배지(추가) */
+            .eta-bar {
+                margin-top: 8px;
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+
             @media (max-width: 980px) {
                 .bus-dashboard {
                     grid-template-columns: 1fr;
@@ -948,7 +974,6 @@
                 aria-label="버스 정보"
                 ng-if="showBusTab"
             >
-                <!-- ✅ BusController: ng-init 제거 (파서 에러 방지) -->
                 <div ng-controller="BusController">
                     <section>
                         <!-- 트램 공구 -->
@@ -1166,47 +1191,54 @@
                                         <div class="seg">
                                             <div class="seg-title">
                                                 <b>0. 자동 수집 상태</b>
-                                                <span class="muted">수집/자동갱신 상태를 한눈에</span>
+                                                <span class="muted">시작 버튼 없이 자동으로 수집됩니다</span>
                                             </div>
 
+                                            <!-- ✅✅✅ 간단 요약 -->
+                                            <div
+                                                class="collect-mini"
+                                                style="margin-bottom: 10px"
+                                            >
+                                                <div>
+                                                    <b>수집:</b>
+                                                    <span ng-class="collectUi.running ? 'ok' : 'off'"> {{collectUi.running ? 'ON' : 'OFF'}} </span>
+                                                </div>
+                                                <div><b>마지막:</b> {{collectUi.lastAt || '-'}}</div>
+
+                                                <!-- ✅✅✅ [수정] 여기 ‘최근 결과’에 출발/도착 ETA(분/초) 같이 출력 -->
+                                                <div>
+                                                    <b>최근 결과:</b>
+                                                    {{collectUi.lastMsg || '-'}}
+                                                    <div
+                                                        class="eta-bar"
+                                                        ng-if="collectFromEtaText || collectToEtaText"
+                                                    >
+                                                        <span class="chip green">출발 ETA: <b>{{collectFromEtaText || '-'}}</b></span>
+                                                        <span class="chip blue">도착 ETA: <b>{{collectToEtaText || '-'}}</b></span>
+                                                    </div>
+                                                </div>
+
+                                                <div><b>누적 저장:</b> {{collectUi.savedCount || 0}}</div>
+                                            </div>
+
+                                            <!-- ✅✅✅ 버튼: 중지/재개만 -->
                                             <div class="collect-bar">
                                                 <div class="collect-left">
                                                     <span
                                                         class="chip green"
-                                                        ng-if="collecting"
-                                                        >● 수집: ON</span
-                                                    >
-                                                    <span
-                                                        class="chip gray"
-                                                        ng-if="!collecting"
-                                                        >● 수집: OFF</span
-                                                    >
-
-                                                    <span
-                                                        class="chip"
-                                                        ng-if="collectStatusText"
-                                                        >{{ collectStatusText }}</span
-                                                    >
-                                                    <span
-                                                        class="chip"
-                                                        ng-if="collectBatchInfo"
-                                                        >{{ collectBatchInfo }}</span
-                                                    >
-                                                    <span
-                                                        class="chip"
-                                                        ng-if="collectCycleInfo"
-                                                        >{{ collectCycleInfo }}</span
-                                                    >
-
-                                                    <span
-                                                        class="chip gray"
-                                                        ng-if="autoRefreshOn"
-                                                        >↻ 자동갱신: ON</span
+                                                        ng-if="collectUi.running"
+                                                        >● 자동수집: ON</span
                                                     >
                                                     <span
                                                         class="chip red"
-                                                        ng-if="!autoRefreshOn"
-                                                        >↻ 자동갱신: OFF</span
+                                                        ng-if="!collectUi.running"
+                                                        >● 자동수집: OFF</span
+                                                    >
+
+                                                    <span
+                                                        class="chip gray"
+                                                        ng-if="collectCycleInfo"
+                                                        >{{ collectCycleInfo }}</span
                                                     >
                                                 </div>
 
@@ -1214,43 +1246,23 @@
                                                     <button
                                                         class="fbtn dark"
                                                         type="button"
-                                                        ng-click="startAutoRefresh && startAutoRefresh()"
-                                                        ng-disabled="autoRefreshOn"
+                                                        ng-click="resumeCollect && resumeCollect()"
+                                                        ng-disabled="collectUi.running"
                                                     >
-                                                        ▶ 자동갱신
-                                                    </button>
-                                                    <button
-                                                        class="fbtn"
-                                                        type="button"
-                                                        ng-click="stopAutoRefresh && stopAutoRefresh()"
-                                                        ng-disabled="!autoRefreshOn"
-                                                    >
-                                                        ⏸ 멈춤
+                                                        ▶ 재개
                                                     </button>
                                                     <button
                                                         class="fbtn warn"
                                                         type="button"
-                                                        ng-click="stopCollect && stopCollect()"
-                                                        ng-disabled="!collecting"
+                                                        ng-click="pauseCollect && pauseCollect()"
+                                                        ng-disabled="!collectUi.running"
                                                     >
-                                                        ■ 수집 중지
+                                                        ■ 중지
                                                     </button>
                                                 </div>
                                             </div>
 
-                                            <div
-                                                style="margin-top: 8px"
-                                                ng-if="!collecting"
-                                            >
-                                                <button
-                                                    class="fbtn primary"
-                                                    type="button"
-                                                    ng-click="startCollect && startCollect()"
-                                                >
-                                                    ● 수집 시작
-                                                </button>
-                                                <span style="margin-left: 8px; font-size: 12px; color: #64748b">※ startCollect 함수가 이미 app.js에 있으면 그대로 동작</span>
-                                            </div>
+                                            <div style="margin-top: 8px; font-size: 12px; color: #64748b">※ 페이지 진입 시 자동으로 수집이 시작됩니다. (출발/도착 선택 후 제대로 수집됩니다)</div>
                                         </div>
 
                                         <!-- 1) 검색 & 필터 -->
@@ -1422,6 +1434,12 @@
                                                     </button>
                                                 </div>
 
+                                                <!-- ✅✅✅ [추가] 경로설정 박스 안에도 ETA 바로 보여주기 -->
+                                                <div style="display: flex; gap: 8px; flex-wrap: wrap; padding: 0 4px; margin-top: 2px">
+                                                    <span class="chip green">출발 ETA: <b>{{collectFromEtaText || '-'}}</b></span>
+                                                    <span class="chip blue">도착 ETA: <b>{{collectToEtaText || '-'}}</b></span>
+                                                </div>
+
                                                 <div style="display: flex; align-items: center; gap: 10px; padding: 0 4px">
                                                     <span style="font-size: 12px; color: #64748b; font-weight: 900">환승</span>
                                                     <input
@@ -1436,10 +1454,15 @@
                                                 </div>
 
                                                 <div style="display: flex; gap: 8px; flex-wrap: wrap; padding: 0 4px">
+                                                    <!-- ✅ 변경된 버튼: findShortestPath && 가드 제거 -->
                                                     <button
                                                         class="fbtn primary"
                                                         type="button"
-                                                        ng-click="path.fromNodeId=(collect.fromStopId || (collect.from && collect.from.stopId)); path.toNodeId=(collect.toStopId || (collect.to && collect.to.stopId)); findShortestPath && findShortestPath();"
+                                                        ng-click="
+                                                            path.fromNodeId=(collect.fromStopId || (collect.from && collect.from.stopId));
+                                                            path.toNodeId=(collect.toStopId || (collect.to && collect.to.stopId));
+                                                            findShortestPath();
+                                                        "
                                                         ng-disabled="pathLoading || !((collect.fromStopId || (collect.from && collect.from.stopId)) && (collect.toStopId || (collect.to && collect.to.stopId)))"
                                                     >
                                                         ▶ 경로 탐색
@@ -1605,24 +1628,226 @@
                     app.run([
                         '$rootScope',
                         function ($rootScope) {
-                            // path 기본값 보장 (템플릿에서 path.mode 사용)
                             $rootScope.path = $rootScope.path || {};
                             if (!$rootScope.path.mode) $rootScope.path.mode = 'MIXED';
 
-                            // stopModeFilter를 rootScope에 안전 주입
                             $rootScope.stopModeFilter = function (s) {
                                 var m = String(($rootScope.path && $rootScope.path.mode) || 'MIXED').toUpperCase();
                                 var k = String((s && (s.kind || s.type)) || '').toUpperCase();
 
                                 if (m === 'TRAM') return k === 'TRAM';
                                 if (m === 'BUS') return k === 'BUS';
-                                // MIXED
                                 return k === 'BUS' || k === 'TRAM' || k === '';
                             };
                         },
                     ]);
                 } catch (e) {
                     console.warn('stopModeFilter 주입 실패:', e);
+                }
+            })();
+        </script>
+
+        <!-- ✅✅✅ [수정 핵심] BusController 자동수집 주입: Promise.all 대신 Angular $q 사용 -->
+        <script>
+            (function () {
+                try {
+                    if (!window.angular) return;
+                    var app = angular.module('busApp');
+
+                    app.run([
+                        '$timeout',
+                        function ($timeout) {
+                            function attachIfBusScopeReady() {
+                                try {
+                                    var host = document.querySelector("#tab-bus [ng-controller='BusController'], #tab-bus div[ng-controller='BusController']");
+                                    if (!host) return false;
+
+                                    var el = window.angular.element(host);
+                                    var s = el && el.scope && el.scope();
+                                    if (!s) return false;
+
+                                    // 이미 붙었으면 패스
+                                    if (s.__autoCollectAttached) return true;
+                                    s.__autoCollectAttached = true;
+
+                                    // injector에서 $q 확보
+                                    var injector = el.injector && el.injector();
+                                    var $q = injector && injector.get ? injector.get('$q') : null;
+
+                                    // ✅ UI 모델
+                                    s.collectUi = s.collectUi || { running: false, lastAt: '', lastMsg: '', savedCount: 0 };
+
+                                    function nowStr() {
+                                        var d = new Date();
+                                        var p2 = function (n) {
+                                            return String(n).padStart(2, '0');
+                                        };
+                                        return p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+                                    }
+
+                                    // ✅ 내부 타이머
+                                    var autoTimer = null;
+
+                                    // ✅ “가장 빠른 ETA(초)” 뽑기
+                                    function pickInt(obj, keys) {
+                                        for (var i = 0; i < keys.length; i++) {
+                                            var v = obj && obj[keys[i]];
+                                            if (v === null || v === undefined) continue;
+                                            var n = parseInt(String(v).trim(), 10);
+                                            if (isFinite(n)) return n;
+                                        }
+                                        return null;
+                                    }
+                                    function getBestEtaSec(list) {
+                                        if (!Array.isArray(list) || !list.length) return null;
+                                        var best = null;
+                                        for (var i = 0; i < list.length; i++) {
+                                            var sec = pickInt(list[i], ['arrtime', 'arrTime', 'remaintime', 'remainTime', 'arrsec', 'arrSec', 'arrivalSec']);
+                                            if (!sec || sec <= 0) continue;
+                                            if (best === null || sec < best) best = sec;
+                                        }
+                                        return best;
+                                    }
+                                    function secToMmSs(sec) {
+                                        sec = Number(sec);
+                                        if (!isFinite(sec) || sec <= 0) return '-';
+                                        var m = Math.floor(sec / 60);
+                                        var r = sec % 60;
+                                        return m + '분 ' + r + '초';
+                                    }
+
+                                    // ✅ 1회 수집 실행 (너 app.js에 있는 fetchArrivalForStop 사용)
+                                    function autoCollectOnce() {
+                                        try {
+                                            var c = s.collect || {};
+                                            var fromStopId = String((c.from && c.from.stopId) || c.fromStopId || '').trim();
+                                            var toStopId = String((c.to && c.to.stopId) || c.toStopId || '').trim();
+
+                                            if (!fromStopId || !toStopId) {
+                                                s.collectUi.lastAt = nowStr();
+                                                s.collectUi.lastMsg = '출발/도착 정류장 선택 필요';
+                                                s.$applyAsync();
+                                                return;
+                                            }
+
+                                            var sec = parseInt(c.periodSec || 10, 10);
+                                            if (!isFinite(sec) || sec < 5) sec = 10;
+                                            s.collectCycleInfo = '주기: ' + sec + 's';
+
+                                            // ✅ 핵심: window.fetchArrivalForStop 또는 s.fetchArrivalForStop 중 있는걸 사용
+                                            var fn = (typeof s.fetchArrivalForStop === 'function' && s.fetchArrivalForStop) || (typeof window.fetchArrivalForStop === 'function' && window.fetchArrivalForStop);
+
+                                            if (typeof fn !== 'function') {
+                                                s.collectUi.lastAt = nowStr();
+                                                s.collectUi.lastMsg = 'fetchArrivalForStop 함수 없음(app.js 확인)';
+                                                s.$applyAsync();
+                                                return;
+                                            }
+
+                                            var pFrom = fn(c.cityCode || 25, fromStopId);
+                                            var pTo = fn(c.cityCode || 25, toStopId);
+
+                                            // ✅ $q가 있으면 $q.all, 없으면 Promise.all(후퇴)
+                                            var allPromise = $q && $q.all ? $q.all([pFrom, pTo]) : Promise.all([pFrom, pTo]);
+
+                                            allPromise
+                                                .then(function (arr) {
+                                                    var fromList = arr[0] || [];
+                                                    var toList = arr[1] || [];
+
+                                                    // ✅ ETA 계산 + scope에 올리기
+                                                    var fromEta = getBestEtaSec(fromList);
+                                                    var toEta = getBestEtaSec(toList);
+
+                                                    s.collectFromEtaSec = fromEta;
+                                                    s.collectToEtaSec = toEta;
+
+                                                    s.collectFromEtaText = secToMmSs(fromEta);
+                                                    s.collectToEtaText = secToMmSs(toEta);
+
+                                                    s.collectUi.lastAt = nowStr();
+                                                    s.collectUi.lastMsg = '도착정보 수신: 출발(' + fromList.length + ') / 도착(' + toList.length + ')';
+
+                                                    s.$applyAsync();
+                                                })
+                                                .catch(function (err) {
+                                                    console.error('[autoCollectOnce] err', err);
+                                                    s.collectUi.lastAt = nowStr();
+                                                    s.collectUi.lastMsg = '수집 실패(콘솔 확인)';
+                                                    s.$applyAsync();
+                                                });
+                                        } catch (e) {
+                                            console.warn('[autoCollectOnce] error', e);
+                                        }
+                                    }
+
+                                    function startAuto() {
+                                        if (autoTimer) return;
+                                        s.collectUi.running = true;
+                                        s.collectUi.lastAt = nowStr();
+                                        s.collectUi.lastMsg = '자동수집 시작';
+                                        s.$applyAsync();
+
+                                        // 즉시 1회
+                                        $timeout(function () {
+                                            autoCollectOnce();
+                                        }, 0);
+
+                                        // 주기
+                                        var c = s.collect || {};
+                                        var sec = parseInt(c.periodSec || 10, 10);
+                                        if (!isFinite(sec) || sec < 5) sec = 10;
+
+                                        autoTimer = setInterval(function () {
+                                            autoCollectOnce();
+                                        }, sec * 1000);
+                                    }
+
+                                    function stopAuto() {
+                                        if (autoTimer) {
+                                            clearInterval(autoTimer);
+                                            autoTimer = null;
+                                        }
+                                        s.collectUi.running = false;
+                                        s.collectUi.lastAt = nowStr();
+                                        s.collectUi.lastMsg = '자동수집 중지';
+                                        s.$applyAsync();
+                                    }
+
+                                    // ✅ 버튼 연결 (중지/재개)
+                                    s.pauseCollect = function () {
+                                        stopAuto();
+                                    };
+                                    s.resumeCollect = function () {
+                                        startAuto();
+                                    };
+
+                                    // ✅ 페이지 진입 시 자동 시작
+                                    $timeout(function () {
+                                        startAuto();
+                                    }, 300);
+
+                                    s.$applyAsync();
+                                    return true;
+                                } catch (e) {
+                                    console.warn('attachIfBusScopeReady error:', e);
+                                    return false;
+                                }
+                            }
+
+                            // bus 탭 렌더 타이밍 대비: 몇 번 재시도
+                            (function retry(n) {
+                                var ok = attachIfBusScopeReady();
+                                if (ok) return;
+                                if (n >= 20) return;
+                                $timeout(function () {
+                                    retry(n + 1);
+                                }, 150);
+                            })(1);
+                        },
+                    ]);
+                } catch (e) {
+                    console.warn('autoCollect bootstrap 실패:', e);
                 }
             })();
         </script>
