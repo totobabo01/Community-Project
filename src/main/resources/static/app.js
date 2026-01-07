@@ -5202,16 +5202,6 @@
             return [lon + dLon, lat + dLat];
         }
 
-        // ✅ 거리(m)
-        function distanceMeters(lon1, lat1, lon2, lat2) {
-            const R = 6371000;
-            const toRad = (d) => (d * Math.PI) / 180;
-            const dLat = toRad(lat2 - lat1);
-            const dLon = toRad(lon2 - lon1);
-            const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-            return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        }
-
         // =========================================================
         // ✅ PATH (단일: BUS/TRAM) + MIXED(구간별) 레이어 세트
         // =========================================================
@@ -5270,7 +5260,15 @@
         }
 
         // =========================================================
-        // ✅ MIXED 레이어 3개: BUS(파랑) / TRAM(핑크) / WALK(검정 점선)
+        // ✅ MIXED 렌더 전역 변수 (파일 상단/컨트롤러 상단 어딘가에 1번만)
+        // =========================================================
+        var mixedTransferSource = null;
+
+        var mixedTransferLayer = null;
+
+        // =========================================================
+        // ✅ MIXED 레이어 4개: BUS(파랑) / TRAM(핑크) / WALK(검정 점선) / TRANSFER(회색 점선)
+        // - 네 코드 스타일/구조 유지 + TRANSFER만 추가
         // =========================================================
         function ensureMixedLayers() {
             const map = getInnerOlMap();
@@ -5292,6 +5290,7 @@
                     style: BUS_STYLE,
                     zIndex: 14,
                 });
+                mixedBusLayer.set('tag', 'mixed-bus');
                 map.addLayer(mixedBusLayer);
             } else {
                 mixedBusLayer.setStyle(BUS_STYLE);
@@ -5314,6 +5313,7 @@
                     style: TRAM_STYLE,
                     zIndex: 15,
                 });
+                mixedTramLayer.set('tag', 'mixed-tram');
                 map.addLayer(mixedTramLayer);
             } else {
                 mixedTramLayer.setStyle(TRAM_STYLE);
@@ -5337,13 +5337,96 @@
                     style: WALK_STYLE,
                     zIndex: 16,
                 });
+                mixedWalkLayer.set('tag', 'mixed-walk');
                 map.addLayer(mixedWalkLayer);
             } else {
                 mixedWalkLayer.setStyle(WALK_STYLE);
                 mixedWalkLayer.setZIndex(16);
             }
 
+            // TRANSFER (회색 얇은 점선)  ✅ 추가
+            if (!mixedTransferSource) mixedTransferSource = new ol.source.Vector();
+            const TRANSFER_STYLE = new ol.style.Style({
+                stroke: new ol.style.Stroke({
+                    color: '#9ca3af',
+                    width: 2,
+                    lineDash: [4, 7],
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                }),
+            });
+            if (!mixedTransferLayer) {
+                mixedTransferLayer = new ol.layer.Vector({
+                    source: mixedTransferSource,
+                    style: TRANSFER_STYLE,
+                    zIndex: 13, // 버스/트램/도보보다 아래로
+                });
+                mixedTransferLayer.set('tag', 'mixed-transfer');
+                map.addLayer(mixedTransferLayer);
+            } else {
+                mixedTransferLayer.setStyle(TRANSFER_STYLE);
+                mixedTransferLayer.setZIndex(13);
+            }
+
             return true;
+        }
+
+        // =========================================================
+        // ✅ MIXED 경로 지우기 (필요하면 clearPathOnMap() 내부에서 호출해도 됨)
+        // =========================================================
+        function clearMixedOnMap() {
+            try {
+                if (mixedBusSource) mixedBusSource.clear(true);
+                if (mixedTramSource) mixedTramSource.clear(true);
+                if (mixedWalkSource) mixedWalkSource.clear(true);
+                if (mixedTransferSource) mixedTransferSource.clear(true);
+            } catch (e) {}
+        }
+
+        // =========================================================
+        // ✅ MIXED 전용: BUS/TRAM/WALK/TRANSFER 구간별로 그리기
+        // - r.path(구간) + r.stops(좌표) 기반
+        // - 좌표맵 보강(r.stops / r.polyline+stopIds / TRAM_STOPS)
+        // =========================================================
+
+        // ✅ 세그먼트 추가 (A,B는 "map 좌표" 또는 "lonlat" 둘다 받아서 안전처리)
+        function addSegmentToSource(vectorSource, A, B, alreadyMapXY) {
+            if (!vectorSource || !A || !B) return false;
+
+            var a, b;
+
+            // alreadyMapXY === true면 A/B가 이미 map좌표라고 가정
+            if (alreadyMapXY) {
+                a = A;
+                b = B;
+            } else {
+                // A/B는 [lon,lat]
+                a = lonLatToMapXY(Number(A[0]), Number(A[1]));
+                b = lonLatToMapXY(Number(B[0]), Number(B[1]));
+            }
+
+            if (!a || !b) return false;
+
+            const line = new ol.geom.LineString([a, b]);
+            vectorSource.addFeature(new ol.Feature({ geometry: line }));
+            return true;
+        }
+
+        // =========================================================
+        // ✅ 거리 계산 유틸 (없으면 이거 써)
+        // =========================================================
+        function distanceMeters(lon1, lat1, lon2, lat2) {
+            var R = 6371000;
+            function toRad(d) {
+                return (d * Math.PI) / 180;
+            }
+            var dLat = toRad(lat2 - lat1);
+            var dLon = toRad(lon2 - lon1);
+
+            var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+            var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
         }
 
         // =========================================================
@@ -5362,13 +5445,41 @@
         }
 
         // =========================================================
+        // ✅ 공통: extent 유틸 (MIXED도 "경로로 이동" 가능하게 만들기용)
+        // =========================================================
+        function isValidExtent(ext) {
+            return ext && ext.length === 4 && isFinite(ext[0]) && isFinite(ext[1]) && isFinite(ext[2]) && isFinite(ext[3]) && !(ext[0] === ext[2] && ext[1] === ext[3]);
+        }
+
+        function computeExtentFromSources(list) {
+            if (!window.ol || !ol.extent) return null;
+
+            var ext = ol.extent.createEmpty();
+            var any = false;
+
+            for (var i = 0; i < list.length; i++) {
+                var src = list[i];
+                if (!src || !src.getExtent) continue;
+
+                var e = src.getExtent();
+                if (!isValidExtent(e)) continue;
+
+                ol.extent.extend(ext, e);
+                any = true;
+            }
+
+            return any ? ext : null;
+        }
+
+        // =========================================================
         // ✅ 단일 모드 polyline 그리기 (기존 유지 + tag 추가)
+        // + ✅ 출발/도착 마커: 라벨=정류장명, 도착=빨강
         // =========================================================
         function drawPathPolylineLonLat(polyLonLat, mode) {
-            const map = getInnerOlMap();
+            var map = getInnerOlMap();
             if (!map) return false;
 
-            const m = String(mode || '').toUpperCase();
+            var m = String(mode || '').toUpperCase();
 
             // ✅ MIXED는 여기서 그리지 말고 drawMixedSegmentsFromResult()를 쓰자
             if (m === 'MIXED') return false;
@@ -5381,39 +5492,88 @@
                 if (typeof pathVectorLayer !== 'undefined' && pathVectorLayer && pathVectorLayer.set) {
                     pathVectorLayer.set('tag', 'path');
                 }
-            } catch (e) {}
+            } catch (e0) {}
 
             pathVectorSource.clear(true);
             if (!Array.isArray(polyLonLat) || polyLonLat.length < 2) return false;
 
-            const projected = polyLonLat
+            var projected = polyLonLat
                 .map(function (xy) {
-                    const lon = Number(xy && xy[0]);
-                    const lat = Number(xy && xy[1]);
+                    var lon = Number(xy && xy[0]);
+                    var lat = Number(xy && xy[1]);
                     return lonLatToMapXY(lon, lat);
                 })
-                .filter(Boolean);
+                .filter(function (v) {
+                    return !!v;
+                });
 
             if (projected.length < 2) return false;
 
-            const line = new ol.geom.LineString(projected);
-            const feature = new ol.Feature({ geometry: line });
+            // =========================
+            // 1) ✅ 폴리라인
+            // =========================
+            var line = new ol.geom.LineString(projected);
+            var feature = new ol.Feature({ geometry: line });
 
-            // ✅ 선 색 고정
-            const isTram = m === 'TRAM';
+            var isTram = m === 'TRAM';
             feature.setStyle(
                 new ol.style.Style({
                     stroke: new ol.style.Stroke({
-                        color: isTram ? '#ec4899' : '#2563eb',
+                        color: isTram ? '#ec4899' : '#2563eb', // 트램=핑크, 버스=파랑
                         width: 5,
                         lineCap: 'round',
                         lineJoin: 'round',
                     }),
                 })
             );
-
             pathVectorSource.addFeature(feature);
 
+            // =========================
+            // 2) ✅ 출발/도착 마커 추가
+            // - 라벨: 정류장 이름
+            // - 도착 색: 빨강
+            // =========================
+            try {
+                var startXY = projected[0];
+                var endXY = projected[projected.length - 1];
+
+                // ✅ 정류장명: UI에서 선택된 이름을 우선 사용
+                var fromName = String(($scope.collectFromSelected && $scope.collectFromSelected.name) || '출발').trim();
+                var toName = String(($scope.collectToSelected && $scope.collectToSelected.name) || '도착').trim();
+
+                function makeMarker(pointXY, fillColor, labelText) {
+                    var f = new ol.Feature({ geometry: new ol.geom.Point(pointXY) });
+                    f.setStyle(
+                        new ol.style.Style({
+                            image: new ol.style.Circle({
+                                radius: 8,
+                                fill: new ol.style.Fill({ color: fillColor }),
+                                stroke: new ol.style.Stroke({ color: '#ffffff', width: 2 }),
+                            }),
+                            text: new ol.style.Text({
+                                text: labelText,
+                                offsetY: -18,
+                                font: 'bold 12px Segoe UI',
+                                fill: new ol.style.Fill({ color: '#111827' }),
+                                stroke: new ol.style.Stroke({ color: '#ffffff', width: 4 }),
+                            }),
+                        })
+                    );
+                    return f;
+                }
+
+                // 출발: 초록
+                pathVectorSource.addFeature(makeMarker(startXY, '#22c55e', fromName));
+
+                // 도착: ✅ 빨강
+                pathVectorSource.addFeature(makeMarker(endXY, '#ef4444', toName));
+            } catch (e1) {
+                console.warn('[drawPathPolylineLonLat] endpoint marker error:', e1);
+            }
+
+            // =========================
+            // 3) 기존 상태값 유지 (버튼 unlock 조건)
+            // =========================
             $scope.pathPolylineFeature = feature;
             $scope.pathPolylineExtent = line.getExtent();
             $scope.pathPolylineReady = true;
@@ -5425,22 +5585,36 @@
         // =========================================================
         // ✅ MIXED 전용: BUS/TRAM/WALK 구간별로 그리기
         // r.path(구간 정보) + r.stops(좌표) 를 이용
+        //  - BUS: 파란 실선
+        //  - TRAM: 핑크 실선
+        //  - WALK/TRANSFER: 검은 점선(레이어 스타일에 의해)
         // =========================================================
         function pickModeUpper(x) {
-            return String((x && (x.mode ?? x.kind ?? x.type ?? x.vehicle ?? x.edgeType ?? x.transitType ?? '')) || '')
+            var raw = String((x && (x.mode != null ? x.mode : x.kind != null ? x.kind : x.type != null ? x.type : x.vehicle != null ? x.vehicle : x.edgeType != null ? x.edgeType : x.transitType != null ? x.transitType : '')) || '')
                 .trim()
                 .toUpperCase();
+
+            // ✅ 서버에서 짧게 오는 경우 보정
+            if (raw === 'B') return 'BUS';
+            if (raw === 'T') return 'TRAM';
+            if (raw === 'W') return 'WALK';
+
+            // ✅ 흔한 별칭 보정
+            if (raw === 'FOOT' || raw === 'PED' || raw === 'WALKING') return 'WALK';
+            if (raw === 'LINK' || raw === 'XFER') return 'TRANSFER';
+
+            return raw;
         }
 
         function buildStopCoordMapFromResult(r) {
-            const m = {};
+            var m = {};
 
             // r.stops에서 stopId -> [lon,lat]
             if (Array.isArray(r && r.stops)) {
                 r.stops.forEach(function (s) {
-                    const id = String(s && (s.stopId ?? s.nodeId ?? s.nodeid ?? '')).trim();
-                    const lon = Number(s && (s.lon ?? s.gpslong ?? s.gpsLong));
-                    const lat = Number(s && (s.lat ?? s.gpslati ?? s.gpsLat));
+                    var id = String(s && (s.stopId != null ? s.stopId : s.nodeId != null ? s.nodeId : s.nodeid != null ? s.nodeid : s.id != null ? s.id : '')).trim();
+                    var lon = Number(s && (s.lon != null ? s.lon : s.lng != null ? s.lng : s.longitude != null ? s.longitude : s.gpslong != null ? s.gpslong : s.gpsLong));
+                    var lat = Number(s && (s.lat != null ? s.lat : s.latitude != null ? s.latitude : s.gpslati != null ? s.gpslati : s.gpsLat));
                     if (id && isFinite(lon) && isFinite(lat)) m[id] = [lon, lat];
                 });
             }
@@ -5448,30 +5622,28 @@
             return m;
         }
 
-        function addSegmentToSource(vectorSource, A, B) {
-            if (!vectorSource) return false;
-            if (!A || !B) return false;
+        /**
+         * ✅ 중요: MIXED는 "이미 mapXY로 변환된 좌표"를 라인스트링으로 찍는다.
+         */
+        function addSegmentToSourceXY(vectorSource, Axy, Bxy) {
+            if (!vectorSource || !Axy || !Bxy) return false;
 
-            const a = lonLatToMapXY(Number(A[0]), Number(A[1]));
-            const b = lonLatToMapXY(Number(B[0]), Number(B[1]));
-            if (!a || !b) return false;
+            var ax = Number(Axy[0]),
+                ay = Number(Axy[1]);
+            var bx = Number(Bxy[0]),
+                by = Number(Bxy[1]);
+            if (!isFinite(ax) || !isFinite(ay) || !isFinite(bx) || !isFinite(by)) return false;
 
-            const line = new ol.geom.LineString([a, b]);
+            var line = new ol.geom.LineString([
+                [ax, ay],
+                [bx, by],
+            ]);
             vectorSource.addFeature(new ol.Feature({ geometry: line }));
             return true;
         }
 
-        /**
-         * ✅ MIXED 구간 렌더
-         * - BUS: mixedBusSource
-         * - TRAM: mixedTramSource
-         * - 그 외/빈환승: mixedWalkSource
-         *
-         * r.path가 이런 형태면 제일 잘 됨:
-         *   [{mode:'BUS', from:'...', to:'...'}, {mode:'WALK', from:'...', to:'...'}, {mode:'TRAM', from:'...', to:'...'}]
-         */
         function drawMixedSegmentsFromResult(r) {
-            const map = getInnerOlMap();
+            var map = getInnerOlMap();
             if (!map) return false;
             if (!ensureMixedLayers()) return false;
 
@@ -5482,180 +5654,315 @@
             if (mixedBusSource) mixedBusSource.clear(true);
             if (mixedTramSource) mixedTramSource.clear(true);
             if (mixedWalkSource) mixedWalkSource.clear(true);
+            if (typeof mixedTransferSource !== 'undefined' && mixedTransferSource) mixedTransferSource.clear(true);
 
-            // ─────────────────────────────────────────
+            // ✅ (추가) MIXED 마커 레이어 소스가 있으면 이것도 초기화
+            // - 전역으로 mixedMarkerSource/mixedMarkerLayer를 쓰는 구조면 여기서 같이 clear됨
+            try {
+                if (typeof mixedMarkerSource !== 'undefined' && mixedMarkerSource) mixedMarkerSource.clear(true);
+            } catch (e0) {}
+
             // 0) 좌표 맵 구성(중요)
-            //    buildStopCoordMapFromResult(r)가 TRAM 좌표를 못 담는 경우가 많아서
-            //    여기서 "강제로 보강"한다.
-            // ─────────────────────────────────────────
-            const stopCoord = buildStopCoordMapFromResult(r) || {};
+            var stopCoord = buildStopCoordMapFromResult(r) || {};
 
-            // (A) r.stops가 있으면 최우선 보강 (stopId/lat/lon)
+            // (A) r.stops 보강
             if (Array.isArray(r && r.stops)) {
                 r.stops.forEach(function (s) {
-                    const id = String((s && (s.stopId ?? s.id ?? s.nodeId ?? '')) || '').trim();
-                    const lat = Number(s && (s.lat ?? s.latitude));
-                    const lon = Number(s && (s.lon ?? s.lng ?? s.longitude));
+                    var id = String((s && (s.stopId != null ? s.stopId : s.id != null ? s.id : s.nodeId != null ? s.nodeId : s.nodeid != null ? s.nodeid : '')) || '').trim();
+                    var lat = Number(s && (s.lat != null ? s.lat : s.latitude));
+                    var lon = Number(s && (s.lon != null ? s.lon : s.lng != null ? s.lng : s.longitude));
                     if (!id) return;
                     if (!isFinite(lat) || !isFinite(lon)) return;
-                    stopCoord[id] = [lon, lat]; // ✅ [lon,lat]
+                    stopCoord[id] = [lon, lat];
                 });
             }
 
-            // (B) r.polyline 만 있는 경우 대비: stopIds 순서와 매칭
-            // - stopIds 길이와 polyline 길이가 같으면 같은 인덱스로 매칭 가능
+            // (B) stopIds + polyline(점 목록) 길이가 같으면 보강
             if (Array.isArray(r && r.stopIds) && Array.isArray(r && r.polyline) && r.stopIds.length === r.polyline.length) {
-                for (let i = 0; i < r.stopIds.length; i++) {
-                    const id = String(r.stopIds[i] || '').trim();
-                    const p = r.polyline[i] || {};
-                    // 서버 Point가 (lat,lon)인 네 DTO 기준
-                    const lat = Number(p.lat);
-                    const lon = Number(p.lon);
-                    if (!id) continue;
-                    if (!isFinite(lat) || !isFinite(lon)) continue;
-                    if (!stopCoord[id]) stopCoord[id] = [lon, lat];
+                for (var i = 0; i < r.stopIds.length; i++) {
+                    var id2 = String(r.stopIds[i] || '').trim();
+                    var p2 = r.polyline[i] || {};
+                    var lat2 = Number(p2.lat);
+                    var lon2 = Number(p2.lon);
+                    if (!id2) continue;
+                    if (!isFinite(lat2) || !isFinite(lon2)) continue;
+                    if (!stopCoord[id2]) stopCoord[id2] = [lon2, lat2];
                 }
             }
 
-            // (C) TRAM_STOPS(전역 JS)로도 보강 (DB에 트램 stops가 없는 경우)
-            // - 너가 window.TRAM_STOPS를 갖고 있는 구조라면 이게 가장 강력함
+            // (C) TRAM_STOPS 보강
             if (window.TRAM_STOPS && Array.isArray(window.TRAM_STOPS)) {
                 window.TRAM_STOPS.forEach(function (t) {
-                    const id = String((t && (t.stopId ?? t.id ?? '')) || '').trim();
-                    // 너 트램은 lng를 쓰고 있음
-                    const lat = Number(t && t.lat);
-                    const lon = Number(t && (t.lon ?? t.lng));
-                    if (!id) return;
-                    if (!isFinite(lat) || !isFinite(lon)) return;
-                    if (!stopCoord[id]) stopCoord[id] = [lon, lat];
+                    var id3 = String((t && (t.stopId != null ? t.stopId : t.id != null ? t.id : '')) || '').trim();
+                    var lat3 = Number(t && t.lat);
+                    var lon3 = Number(t && (t.lon != null ? t.lon : t.lng));
+                    if (!id3) return;
+                    if (!isFinite(lat3) || !isFinite(lon3)) return;
+                    if (!stopCoord[id3]) stopCoord[id3] = [lon3, lat3];
                 });
             }
 
-            // ─────────────────────────────────────────
             // pathArr 확보
-            // ─────────────────────────────────────────
-            const pathArr = Array.isArray(r && r.path) ? r.path : [];
-            if (!pathArr.length) return false;
+            var pathArr = Array.isArray(r && r.path) ? r.path : [];
+            if (!pathArr.length) {
+                console.warn('[MIXED] r.path empty:', r);
+                return false;
+            }
 
-            // ─────────────────────────────────────────
-            // 안전 추출 유틸 (서버 필드명 변형 흡수)
-            // ─────────────────────────────────────────
+            // 안전 추출 유틸
             function getFromId(seg) {
-                return String((seg && (seg.from ?? seg.fromStopId ?? seg.a ?? seg.start ?? seg.u ?? '')) || '').trim();
+                return String((seg && (seg.from != null ? seg.from : seg.fromStopId != null ? seg.fromStopId : seg.a != null ? seg.a : seg.start != null ? seg.start : seg.u != null ? seg.u : '')) || '').trim();
             }
             function getToId(seg) {
-                return String((seg && (seg.to ?? seg.toStopId ?? seg.b ?? seg.end ?? seg.v ?? '')) || '').trim();
+                return String((seg && (seg.to != null ? seg.to : seg.toStopId != null ? seg.toStopId : seg.b != null ? seg.b : seg.end != null ? seg.end : seg.v != null ? seg.v : '')) || '').trim();
             }
             function getAtId(seg) {
-                return String((seg && (seg.at ?? seg.nodeId ?? seg.stopId ?? seg.id ?? '')) || '').trim();
-            }
-
-            // ─────────────────────────────────────────
-            // 좌표 가져오기 + (필요시) EPSG 변환
-            // stopCoord는 [lon,lat] (EPSG:4326) 기준
-            // ─────────────────────────────────────────
-            function toMapXY(lonLat) {
-                // lonLat: [lon,lat]
-                const view = map.getView && map.getView();
-                const proj = (view && view.getProjection && view.getProjection()) || null;
-                if (proj && window.ol && ol.proj && ol.proj.transform) {
-                    // map projection으로 변환
-                    return ol.proj.transform([lonLat[0], lonLat[1]], 'EPSG:4326', proj);
-                }
-                return lonLat;
+                return String((seg && (seg.at != null ? seg.at : seg.nodeId != null ? seg.nodeId : seg.stopId != null ? seg.stopId : seg.id != null ? seg.id : '')) || '').trim();
             }
 
             function coordOf(id) {
-                const c = stopCoord[String(id || '').trim()];
+                var c = stopCoord[String(id || '').trim()];
                 if (!c) return null;
-                // c is [lon,lat]
-                if (!isFinite(Number(c[0])) || !isFinite(Number(c[1]))) return null;
-                return c;
+
+                var lon = Number(c[0]);
+                var lat = Number(c[1]);
+                if (!isFinite(lon) || !isFinite(lat)) return null;
+
+                return [lon, lat];
             }
 
-            // ─────────────────────────────────────────
+            // stopCoord는 [lon,lat] (EPSG:4326) → map projection 좌표로 변환
+            function toMapXY4326(lonLat) {
+                var view = map.getView && map.getView();
+                var proj = (view && view.getProjection && view.getProjection()) || null;
+
+                if (proj && window.ol && ol.proj && ol.proj.transform) {
+                    return ol.proj.transform([lonLat[0], lonLat[1]], 'EPSG:4326', proj);
+                }
+                // fallback
+                return [Number(lonLat[0]), Number(lonLat[1])];
+            }
+
             // 1) pathArr 구간 그대로 그림
-            //    - at-only도 "이전 앵커 -> at"으로 연결선을 만든다(끊김 방지)
-            // ─────────────────────────────────────────
-            let prevAnchorId = null;
+            var prevAnchorId = null;
+            var drawnCount = 0;
 
-            for (let i = 0; i < pathArr.length; i++) {
-                const e = pathArr[i];
-                const mode = (pickModeUpper(e) || 'WALK').toUpperCase();
+            for (var j = 0; j < pathArr.length; j++) {
+                var e = pathArr[j];
+                var mode = String(pickModeUpper(e) || 'WALK').toUpperCase();
 
-                let fromId = getFromId(e);
-                let toId = getToId(e);
-                const atId = getAtId(e);
+                var fromId = getFromId(e);
+                var toId = getToId(e);
+                var atId = getAtId(e);
 
-                // ✅ 1) at-only: 이전 앵커가 있으면 prevAnchor -> at 선을 그려주고 anchor 갱신
+                // at-only: 이전 앵커 -> at 연결 (환승 끊김 방지)
                 if ((!fromId || !toId) && atId) {
                     if (prevAnchorId && prevAnchorId !== atId) {
-                        const A0 = coordOf(prevAnchorId);
-                        const B0 = coordOf(atId);
+                        var A0 = coordOf(prevAnchorId);
+                        var B0 = coordOf(atId);
                         if (A0 && B0) {
-                            // at-only는 기본 WALK로 처리(환승/연결)
-                            addSegmentToSource(mixedWalkSource, toMapXY(A0), toMapXY(B0));
+                            // 너무 가까우면 생략 (5m 미만)
+                            var d0 = distanceMeters(A0[0], A0[1], B0[0], B0[1]);
+                            if (!isFinite(d0) || d0 >= 5) {
+                                var AX0 = toMapXY4326(A0);
+                                var BX0 = toMapXY4326(B0);
+
+                                // at-only는 보통 환승/도보로 표시하는 게 자연스러움
+                                if (typeof mixedTransferSource !== 'undefined' && mixedTransferSource) {
+                                    if (addSegmentToSourceXY(mixedTransferSource, AX0, BX0)) drawnCount++;
+                                } else {
+                                    if (addSegmentToSourceXY(mixedWalkSource, AX0, BX0)) drawnCount++;
+                                }
+                            }
                         }
                     }
                     prevAnchorId = atId;
                     continue;
                 }
 
-                // ✅ 2) from/to가 하나라도 비면 anchor로 보정
+                // from/to가 비면 anchor로 보정
                 if (!fromId && prevAnchorId) fromId = prevAnchorId;
                 if (!toId && prevAnchorId) toId = prevAnchorId;
-
                 if (!fromId || !toId) continue;
 
-                const A = coordOf(fromId);
-                const B = coordOf(toId);
-
+                var A = coordOf(fromId);
+                var B = coordOf(toId);
                 if (!A || !B) {
-                    // 좌표 못 찾으면 anchor만 갱신하고 넘어감
                     prevAnchorId = toId || fromId || prevAnchorId;
                     continue;
                 }
 
-                const AX = toMapXY(A);
-                const BX = toMapXY(B);
+                // 너무 가까우면 생략 (도보/환승만)
+                var d = distanceMeters(A[0], A[1], B[0], B[1]);
+                if (isFinite(d) && d < 5 && (mode === 'WALK' || mode === 'TRANSFER')) {
+                    prevAnchorId = toId;
+                    continue;
+                }
 
-                if (mode === 'BUS') addSegmentToSource(mixedBusSource, AX, BX);
-                else if (mode === 'TRAM') addSegmentToSource(mixedTramSource, AX, BX);
-                else addSegmentToSource(mixedWalkSource, AX, BX); // WALK/TRANSFER/UNKNOWN
+                var AX = toMapXY4326(A);
+                var BX = toMapXY4326(B);
+
+                if (mode === 'BUS') {
+                    if (addSegmentToSourceXY(mixedBusSource, AX, BX)) drawnCount++;
+                } else if (mode === 'TRAM') {
+                    if (addSegmentToSourceXY(mixedTramSource, AX, BX)) drawnCount++;
+                } else if (mode === 'TRANSFER') {
+                    if (typeof mixedTransferSource !== 'undefined' && mixedTransferSource) {
+                        if (addSegmentToSourceXY(mixedTransferSource, AX, BX)) drawnCount++;
+                    } else {
+                        if (addSegmentToSourceXY(mixedWalkSource, AX, BX)) drawnCount++;
+                    }
+                } else {
+                    if (addSegmentToSourceXY(mixedWalkSource, AX, BX)) drawnCount++;
+                }
 
                 prevAnchorId = toId;
             }
 
-            // ─────────────────────────────────────────
-            // 2) “빈 환승 구간” 자동 보강
-            //    - 모드가 바뀌는데 prev.to != cur.from 이면 WALK 점선 추가
-            //    - 너무 가까우면(5m 미만) 생략
-            // ─────────────────────────────────────────
-            for (let i = 1; i < pathArr.length; i++) {
-                const prev = pathArr[i - 1];
-                const cur = pathArr[i];
+            // 2) “빈 환승 구간” 자동 보강 (모드가 바뀌는데 prev.to != cur.from 일 때)
+            for (var k = 1; k < pathArr.length; k++) {
+                var prev = pathArr[k - 1];
+                var cur = pathArr[k];
 
-                const pm = (pickModeUpper(prev) || '').toUpperCase();
-                const cm = (pickModeUpper(cur) || '').toUpperCase();
-
+                var pm = String(pickModeUpper(prev) || '').toUpperCase();
+                var cm = String(pickModeUpper(cur) || '').toUpperCase();
                 if (!pm || !cm) continue;
                 if (pm === cm) continue;
 
-                const prevTo = getToId(prev) || getAtId(prev);
-                const curFrom = getFromId(cur) || getAtId(cur);
+                var prevTo = getToId(prev) || getAtId(prev);
+                var curFrom = getFromId(cur) || getAtId(cur);
 
                 if (!prevTo || !curFrom) continue;
                 if (prevTo === curFrom) continue;
 
-                const A = coordOf(prevTo);
-                const B = coordOf(curFrom);
-                if (!A || !B) continue;
+                var A2 = coordOf(prevTo);
+                var B2 = coordOf(curFrom);
+                if (!A2 || !B2) continue;
 
-                const d = distanceMeters(A[0], A[1], B[0], B[1]); // [lon,lat]
-                if (isFinite(d) && d < 5) continue;
+                var d2 = distanceMeters(A2[0], A2[1], B2[0], B2[1]);
+                if (isFinite(d2) && d2 < 5) continue;
 
-                addSegmentToSource(mixedWalkSource, toMapXY(A), toMapXY(B));
+                var AX2 = toMapXY4326(A2);
+                var BX2 = toMapXY4326(B2);
+
+                if (typeof mixedTransferSource !== 'undefined' && mixedTransferSource) {
+                    if (addSegmentToSourceXY(mixedTransferSource, AX2, BX2)) drawnCount++;
+                } else {
+                    if (addSegmentToSourceXY(mixedWalkSource, AX2, BX2)) drawnCount++;
+                }
             }
+
+            if (!drawnCount) {
+                console.warn('[MIXED] drawnCount=0 (좌표/모드/호출 확인 필요)', {
+                    pathLen: pathArr.length,
+                    stopCoordKeys: Object.keys(stopCoord || {}).length,
+                    samplePath0: pathArr[0],
+                });
+                return false;
+            }
+
+            // =========================================================
+            // ✅✅✅ (추가) MIXED 출발/도착 마커 찍기
+            // - 단일 drawPathPolylineLonLat는 MIXED에서 안 타니까, 여기서 직접 찍어야 함
+            // =========================================================
+            try {
+                // (1) marker source/layer가 전역에 없을 수도 있으니, 없으면 여기서 임시로라도 만든다
+                //     (권장: ensureMixedLayers 안에서 만드는 게 정석)
+                if (typeof mixedMarkerSource === 'undefined') {
+                    window.mixedMarkerSource = null;
+                }
+                if (typeof mixedMarkerLayer === 'undefined') {
+                    window.mixedMarkerLayer = null;
+                }
+
+                if (!mixedMarkerSource) mixedMarkerSource = new ol.source.Vector();
+
+                if (!mixedMarkerLayer) {
+                    mixedMarkerLayer = new ol.layer.Vector({
+                        source: mixedMarkerSource,
+                        zIndex: 9999,
+                        style: function (feature) {
+                            var kind = feature.get('kind'); // 'from' | 'to'
+                            var label = feature.get('label') || '';
+                            var isTo = kind === 'to';
+
+                            return new ol.style.Style({
+                                image: new ol.style.Circle({
+                                    radius: 8,
+                                    fill: new ol.style.Fill({ color: isTo ? '#ef4444' : '#22c55e' }),
+                                    stroke: new ol.style.Stroke({ color: '#ffffff', width: 2 }),
+                                }),
+                                text: new ol.style.Text({
+                                    text: String(label),
+                                    offsetY: -18,
+                                    font: 'bold 12px Segoe UI',
+                                    fill: new ol.style.Fill({ color: '#111827' }),
+                                    stroke: new ol.style.Stroke({ color: '#ffffff', width: 4 }),
+                                }),
+                            });
+                        },
+                    });
+                    try {
+                        mixedMarkerLayer.set('tag', 'mixed-marker');
+                    } catch (eTag) {}
+                    map.addLayer(mixedMarkerLayer);
+                }
+
+                // (2) 마커 clear
+                mixedMarkerSource.clear(true);
+
+                // (3) start/end id 뽑기: r 값 우선 → path에서 추출 → UI 선택값 fallback
+                function pickStartId() {
+                    return String(
+                        (r && (r.fromStopId || r.from || r.startId)) || (pathArr[0] && (getFromId(pathArr[0]) || getAtId(pathArr[0]))) || ($scope.collectFromSelected && ($scope.collectFromSelected.stopId || $scope.collectFromSelected.id)) || ''
+                    ).trim();
+                }
+
+                function pickEndId() {
+                    var last = pathArr[pathArr.length - 1];
+                    return String((r && (r.toStopId || r.to || r.endId)) || (last && (getToId(last) || getAtId(last))) || ($scope.collectToSelected && ($scope.collectToSelected.stopId || $scope.collectToSelected.id)) || '').trim();
+                }
+
+                var startId = pickStartId();
+                var endId = pickEndId();
+
+                var A3 = coordOf(startId);
+                var B3 = coordOf(endId);
+
+                var fromName = String(($scope.collectFromSelected && $scope.collectFromSelected.name) || '출발').trim();
+                var toName = String(($scope.collectToSelected && $scope.collectToSelected.name) || '도착').trim();
+
+                if (A3) {
+                    var AX3 = lonLatToMapXY(Number(A3[0]), Number(A3[1]));
+                    if (AX3) {
+                        var f1 = new ol.Feature({ geometry: new ol.geom.Point(AX3) });
+                        f1.set('kind', 'from');
+                        f1.set('label', fromName);
+                        mixedMarkerSource.addFeature(f1);
+                    }
+                }
+                if (B3) {
+                    var BX3 = lonLatToMapXY(Number(B3[0]), Number(B3[1]));
+                    if (BX3) {
+                        var f2 = new ol.Feature({ geometry: new ol.geom.Point(BX3) });
+                        f2.set('kind', 'to');
+                        f2.set('label', toName);
+                        mixedMarkerSource.addFeature(f2);
+                    }
+                }
+
+                // 디버깅 필요하면 주석 해제
+                // console.log('[MIXED] start/end', startId, endId, 'A', A3, 'B', B3);
+            } catch (eM) {
+                console.warn('[MIXED] endpoint marker error:', eM);
+            }
+
+            // ✅✅✅ (핵심) MIXED도 경로이동 버튼 unlock 되게 extent/ready 세팅
+            var ext = computeExtentFromSources([mixedBusSource, mixedTramSource, mixedWalkSource, typeof mixedTransferSource !== 'undefined' ? mixedTransferSource : null, typeof mixedMarkerSource !== 'undefined' ? mixedMarkerSource : null]);
+
+            $scope.pathPolylineFeature = null;
+            $scope.pathPolylineExtent = isValidExtent(ext) ? ext : null;
+            $scope.pathPolylineReady = true;
 
             if (map.renderSync) map.renderSync();
             return true;
@@ -5664,17 +5971,17 @@
         // =========================================================
         // ✅ STOPS (정류장 마커) 레이어  (기존 + 필터 레이어 추가)
         // =========================================================
-        let stopsVectorSource = null; // = 전체 정류장
-        let stopsVectorLayer = null;
+        var stopsVectorSource = null; // = 전체 정류장
+        var stopsVectorLayer = null;
 
-        let filteredStopsSource = null; // ✅ 선택 노선 정류장만
-        let filteredStopsLayer = null;
+        var filteredStopsSource = null; // ✅ 선택 노선 정류장만
+        var filteredStopsLayer = null;
 
         // ✅ nodeId -> Feature 인덱스 (필터링 핵심)
-        let stopFeatureById = Object.create(null);
+        var stopFeatureById = Object.create(null);
 
         function ensureStopsLayer() {
-            const map = getInnerOlMap();
+            var map = getInnerOlMap();
             if (!map || !window.ol) return false;
 
             if (!stopsVectorSource) stopsVectorSource = new ol.source.Vector();
@@ -5704,7 +6011,7 @@
                 // ✅ 추가: tag (필터도 stops로 취급)
                 try {
                     filteredStopsLayer.set('tag', 'stops');
-                } catch (e) {}
+                } catch (e2) {}
 
                 filteredStopsLayer.setVisible(false); // 기본 숨김
                 map.addLayer(filteredStopsLayer);
@@ -6275,8 +6582,7 @@
         $scope.pathPolylineExtent = null;
 
         // =========================================================
-        // ✅✅✅ [REAL] findShortestPath: 데모 하드코딩 제거 → API 호출
-        // (ES5 안전버전: ??, let/const, =>, optional chaining 제거)
+        // ✅✅✅ [REAL] findShortestPath
         // =========================================================
         $scope.findShortestPath = function () {
             // =========================
@@ -6369,47 +6675,39 @@
             var TRAM_SPEED_MPS = 6.94; // 약 25km/h
 
             // =========================================================
-            // ✅ TRAM 전용: "노선 순서" 기반 그래프 (TRAM_ROUTE_FULL_HD) + 다익스트라
+            // ✅ (너 코드 그대로) TRAM 전용 계산부...
             // =========================================================
             function pickStopId(s) {
                 if (!s) return '';
                 var v = s.stopId != null ? s.stopId : s.stop_id != null ? s.stop_id : s.nodeid != null ? s.nodeid : s.nodeId != null ? s.nodeId : s.id != null ? s.id : '';
                 return String(v || '').trim();
             }
-
             function pickStopName(s) {
                 if (!s) return '';
                 var v = s.name != null ? s.name : s.nodenm != null ? s.nodenm : s.nodeNm != null ? s.nodeNm : '';
                 return String(v || '').trim();
             }
-
             function pickLonLat(s) {
                 if (!s) return null;
                 var lon = Number(s.lon != null ? s.lon : s.gpslong != null ? s.gpslong : s.gpsLong != null ? s.gpsLong : s.lng != null ? s.lng : undefined);
                 var lat = Number(s.lat != null ? s.lat : s.gpslati != null ? s.gpslati : s.gpsLat != null ? s.gpsLat : undefined);
-
                 if (!isFinite(lon) || !isFinite(lat)) return null;
                 return [lon, lat];
             }
 
-            // ✅ stopId -> {lon,lat,name} 맵 만들기 (TRAM_STOPS + TRAM_ROUTE_FULL_HD로 보강)
             function buildTramStopInfoMap() {
                 var m = {};
 
-                // 1) TRAM_STOPS 우선
                 var arr = window.TRAM_STOPS || window.tramStops || [];
                 if (Array.isArray(arr)) {
                     arr.forEach(function (s) {
                         var id = pickStopId(s);
                         var ll = pickLonLat(s);
                         var name = pickStopName(s);
-                        if (id && ll) {
-                            m[id] = { id: id, lon: ll[0], lat: ll[1], name: name || id };
-                        }
+                        if (id && ll) m[id] = { id: id, lon: ll[0], lat: ll[1], name: name || id };
                     });
                 }
 
-                // 2) TRAM_ROUTE_FULL_HD로 보강
                 var raw = window.TRAM_ROUTE_FULL_HD || [];
                 if (Array.isArray(raw)) {
                     raw.forEach(function (p) {
@@ -6430,7 +6728,6 @@
                 return m;
             }
 
-            // ✅ TRAM_ROUTE_FULL_HD에서 station id 순서 뽑기 (중복 제거)
             function getTramStationSequence() {
                 var raw = window.TRAM_ROUTE_FULL_HD || [];
                 var seq = [];
@@ -6447,11 +6744,10 @@
                 return seq;
             }
 
-            // ✅ 노선 순서 기반 그래프 만들기(양방향)
             function buildTramGraphFromRoute() {
                 var stopMap = buildTramStopInfoMap();
                 var seq = getTramStationSequence();
-                var graph = {}; // id -> [{to, distM, timeS}]
+                var graph = {};
 
                 function addEdge(a, b, distM, timeS) {
                     if (!graph[a]) graph[a] = [];
@@ -6477,7 +6773,7 @@
                 return { graph: graph, stopMap: stopMap, seq: seq };
             }
 
-            function dijkstra(graph, startId, endId, weightKey /* 'DIST'|'TIME' */) {
+            function dijkstra(graph, startId, endId, weightKey) {
                 var dist = {};
                 var prev = {};
                 var visited = {};
@@ -6498,7 +6794,6 @@
                     var u = cur.id;
                     if (visited[u]) continue;
                     visited[u] = true;
-
                     if (u === endId) break;
 
                     var edges = graph[u] || [];
@@ -6538,18 +6833,11 @@
                 var stopMap = built.stopMap || {};
                 var seq = built.seq || [];
 
-                if (!seq.length) {
-                    return { found: false, message: 'TRAM_ROUTE_FULL_HD(station 순서) 데이터가 없습니다. tram-data.js 확인 필요' };
-                }
-
-                if (!stopMap[fromId] || !stopMap[toId]) {
-                    return { found: false, message: '트램 출발/도착 stopId가 stopMap(TRAM_STOPS/TRAM_ROUTE_FULL_HD)에 없습니다. (ID 확인 필요)' };
-                }
+                if (!seq.length) return { found: false, message: 'TRAM_ROUTE_FULL_HD(station 순서) 데이터가 없습니다. tram-data.js 확인 필요' };
+                if (!stopMap[fromId] || !stopMap[toId]) return { found: false, message: '트램 출발/도착 stopId가 stopMap에 없습니다. (ID 확인 필요)' };
 
                 var res = dijkstra(graph, fromId, toId, weightKey);
-                if (!res || !Array.isArray(res.nodes) || res.nodes.length < 2) {
-                    return { found: false, message: '경로를 찾지 못했습니다. (트램 엣지 연결 부족 / 노선 순서 확인 필요)' };
-                }
+                if (!res || !Array.isArray(res.nodes) || res.nodes.length < 2) return { found: false, message: '경로를 찾지 못했습니다. (트램 엣지 연결 부족)' };
 
                 var totalDistM = 0;
                 var totalTimeS = 0;
@@ -6561,9 +6849,7 @@
                     var id = res.nodes[i];
                     var s = stopMap[id];
 
-                    if (s && isFinite(s.lon) && isFinite(s.lat)) {
-                        polyline.push({ lon: s.lon, lat: s.lat });
-                    }
+                    if (s && isFinite(s.lon) && isFinite(s.lat)) polyline.push({ lon: s.lon, lat: s.lat });
 
                     stops.push({
                         stopId: id,
@@ -6608,10 +6894,14 @@
                 // ✅ 지도 싹 초기화
                 safeClearAll();
 
-                // ✅✅✅ (핵심 수정 1) path 객체 보장
+                // ✅ (중요) 버튼 상태 초기화
+                $scope.pathPolylineReady = false;
+                $scope.pathPolylineExtent = null;
+                $scope.pathPolylineFeature = null;
+
+                // ✅ path 객체 보장
                 if (!$scope.path) $scope.path = {};
 
-                // ✅ 선택이 raw로 들어왔을 가능성 방어 (있을 때만)
                 if ($scope.path.from && !$scope.path.from.stopId && typeof normalizeStop === 'function') {
                     $scope.path.from = normalizeStop($scope.path.from);
                 }
@@ -6619,8 +6909,6 @@
                     $scope.path.to = normalizeStop($scope.path.to);
                 }
 
-                // ✅✅✅ (핵심 수정 2) from/to 객체 없어도 nodeId만 있으면 진행
-                // - 프로젝트마다 fromStopId/toStopId 또는 fromId/toId로 저장한 경우를 흡수
                 if (!$scope.path.fromNodeId) {
                     $scope.path.fromNodeId = String(($scope.path.from && $scope.path.from.stopId) || $scope.path.fromStopId || $scope.path.fromId || '').trim();
                 }
@@ -6628,7 +6916,6 @@
                     $scope.path.toNodeId = String(($scope.path.to && $scope.path.to.stopId) || $scope.path.toStopId || $scope.path.toId || '').trim();
                 }
 
-                // ✅ nodeId 기준으로만 검증
                 if (!($scope.path.fromNodeId && $scope.path.toNodeId)) {
                     return safeSetPathStatus('error', '출발/도착 nodeId가 비어있습니다. 후보를 다시 선택해 주세요.');
                 }
@@ -6644,7 +6931,6 @@
                     weight: $scope.path.weight || 'DIST', // DIST | TIME
                 };
 
-                // ✅ TRAM이면 프론트 계산(buildTramResponse), BUS/MIXED는 서버 호출
                 var promise;
                 if (String(params.mode).toUpperCase() === 'TRAM') {
                     promise = $q.when({ data: buildTramResponse(params.fromStopId, params.toStopId, params.weight) });
@@ -6665,9 +6951,38 @@
                         var r = res && res.data ? res.data : res || {};
                         console.log('[shortestPath raw]', r);
 
-                        var modeUpper = String((r && (r.mode != null ? r.mode : r.kind != null ? r.kind : r.type != null ? r.type : '')) || params.mode || '').toUpperCase();
+                        // ✅ stopIds/pathArr 먼저 확보
+                        var stopIds = Array.isArray(r && r.stopIds) ? r.stopIds : [];
+                        var pathArr = Array.isArray(r && r.path) ? r.path : [];
 
-                        var isMixed = modeUpper === 'MIXED';
+                        var reqModeUpper = String(params.mode || '').toUpperCase();
+
+                        function pickSegMode(seg) {
+                            var v =
+                                seg &&
+                                (seg.mode != null ? seg.mode : seg.kind != null ? seg.kind : seg.type != null ? seg.type : seg.vehicle != null ? seg.vehicle : seg.edgeType != null ? seg.edgeType : seg.transitType != null ? seg.transitType : '');
+                            v = String(v || '').toUpperCase();
+
+                            if (v === 'FOOT' || v === 'PED' || v === 'WALKING') v = 'WALK';
+                            if (v === 'LINK' || v === 'XFER') v = 'TRANSFER';
+                            return v;
+                        }
+
+                        var hasBus = false,
+                            hasTram = false,
+                            hasWalk = false,
+                            hasTransfer = false;
+
+                        for (var i = 0; i < pathArr.length; i++) {
+                            var mm = pickSegMode(pathArr[i]);
+                            if (mm === 'BUS') hasBus = true;
+                            else if (mm === 'TRAM') hasTram = true;
+                            else if (mm === 'TRANSFER') hasTransfer = true;
+                            else if (mm) hasWalk = true;
+                        }
+
+                        var isMixed = reqModeUpper === 'MIXED' || (hasBus && hasTram);
+                        var modeUpper = isMixed ? 'MIXED' : String(reqModeUpper || 'BUS').toUpperCase();
 
                         if (r && r.found === false) {
                             safeClearAll();
@@ -6687,9 +7002,6 @@
                             endLoading();
                             return;
                         }
-
-                        var stopIds = Array.isArray(r.stopIds) ? r.stopIds : [];
-                        var pathArr = Array.isArray(r.path) ? r.path : [];
 
                         var serverTransfers = pickTransfersCount(r);
                         var computedTransfers = computeTransfersFromPath(pathArr);
@@ -6732,7 +7044,6 @@
                                 tLon = Number(sN && (sN.lon != null ? sN.lon : sN.gpslong != null ? sN.gpslong : sN.gpsLong));
                                 tLat = Number(sN && (sN.lat != null ? sN.lat : sN.gpslati != null ? sN.gpslati : sN.gpsLat));
                             } else {
-                                // from/to 객체 없을 수 있으니 방어
                                 var fromObj = $scope.path.from || {};
                                 var toObj = $scope.path.to || {};
                                 fLat = Number(fromObj.gpslati || fromObj.gpsLat || fromObj.lat);
@@ -6751,11 +7062,8 @@
                                 if (d2 >= 5) walkDistM += d2;
                             }
 
-                            if (walkDistM > 0 && WALK_SPEED_MPS > 0) {
-                                walkTimeS = Math.round(walkDistM / WALK_SPEED_MPS);
-                            } else {
-                                walkTimeS = 0;
-                            }
+                            if (walkDistM > 0 && WALK_SPEED_MPS > 0) walkTimeS = Math.round(walkDistM / WALK_SPEED_MPS);
+                            else walkTimeS = 0;
                         })();
 
                         $scope.pathResult = {
@@ -6775,9 +7083,8 @@
                         var okDraw = false;
 
                         if (isMixed) {
-                            if (typeof drawMixedSegmentsFromResult === 'function') {
-                                okDraw = !!drawMixedSegmentsFromResult(r);
-                            } else {
+                            if (typeof drawMixedSegmentsFromResult === 'function') okDraw = !!drawMixedSegmentsFromResult(r);
+                            else {
                                 okDraw = false;
                                 console.warn('[MIXED] drawMixedSegmentsFromResult 함수가 없습니다.');
                             }
@@ -6785,6 +7092,40 @@
                             if (Array.isArray(coordsLonLat) && coordsLonLat.length >= 2) {
                                 okDraw = typeof drawPathPolylineLonLat === 'function' ? !!drawPathPolylineLonLat(coordsLonLat, modeUpper) : false;
                             }
+                        }
+
+                        // ✅✅✅ (핵심) 버튼 unlock: okDraw 기준으로 ready/extent 세팅
+                        if (okDraw) {
+                            if (isMixed) {
+                                // ✅ ext는 여기서 "항상" 정의되게 만든다 (ReferenceError 방지)
+                                var ext = null;
+
+                                try {
+                                    // MIXED는 pathVectorSource가 비어있을 수 있으니,
+                                    // mixed 소스들의 extent를 합쳐서 사용
+                                    if (typeof computeExtentFromSources === 'function') {
+                                        ext = computeExtentFromSources([mixedBusSource, mixedTramSource, mixedWalkSource, typeof mixedTransferSource !== 'undefined' ? mixedTransferSource : null]);
+                                    } else {
+                                        console.warn('[MIXED] computeExtentFromSources is not defined');
+                                        ext = null;
+                                    }
+                                } catch (e) {
+                                    console.warn('[MIXED] computeExtentFromSources failed:', e);
+                                    ext = null;
+                                }
+
+                                $scope.pathPolylineExtent = ext && isValidExtent(ext) ? ext : null;
+                                $scope.pathPolylineFeature = null; // MIXED는 단일 feature 없음
+                                $scope.pathPolylineReady = true;
+                            } else {
+                                // 단일은 drawPathPolylineLonLat 내부에서 extent/ready를 세팅할 수도 있지만,
+                                // 혹시 안 하면 여기서라도 unlock
+                                if (!$scope.pathPolylineReady) $scope.pathPolylineReady = true;
+                            }
+                        } else {
+                            $scope.pathPolylineReady = false;
+                            $scope.pathPolylineExtent = null;
+                            $scope.pathPolylineFeature = null;
                         }
 
                         if (!okDraw) {
@@ -6809,7 +7150,6 @@
                             if (isFinite(tLat3) && isFinite(tLon3)) drawStopMarker(tLon3, tLat3, '#22c55e', '도착', 'TO');
                         }
 
-                        // 상태 문구 (from/to 없을 수 있으니 방어)
                         var fromName =
                             $scope.path && $scope.path.from && ($scope.path.from.name || $scope.path.from.nodenm || $scope.path.from.nodeNm)
                                 ? $scope.path.from.name || $scope.path.from.nodenm || $scope.path.from.nodeNm
@@ -6838,6 +7178,8 @@
                                 finalTransfers +
                                 '회)'
                         );
+
+                        $scope.$applyAsync(); // ✅ 화면 반영 안전
 
                         endLoading();
                     },
@@ -6895,6 +7237,9 @@
 
         // =========================================================
         // ✅ "경로로 이동하기" 버튼 동작 (fit + 경로만 보기)
+        // - MIXED에서도 extent만 있으면 이동 가능
+        // - extent 유효성 검사 추가
+        // - setOnlyPathVisible 없어도 크래시 안 나게 방어
         // =========================================================
         $scope.goToPathOnMap = function () {
             try {
@@ -6904,15 +7249,50 @@
                 var view = map.getView && map.getView();
                 if (!view || !view.fit) return;
 
+                function isValidExtent(ext) {
+                    return ext && ext.length === 4 && isFinite(ext[0]) && isFinite(ext[1]) && isFinite(ext[2]) && isFinite(ext[3]) && !(ext[0] === ext[2] && ext[1] === ext[3]);
+                }
+
                 var ext = $scope.pathPolylineExtent;
 
-                if (!ext && $scope.pathPolylineFeature) {
+                // 1) extent가 없으면 feature에서 재추출(단일 모드용)
+                if (!isValidExtent(ext) && $scope.pathPolylineFeature) {
                     var geom = $scope.pathPolylineFeature.getGeometry && $scope.pathPolylineFeature.getGeometry();
                     if (geom && geom.getExtent) ext = geom.getExtent();
                 }
 
-                if (!ext) {
-                    if (typeof setPathStatus === 'function') setPathStatus('error', '이동할 경로 범위를 찾지 못했습니다. (polyline/extent 없음)');
+                // 2) 그래도 없으면: MIXED 레이어(source) extent를 합쳐서 생성(있을 때만)
+                //    - mixedBusSource/mixedTramSource/mixedWalkSource/mixedTransferSource가 전역이면 잡힘
+                if (!isValidExtent(ext) && window.ol && ol.extent) {
+                    var sources = [];
+                    if (typeof mixedBusSource !== 'undefined' && mixedBusSource) sources.push(mixedBusSource);
+                    if (typeof mixedTramSource !== 'undefined' && mixedTramSource) sources.push(mixedTramSource);
+                    if (typeof mixedWalkSource !== 'undefined' && mixedWalkSource) sources.push(mixedWalkSource);
+                    if (typeof mixedTransferSource !== 'undefined' && mixedTransferSource) sources.push(mixedTransferSource);
+
+                    if (sources.length) {
+                        var merged = ol.extent.createEmpty();
+                        var any = false;
+
+                        for (var i = 0; i < sources.length; i++) {
+                            var src = sources[i];
+                            if (!src || !src.getExtent) continue;
+
+                            var e = src.getExtent();
+                            if (!isValidExtent(e)) continue;
+
+                            ol.extent.extend(merged, e);
+                            any = true;
+                        }
+
+                        if (any) ext = merged;
+                    }
+                }
+
+                if (!isValidExtent(ext)) {
+                    if (typeof setPathStatus === 'function') {
+                        setPathStatus('error', '이동할 경로 범위를 찾지 못했습니다. (extent 없음/유효하지 않음)');
+                    }
                     return;
                 }
 
@@ -6922,11 +7302,17 @@
                     maxZoom: 17,
                 });
 
-                // ✅✅✅ 추가: 경로만 보기 모드 ON
+                // ✅✅✅ 경로만 보기 모드 ON (함수 없어도 크래시 방지)
                 $scope.onlyPathMode = true;
-                setOnlyPathVisible(true);
+                try {
+                    if (typeof setOnlyPathVisible === 'function') setOnlyPathVisible(true);
+                } catch (e2) {
+                    console.warn('[goToPathOnMap] setOnlyPathVisible fail:', e2);
+                }
 
-                if (typeof setPathStatus === 'function') setPathStatus('ok', '지도 영역을 경로로 맞췄습니다. (경로만 표시)');
+                if (typeof setPathStatus === 'function') {
+                    setPathStatus('ok', '지도 영역을 경로로 맞췄습니다. (경로만 표시)');
+                }
             } catch (e) {
                 console.error('[goToPathOnMap] fail:', e);
                 if (typeof setPathStatus === 'function') setPathStatus('error', '경로로 이동 중 오류가 발생했습니다.');

@@ -1138,7 +1138,8 @@
                                             style="margin-bottom: 8px; font-size: 12px; color: #6b7280"
                                             ng-if="selectedStop"
                                         >
-                                            선택 정류장: <b>{{ selectedStop.nodenm || selectedStop.nodeNm || selectedStop.name }}</b>
+                                            선택 정류장:
+                                            <b>{{ selectedStop.nodenm || selectedStop.nodeNm || selectedStop.name }}</b>
                                         </div>
 
                                         <div
@@ -1194,7 +1195,6 @@
                                                 <span class="muted">시작 버튼 없이 자동으로 수집됩니다</span>
                                             </div>
 
-                                            <!-- ✅✅✅ 간단 요약 -->
                                             <div
                                                 class="collect-mini"
                                                 style="margin-bottom: 10px"
@@ -1205,7 +1205,6 @@
                                                 </div>
                                                 <div><b>마지막:</b> {{collectUi.lastAt || '-'}}</div>
 
-                                                <!-- ✅✅✅ [수정] 여기 ‘최근 결과’에 출발/도착 ETA(분/초) 같이 출력 -->
                                                 <div>
                                                     <b>최근 결과:</b>
                                                     {{collectUi.lastMsg || '-'}}
@@ -1221,7 +1220,6 @@
                                                 <div><b>누적 저장:</b> {{collectUi.savedCount || 0}}</div>
                                             </div>
 
-                                            <!-- ✅✅✅ 버튼: 중지/재개만 -->
                                             <div class="collect-bar">
                                                 <div class="collect-left">
                                                     <span
@@ -1366,20 +1364,23 @@
                                                     class="row"
                                                     ng-if="selectedStop"
                                                 >
-                                                    <b>정류장명:</b> {{ selectedStop.nodenm || selectedStop.nodeNm || selectedStop.name || '-' }}
+                                                    <b>정류장명:</b>
+                                                    {{ selectedStop.nodenm || selectedStop.nodeNm || selectedStop.name || '-' }}
                                                 </div>
                                                 <div
                                                     class="row"
                                                     ng-if="selectedStop"
                                                 >
-                                                    <b>정류장ID:</b> {{ selectedStop.stopId || selectedStop.stop_id || selectedStop.nodeid || selectedStop.nodeId || selectedStop.id || '-' }}
+                                                    <b>정류장ID:</b>
+                                                    {{ selectedStop.stopId || selectedStop.stop_id || selectedStop.nodeid || selectedStop.nodeId || selectedStop.id || '-' }}
                                                 </div>
 
                                                 <div
                                                     class="row"
                                                     ng-if="selectedBus"
                                                 >
-                                                    <b>차량/표시:</b> {{ selectedBus.plateNo || selectedBus.busNo || selectedBus.id || '-' }}
+                                                    <b>차량/표시:</b>
+                                                    {{ selectedBus.plateNo || selectedBus.busNo || selectedBus.id || '-' }}
                                                 </div>
                                                 <div
                                                     class="row"
@@ -1434,7 +1435,6 @@
                                                     </button>
                                                 </div>
 
-                                                <!-- ✅✅✅ [추가] 경로설정 박스 안에도 ETA 바로 보여주기 -->
                                                 <div style="display: flex; gap: 8px; flex-wrap: wrap; padding: 0 4px; margin-top: 2px">
                                                     <span class="chip green">출발 ETA: <b>{{collectFromEtaText || '-'}}</b></span>
                                                     <span class="chip blue">도착 ETA: <b>{{collectToEtaText || '-'}}</b></span>
@@ -1454,15 +1454,14 @@
                                                 </div>
 
                                                 <div style="display: flex; gap: 8px; flex-wrap: wrap; padding: 0 4px">
-                                                    <!-- ✅ 변경된 버튼: findShortestPath && 가드 제거 -->
                                                     <button
                                                         class="fbtn primary"
                                                         type="button"
                                                         ng-click="
-                                                            path.fromNodeId=(collect.fromStopId || (collect.from && collect.from.stopId));
-                                                            path.toNodeId=(collect.toStopId || (collect.to && collect.to.stopId));
-                                                            findShortestPath();
-                                                        "
+                              path.fromNodeId=(collect.fromStopId || (collect.from && collect.from.stopId));
+                              path.toNodeId=(collect.toStopId || (collect.to && collect.to.stopId));
+                              findShortestPath();
+                            "
                                                         ng-disabled="pathLoading || !((collect.fromStopId || (collect.from && collect.from.stopId)) && (collect.toStopId || (collect.to && collect.to.stopId)))"
                                                     >
                                                         ▶ 경로 탐색
@@ -1477,10 +1476,20 @@
                                                     </button>
                                                 </div>
 
+                                                <!-- ✅✅✅ 여기 결과 표시를 “보기 좋은 포맷(거리/시간)”으로 변경 -->
                                                 <div style="margin-top: 4px; font-size: 12px; color: #334155; display: flex; gap: 6px; flex-wrap: wrap; padding: 0 4px">
-                                                    <span class="chip">거리: <b>{{ (pathResult && pathResult.totalDistM != null) ? ((pathResult.totalDistM | number:0) + ' m') : '-' }}</b></span>
-                                                    <span class="chip">시간: <b>{{ (pathResult && pathResult.totalTimeS != null) ? (formatDuration && formatDuration(pathResult.totalTimeS)) : '-' }}</b></span>
-                                                    <span class="chip">환승: <b>{{ (pathResult && pathResult.transfersCount != null) ? pathResult.transfersCount : '-' }}</b></span>
+                                                    <span class="chip">
+                                                        거리:
+                                                        <b>{{ (pathResult && pathResult.totalDistM != null) ? (formatDistance && formatDistance(pathResult.totalDistM)) : '-' }}</b>
+                                                    </span>
+                                                    <span class="chip">
+                                                        시간:
+                                                        <b>{{ (pathResult && pathResult.totalTimeS != null) ? (formatDuration && formatDuration(pathResult.totalTimeS)) : '-' }}</b>
+                                                    </span>
+                                                    <span class="chip">
+                                                        환승:
+                                                        <b>{{ (pathResult && pathResult.transfersCount != null) ? pathResult.transfersCount : '-' }}</b>
+                                                    </span>
                                                 </div>
 
                                                 <div
@@ -1488,7 +1497,7 @@
                                                     ng-if="pathStatusMsg"
                                                     style="color: #64748b; padding: 0 4px"
                                                 >
-                                                    {{pathStatusMsg}}
+                                                    최단경로 계산 완료
                                                 </div>
                                             </div>
                                         </div>
@@ -1673,6 +1682,10 @@
                                     // injector에서 $q 확보
                                     var injector = el.injector && el.injector();
                                     var $q = injector && injector.get ? injector.get('$q') : null;
+
+                                    // ✅✅✅ (추가) 전역 포맷 함수들을 Angular scope에서 바로 쓰게 연결
+                                    s.formatDuration = window.formatDuration;
+                                    s.formatDistance = window.formatDistance;
 
                                     // ✅ UI 모델
                                     s.collectUi = s.collectUi || { running: false, lastAt: '', lastMsg: '', savedCount: 0 };
@@ -1960,8 +1973,9 @@
             })();
         </script>
 
-        <!-- ✅ '초 -> 31분 43초' 포맷 유틸(전역) -->
+        <!-- ✅✅✅ (수정) 포맷 유틸: 시간 + 거리 둘 다 제공 -->
         <script>
+            // ✅ '초 -> 31분 43초' 포맷 유틸(전역)
             window.formatDuration = function (sec) {
                 var s = Math.round(Number(sec) || 0);
                 if (s < 0) s = 0;
@@ -1973,6 +1987,14 @@
                 if (h <= 0 && m <= 0) return r + '초';
                 if (h > 0) return h + '시간 ' + String(m).padStart(2, '0') + '분 ' + String(r).padStart(2, '0') + '초';
                 return m + '분 ' + String(r).padStart(2, '0') + '초';
+            };
+
+            // ✅ 'm -> 27,351 m' or '27.35 km' 포맷 유틸(전역)
+            window.formatDistance = function (meter) {
+                var m = Number(meter);
+                if (!isFinite(m) || m <= 0) return '0 m';
+                if (m >= 1000) return (m / 1000).toFixed(2) + ' km';
+                return Math.round(m) + ' m';
             };
         </script>
     </body>
