@@ -233,9 +233,15 @@
             ensureDefaultUsersTab();
             const path = $location.path();
             const tab = $location.search().tab;
+
             $scope.showWelcome = path === '/users' && (!tab || tab === 'home');
             $scope.showBusTab = path === '/users' && tab === 'bus';
+
+            // ✅✅✅ 핵심: autoCollect bootstrap이 $rootScope.showBusTab을 보고 붙으므로 미러링 필요
+            $rootScope.showWelcome = $scope.showWelcome;
+            $rootScope.showBusTab = $scope.showBusTab;
         }
+
         syncTabs();
 
         $scope.goHome = function () {
@@ -6921,6 +6927,7 @@
                 }
 
                 $scope.pathLoading = true;
+                // ✅ (원하면 여기 메시지도 짧게: '계산 중...')
                 safeSetPathStatus('info', '최단경로 계산 중...(실제 계산)');
 
                 var params = {
@@ -7150,37 +7157,12 @@
                             if (isFinite(tLat3) && isFinite(tLon3)) drawStopMarker(tLon3, tLat3, '#22c55e', '도착', 'TO');
                         }
 
-                        var fromName =
-                            $scope.path && $scope.path.from && ($scope.path.from.name || $scope.path.from.nodenm || $scope.path.from.nodeNm)
-                                ? $scope.path.from.name || $scope.path.from.nodenm || $scope.path.from.nodeNm
-                                : $scope.path.fromNodeId || '-';
-
-                        var toName = $scope.path && $scope.path.to && ($scope.path.to.name || $scope.path.to.nodenm || $scope.path.to.nodeNm) ? $scope.path.to.name || $scope.path.to.nodenm || $scope.path.to.nodeNm : $scope.path.toNodeId || '-';
-
-                        safeSetPathStatus(
-                            'ok',
-                            '최단경로 계산 완료: ' +
-                                fromName +
-                                ' → ' +
-                                toName +
-                                ' (모드 ' +
-                                modeUpper +
-                                ', 거리 ' +
-                                (($scope.pathResult && $scope.pathResult.totalDistM) || 0) +
-                                'm' +
-                                ', 시간 ' +
-                                (($scope.pathResult && $scope.pathResult.totalTimeS) || 0) +
-                                's' +
-                                ', 도보 ' +
-                                (($scope.pathResult && $scope.pathResult.walkTimeS) || 0) +
-                                's' +
-                                ', 환승 ' +
-                                finalTransfers +
-                                '회)'
-                        );
+                        // =========================================================
+                        // ✅✅✅ 3) 성공 문구 (요청대로 "최단경로 계산완료"만 출력)
+                        // =========================================================
+                        safeSetPathStatus('ok', '최단경로 계산완료');
 
                         $scope.$applyAsync(); // ✅ 화면 반영 안전
-
                         endLoading();
                     },
                     function (err) {
