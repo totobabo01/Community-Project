@@ -815,6 +815,10 @@
         const routePathIndex = {}; // routeId -> { dirs, proj }
         const routePathPromise = {}; // routeId -> Promise
 
+        // ✅ 디버그/호출용 전역 노출 (필수)
+        window.routePathIndex = routePathIndex;
+        window.routePathPromise = routePathPromise;
+
         // 마지막 클릭 토글용
         let lastPickedKey = null;
         let lastPickedKind = null;
@@ -3208,11 +3212,6 @@
             // ✅ 단일 모드: opts.mode로 받는다 (기본 BUS)
             var modeUpper = String(opts.mode || 'BUS').toUpperCase();
 
-            // ✅ hover는 단일/혼합 모두 받게 (한 번만 바인딩)
-            try {
-                ensureSegmentHoverHandler(map, ['single-seg', 'mixed-seg']);
-            } catch (e) {}
-
             // ✅ 기존 route line/marker 지우기
             try {
                 if (typeof clearRouteLayer === 'function') clearRouteLayer();
@@ -3220,13 +3219,6 @@
             } catch (e) {}
 
             // ✅ 단일 세그먼트로 그리기 (info.dirs에서 ALL/UP/DOWN 중 하나 사용)
-            // - drawSingleRouteSegmentsFromCached는 cached에서 stops/coords를 찾으려 했는데,
-            //   너 캐시는 coords가 dirs.*(projection 좌표)로 들어있음.
-            //   그래서 여기서 "lon/lat stopList"를 만들기 어렵다.
-            //
-            // ✅ 해결: dirs의 projection 좌표를 그대로 세그먼트로 쪼개서 그린다.
-            // (거리/시간은 geometry length 기반으로, mode speed로 time 추정)
-
             var dirs = info.dirs || {};
             var coordsProj = (dirs.ALL && dirs.ALL.length >= 2 && dirs.ALL) || (dirs.UP && dirs.UP.length >= 2 && dirs.UP) || (dirs.DOWN && dirs.DOWN.length >= 2 && dirs.DOWN) || null;
 
@@ -3235,18 +3227,14 @@
                 return false;
             }
 
-            // ✅ mode별 속도(m/s) - 단일은 대략 추정 (너가 원하면 튜닝)
+            // ✅ mode별 속도(m/s) - 단일은 대략 추정
             function speedMps(modeUpper) {
                 if (modeUpper === 'TRAM') return 7.0;
                 if (modeUpper === 'BUS') return 6.0;
                 return 1.2;
             }
 
-            // ✅ proj 좌표 거리(미터)를 얻기 위해 geometry length 사용
-            // - NGII/OpenLayers projection에서는 대체로 meter 단위로 동작함(대부분 EPSG:3857류)
-            // - 만약 proj이 degrees면 time/dist가 이상할 수 있음 → 그때는 stops lonlat가 필요
             var sp = speedMps(modeUpper);
-
             var drawn = 0;
 
             for (var i = 1; i < coordsProj.length; i++) {
@@ -3283,6 +3271,12 @@
                 console.warn('[tryDrawFromCacheKey] drawn=0 (coords too short?)', cacheKey);
                 return false;
             }
+
+            // ✅✅✅ [핵심] 세그먼트가 실제로 생긴 뒤 hover 바인딩 (1번만)
+            // 🔥 path 레이어 허용까지 추가
+            try {
+                ensureSegmentHoverHandler(map, ['single-seg', 'mixed-seg'], ['path']);
+            } catch (e) {}
 
             // ✅ 단일 경로 정류장 마커: coordsProj 점들을 마커로 표시(너무 많으면 간격 표시)
             try {
@@ -3330,14 +3324,14 @@
         function __getMapSafe() {
             try {
                 if (typeof getInnerOlMap === 'function') {
-                    const m = getInnerOlMap();
+                    var m = getInnerOlMap();
                     if (m) return m;
                 }
             } catch (e) {}
 
             try {
                 if (typeof window.__getInnerOlMap === 'function') {
-                    const m2 = window.__getInnerOlMap();
+                    var m2 = window.__getInnerOlMap();
                     if (m2) return m2;
                 }
             } catch (e) {}
@@ -3386,13 +3380,13 @@
         // =========================================================
         function loadRoutePath(routeId, opts) {
             opts = opts || {};
-            const draw = !!opts.draw;
+            var draw = !!opts.draw;
 
-            const rid = String(routeId || '').trim();
+            var rid = String(routeId || '').trim();
             if (!rid) return $q.resolve(null);
 
-            const cc = String(opts.cityCode || (typeof CITY_CODE !== 'undefined' ? CITY_CODE : 25) || 25).trim();
-            const cacheKey = makeCacheKey(cc, rid);
+            var cc = String(opts.cityCode || (typeof CITY_CODE !== 'undefined' ? CITY_CODE : 25) || 25).trim();
+            var cacheKey = makeCacheKey(cc, rid);
 
             // ✅ 캐시 있으면 즉시 반환 (+ draw 옵션이면 즉시 그림)
             if (routePathIndex[cacheKey]) {
@@ -3417,11 +3411,10 @@
             }
 
             // ✅ map 안전 획득 (getInnerOlMap 없거나 늦게 생성되는 경우 대비)
-            let map = __getMapSafe();
+            var map = __getMapSafe();
             if (!map || !window.ol) {
-                // map이 늦게 생성되는 프로젝트 대비: 2회 정도 짧게 재시도
-                const defer2 = $q.defer();
-                let tries = 0;
+                var defer2 = $q.defer();
+                var tries = 0;
 
                 (function retryMap() {
                     tries++;
@@ -3439,7 +3432,6 @@
 
                 return defer2.promise.then(function (m) {
                     if (!m || !window.ol) return null;
-                    // ✅ 재귀 호출로 정상 플로우 탑승
                     return loadRoutePath(rid, opts);
                 });
             }
@@ -3450,14 +3442,14 @@
                 __ensureRouteSourceExposed();
             } catch (e) {}
 
-            const defer = $q.defer();
+            var defer = $q.defer();
             routePathPromise[cacheKey] = defer.promise;
 
             // ---------- 유틸 ----------
             function normDirKey(v) {
-                const s = String(v || '').toUpperCase();
-                if (s === '0' || s === 'UP' || s === 'U' || s.includes('상')) return 'UP';
-                if (s === '1' || s === 'DOWN' || s === 'D' || s.includes('하')) return 'DOWN';
+                var s = String(v || '').toUpperCase();
+                if (s === '0' || s === 'UP' || s === 'U' || s.indexOf('상') >= 0) return 'UP';
+                if (s === '1' || s === 'DOWN' || s === 'D' || s.indexOf('하') >= 0) return 'DOWN';
                 return 'ALL';
             }
 
@@ -3467,11 +3459,11 @@
 
             function pickLonLat(p) {
                 if (!p) return null;
-                const latRaw = p.gpslati ?? p.gpsLati ?? p.gpsLat ?? p.gpsY ?? p.lat ?? p.latitude ?? p.y ?? p.mapY ?? p.posY ?? p.tmY;
-                const lonRaw = p.gpslong ?? p.gpsLong ?? p.gpsLon ?? p.gpsX ?? p.lon ?? p.longitude ?? p.x ?? p.mapX ?? p.posX ?? p.tmX;
+                var latRaw = p.gpslati ?? p.gpsLati ?? p.gpsLat ?? p.gpsY ?? p.lat ?? p.latitude ?? p.y ?? p.mapY ?? p.posY ?? p.tmY;
+                var lonRaw = p.gpslong ?? p.gpsLong ?? p.gpsLon ?? p.gpsX ?? p.lon ?? p.longitude ?? p.x ?? p.mapX ?? p.posX ?? p.tmX;
 
-                const lat = Number(latRaw);
-                const lon = Number(lonRaw);
+                var lat = Number(latRaw);
+                var lon = Number(lonRaw);
                 if (!isFinite(lat) || !isFinite(lon)) return null;
 
                 // ✅ [lat,lon] 뒤집힘 방어
@@ -3486,18 +3478,17 @@
             function buildFromLonLatList(coordsLonLat, proj) {
                 if (!coordsLonLat || coordsLonLat.length < 2) return null;
 
-                // 중복 제거
-                const filtered = [];
-                let prevLon = null,
+                var filtered = [];
+                var prevLon = null,
                     prevLat = null;
 
                 coordsLonLat.forEach(function (xy) {
-                    const lon = Number(xy && xy[0]);
-                    const lat = Number(xy && xy[1]);
+                    var lon = Number(xy && xy[0]);
+                    var lat = Number(xy && xy[1]);
                     if (!isFinite(lon) || !isFinite(lat)) return;
 
-                    const rLon = Math.round(lon * 1e6) / 1e6;
-                    const rLat = Math.round(lat * 1e6) / 1e6;
+                    var rLon = Math.round(lon * 1e6) / 1e6;
+                    var rLat = Math.round(lat * 1e6) / 1e6;
                     if (prevLon === rLon && prevLat === rLat) return;
 
                     filtered.push([lon, lat]);
@@ -3507,11 +3498,11 @@
 
                 if (filtered.length < 2) return null;
 
-                const dense = typeof densifyCoords === 'function' ? densifyCoords(filtered, 1) : filtered;
-                const smooth = typeof chaikinSmooth === 'function' ? chaikinSmooth(dense, 1) : dense;
+                var dense = typeof densifyCoords === 'function' ? densifyCoords(filtered, 1) : filtered;
+                var smooth = typeof chaikinSmooth === 'function' ? chaikinSmooth(dense, 1) : dense;
 
-                const projected = smooth.map(function (xy) {
-                    const lon = xy[0],
+                var projected = smooth.map(function (xy) {
+                    var lon = xy[0],
                         lat = xy[1];
                     if (proj && ol.proj && ol.proj.transform) return ol.proj.transform([lon, lat], 'EPSG:4326', proj);
                     return [lon, lat];
@@ -3532,58 +3523,58 @@
                         return;
                     }
 
-                    const list = raw.list;
+                    var list = raw.list;
 
-                    const view = map.getView && map.getView();
-                    const proj = (view && view.getProjection && view.getProjection()) || mapProjection;
+                    var view = map.getView && map.getView();
+                    var proj = (view && view.getProjection && view.getProjection()) || mapProjection;
 
                     // 그룹핑(dir)
-                    const groups = new Map();
+                    var groups = new Map();
                     list.forEach(function (p) {
-                        const k = pickDirKey(p);
+                        var k = pickDirKey(p);
                         if (!groups.has(k)) groups.set(k, []);
                         groups.get(k).push(p);
                     });
 
                     // dirs 생성
-                    const dirCoordsMap = {};
+                    var dirCoordsMap = {};
                     groups.forEach(function (arr, k) {
                         if (!arr || arr.length < 2) return;
 
                         arr.sort(function (a, b) {
-                            const aOrdRaw = a && (a.nodeord ?? a.nodeOrd ?? a.nodeseq ?? a.nodeSeq ?? a.seq ?? a.ord);
-                            const bOrdRaw = b && (b.nodeord ?? b.nodeOrd ?? b.nodeseq ?? b.nodeSeq ?? b.seq ?? b.ord);
-                            const aOrd = isFinite(parseInt(aOrdRaw, 10)) ? parseInt(aOrdRaw, 10) : 0;
-                            const bOrd = isFinite(parseInt(bOrdRaw, 10)) ? parseInt(bOrdRaw, 10) : 0;
+                            var aOrdRaw = a && (a.nodeord ?? a.nodeOrd ?? a.nodeseq ?? a.nodeSeq ?? a.seq ?? a.ord);
+                            var bOrdRaw = b && (b.nodeord ?? b.nodeOrd ?? b.nodeseq ?? b.nodeSeq ?? b.seq ?? b.ord);
+                            var aOrd = isFinite(parseInt(aOrdRaw, 10)) ? parseInt(aOrdRaw, 10) : 0;
+                            var bOrd = isFinite(parseInt(bOrdRaw, 10)) ? parseInt(bOrdRaw, 10) : 0;
                             return aOrd - bOrd;
                         });
 
-                        const coordsLonLat = [];
+                        var coordsLonLat = [];
                         arr.forEach(function (p2) {
-                            const ll = pickLonLat(p2);
+                            var ll = pickLonLat(p2);
                             if (ll) coordsLonLat.push([ll.lon, ll.lat]);
                         });
 
-                        const projected = buildFromLonLatList(coordsLonLat, proj);
+                        var projected = buildFromLonLatList(coordsLonLat, proj);
                         if (projected && projected.length >= 2) dirCoordsMap[k] = projected;
                     });
 
                     // ALL 보정
                     if ((!dirCoordsMap.ALL || dirCoordsMap.ALL.length < 2) && (dirCoordsMap.UP || dirCoordsMap.DOWN)) {
-                        const up = dirCoordsMap.UP && dirCoordsMap.UP.length >= 2 ? dirCoordsMap.UP : null;
-                        const down = dirCoordsMap.DOWN && dirCoordsMap.DOWN.length >= 2 ? dirCoordsMap.DOWN : null;
+                        var up = dirCoordsMap.UP && dirCoordsMap.UP.length >= 2 ? dirCoordsMap.UP : null;
+                        var down = dirCoordsMap.DOWN && dirCoordsMap.DOWN.length >= 2 ? dirCoordsMap.DOWN : null;
                         if (up) dirCoordsMap.ALL = up;
                         else if (down) dirCoordsMap.ALL = down;
                     }
 
-                    const cached = {
+                    var cached = {
                         dirs: dirCoordsMap,
                         proj: proj,
                         cityCode: cc,
                         routeId: rid,
                         cacheKey: cacheKey,
                         _rawLen: list.length,
-                        _raw: raw, // ✅ 디버깅/마커용으로 원본도 같이 보관
+                        _raw: raw,
                     };
 
                     routePathIndex[cacheKey] = cached;
@@ -3670,24 +3661,40 @@
         }
 
         // =========================================================
-        // ✅✅✅ [REPLACE] 공통 Hover 핸들러 (single/mixed 모두 지원)
+        // ✅✅✅ [REPLACE] 공통 Hover 핸들러 (single/mixed + path 레이어 지원)
         // - 클릭이 아니라 "마우스 올리면" 팝업 뜸
-        // - ✅ 바인딩은 1번만, 대신 allowedTags는 매번 갱신 가능
+        // - ✅ 바인딩은 1번만, 대신 allowedTags/allowedLayerTags는 매번 갱신 가능
+        // - ✅ segTag 없고 geometry만 있는 path 라인도 layerTag로 허용
+        // - ✅ LineString / MultiLineString 모두 지원
+        // - ✅ distM/timeS 없으면 geometry 길이로 계산 + 임시 속도로 time 추정
         // =========================================================
         var __segHoverBound = false;
         var __segHoverOverlay = null;
         var __segHoverEl = null;
-        var __segHoverAllowedTags = ['mixed-seg', 'single-seg']; // ✅ 최신 허용 태그 저장
 
-        function ensureSegmentHoverHandler(map, allowedTags) {
+        // ✅ 최신 허용 목록 저장
+        var __segHoverAllowedTags = ['mixed-seg', 'single-seg']; // feature.get('segTag')
+        var __segHoverAllowedLayerTags = ['path']; // layer.get('tag')
+
+        // (선택) 디버그 켜고싶으면 true
+        var __segHoverDebug = false;
+
+        function ensureSegmentHoverHandler(map, allowedTags, allowedLayerTags) {
             try {
                 if (!map || !map.on || !window.ol) return false;
 
-                // ✅ allowedTags는 매 호출마다 최신으로 갱신
+                // ✅ allowedTags 최신화
                 if (Array.isArray(allowedTags) && allowedTags.length) {
                     __segHoverAllowedTags = allowedTags.slice();
                 } else {
                     __segHoverAllowedTags = ['mixed-seg', 'single-seg'];
+                }
+
+                // ✅ allowedLayerTags 최신화
+                if (Array.isArray(allowedLayerTags) && allowedLayerTags.length) {
+                    __segHoverAllowedLayerTags = allowedLayerTags.slice();
+                } else {
+                    __segHoverAllowedLayerTags = ['path']; // 네 프로젝트 단일 경로 레이어 tag=path
                 }
 
                 // ✅ overlay element 준비
@@ -3740,26 +3747,83 @@
                     return '🚶 도보 구간';
                 }
 
+                // ✅ dist/time 없을 때 임시 계산(나중에 실제 timeS 넣으면 자동으로 그걸 사용)
+                function estimateTimeSByMode(distM, modeUpper) {
+                    modeUpper = String(modeUpper || '').toUpperCase();
+                    var speed = modeUpper === 'TRAM' ? 7.0 : modeUpper === 'BUS' ? 6.0 : 1.2; // m/s
+                    if (!isFinite(distM) || distM <= 0) return -1;
+                    return Math.round(distM / speed);
+                }
+
+                // ✅ geometry 길이 안전 계산 (LineString / MultiLineString 모두 지원)
+                function calcDistMeters(geom) {
+                    if (!geom) return -1;
+
+                    // 1) sphere.getLength 우선 (가능하면 정확)
+                    try {
+                        if (window.ol && ol.sphere && typeof ol.sphere.getLength === 'function') {
+                            var len1 = ol.sphere.getLength(geom);
+                            if (isFinite(len1) && len1 >= 0) return len1;
+                        }
+                    } catch (e1) {}
+
+                    // 2) geom.getLength (LineString이면 보통 있음)
+                    try {
+                        if (typeof geom.getLength === 'function') {
+                            var len2 = geom.getLength();
+                            if (isFinite(len2) && len2 >= 0) return len2;
+                        }
+                    } catch (e2) {}
+
+                    // 3) MultiLineString이면 각 라인 getLength 합산
+                    try {
+                        if (typeof geom.getLineStrings === 'function') {
+                            var lines = geom.getLineStrings();
+                            if (lines && lines.length) {
+                                var sum = 0;
+                                for (var i = 0; i < lines.length; i++) {
+                                    var li = lines[i];
+                                    if (li && typeof li.getLength === 'function') {
+                                        var l3 = li.getLength();
+                                        if (isFinite(l3)) sum += l3;
+                                    }
+                                }
+                                if (isFinite(sum) && sum >= 0) return sum;
+                            }
+                        }
+                    } catch (e3) {}
+
+                    return -1;
+                }
+
                 // ✅ 이미 bind 됐으면 여기서 끝(태그 갱신만 해도 충분)
                 if (__segHoverBound) return true;
                 __segHoverBound = true;
 
+                if (__segHoverDebug) {
+                    console.log('[seg hover] bound ON', {
+                        allowedTags: __segHoverAllowedTags,
+                        allowedLayerTags: __segHoverAllowedLayerTags,
+                    });
+                }
+
                 var lastKey = null;
 
-                // ✅ pointermove = hover
                 map.on('pointermove', function (evt) {
                     try {
                         if (evt.dragging) return;
 
                         var picked = null;
+                        var pickedLayer = null;
 
                         map.forEachFeatureAtPixel(
                             evt.pixel,
                             function (f, layer) {
                                 picked = f;
+                                pickedLayer = layer || null;
                                 return true;
                             },
-                            { hitTolerance: 10 } // ✅ 단일 선이 얇아서 좀 키움
+                            { hitTolerance: 12 }
                         );
 
                         if (!picked) {
@@ -3769,41 +3833,73 @@
                         }
 
                         var geom = picked.getGeometry && picked.getGeometry();
-                        if (!geom || geom.getType() !== 'LineString') {
+                        if (!geom) {
                             hide();
                             lastKey = null;
                             return;
                         }
 
-                        // ✅ 여기서 "항상 최신 allowedTags" 사용
-                        var tag = picked.get && picked.get('segTag');
-                        if (__segHoverAllowedTags.indexOf(tag) < 0) {
+                        // ✅✅ 핵심: LineString + MultiLineString 모두 허용
+                        var gtype = geom.getType && geom.getType();
+                        var isLine = gtype === 'LineString' || gtype === 'MultiLineString';
+                        if (!isLine) {
                             hide();
                             lastKey = null;
                             return;
                         }
 
+                        // ✅ segTag / layerTag 둘 중 하나라도 허용되면 OK
+                        var segTag = picked.get && picked.get('segTag');
+                        var layerTag = pickedLayer && pickedLayer.get && pickedLayer.get('tag');
+
+                        var okBySegTag = __segHoverAllowedTags.indexOf(segTag) >= 0;
+                        var okByLayerTag = __segHoverAllowedLayerTags.indexOf(layerTag) >= 0;
+
+                        if (!okBySegTag && !okByLayerTag) {
+                            hide();
+                            lastKey = null;
+                            return;
+                        }
+
+                        // ✅ mode (path 라인은 없을 수 있음)
                         var mode = String((picked.get && picked.get('mode')) || '').toUpperCase();
+                        if (!mode) mode = 'BUS';
 
+                        // ✅ dist/time
                         var distRaw = picked.get ? picked.get('distM') : undefined;
                         var timeRaw = picked.get ? picked.get('timeS') : undefined;
 
                         var distM = Number(distRaw);
-                        if (!isFinite(distM)) distM = -1;
+                        if (!isFinite(distM) || distM < 0) {
+                            distM = calcDistMeters(geom);
+                        }
 
                         var timeS = Number(timeRaw);
-                        if (!isFinite(timeS)) timeS = -1;
+                        if (!isFinite(timeS) || timeS < 0) {
+                            timeS = estimateTimeSByMode(distM, mode);
+                        }
 
                         var fromName = String((picked.get && picked.get('fromName')) || '').trim();
                         var toName = String((picked.get && picked.get('toName')) || '').trim();
 
-                        // 같은 feature에서 계속 뜨는거 깜빡임 방지
-                        var key = tag + '|' + mode + '|' + fromName + '|' + toName + '|' + distRaw + '|' + timeRaw;
+                        var key = (segTag || layerTag || 'line') + '|' + mode + '|' + fromName + '|' + toName + '|' + distM + '|' + timeS;
                         if (key === lastKey) {
                             __segHoverOverlay.setPosition(evt.coordinate);
                             return;
                         }
                         lastKey = key;
+
+                        if (__segHoverDebug) {
+                            console.log('[hover-hit]', {
+                                geomType: gtype,
+                                segTag: segTag,
+                                layerTag: layerTag,
+                                mode: mode,
+                                distM: distM,
+                                timeS: timeS,
+                                props: (picked.getProperties && picked.getProperties()) || null,
+                            });
+                        }
 
                         var header = titleByMode(mode);
 
@@ -3813,6 +3909,317 @@
                         var line3 = '';
                         if (fromName || toName) {
                             line3 = '<div style="margin-top:6px; opacity:.9">정류장: ' + (fromName || '?') + ' → ' + (toName || '?') + '</div>';
+                        } else if (okByLayerTag) {
+                            line3 = '<div style="margin-top:6px; opacity:.85">※ path 라인(geometry-only)이라 거리/시간은 즉석 계산값</div>';
+                        }
+
+                        __segHoverEl.innerHTML = line1 + line2 + line3;
+                        __segHoverOverlay.setPosition(evt.coordinate);
+                    } catch (e) {
+                        console.warn('[seg hover] error', e);
+                    }
+                });
+
+                // ✅ 마우스가 지도 밖으로 나가면 숨김
+                try {
+                    map.getViewport().addEventListener('mouseleave', function () {
+                        lastKey = null;
+                        hide();
+                    });
+                } catch (e) {}
+
+                return true;
+            } catch (e2) {
+                console.warn('[ensureSegmentHoverHandler] fail', e2);
+                return false;
+            }
+        } // =========================================================
+        // ✅✅✅ [REPLACE] 공통 Hover 핸들러 (single/mixed + path 레이어 지원) - 단일까지 강제 지원 강화판
+        // - 클릭이 아니라 "마우스 올리면" 팝업 뜸
+        // - ✅ 바인딩은 1번만, 대신 allowedTags/allowedLayerTags는 매번 갱신 가능
+        // - ✅ segTag 없고 geometry만 있는 path 라인도 layerTag/전역 pathVectorLayer로 허용
+        // - ✅ LineString / MultiLineString 모두 지원
+        // - ✅ distM/timeS 없으면 geometry 길이로 계산 + 임시 속도로 time 추정
+        // =========================================================
+        var __segHoverBound = false;
+        var __segHoverOverlay = null;
+        var __segHoverEl = null;
+
+        // ✅ 최신 허용 목록 저장
+        var __segHoverAllowedTags = ['mixed-seg', 'single-seg']; // feature.get('segTag')
+        var __segHoverAllowedLayerTags = ['path']; // layer.get('tag')
+
+        // (선택) 디버그 켜고싶으면 true
+        var __segHoverDebug = false;
+
+        function ensureSegmentHoverHandler(map, allowedTags, allowedLayerTags) {
+            try {
+                if (!map || !map.on || !window.ol) return false;
+
+                // ✅ allowedTags 최신화
+                if (Array.isArray(allowedTags) && allowedTags.length) {
+                    __segHoverAllowedTags = allowedTags.slice();
+                } else {
+                    __segHoverAllowedTags = ['mixed-seg', 'single-seg'];
+                }
+
+                // ✅ allowedLayerTags 최신화
+                if (Array.isArray(allowedLayerTags) && allowedLayerTags.length) {
+                    __segHoverAllowedLayerTags = allowedLayerTags.slice();
+                } else {
+                    __segHoverAllowedLayerTags = ['path'];
+                }
+
+                // ✅ overlay element 준비
+                if (!__segHoverEl) {
+                    __segHoverEl = document.createElement('div');
+                    __segHoverEl.style.cssText =
+                        'position:absolute; background:#111827; color:#fff; padding:10px 12px; border-radius:10px;' +
+                        'font:12px/1.4 sans-serif; box-shadow:0 10px 25px rgba(0,0,0,0.25); min-width:220px;' +
+                        'transform:translate(-50%,-115%); pointer-events:none; white-space:normal;';
+                    __segHoverEl.innerHTML = '';
+                }
+
+                if (!__segHoverOverlay) {
+                    __segHoverOverlay = new ol.Overlay({
+                        element: __segHoverEl,
+                        positioning: 'bottom-center',
+                        stopEvent: false,
+                        offset: [0, -10],
+                    });
+                    map.addOverlay(__segHoverOverlay);
+                }
+
+                function hide() {
+                    try {
+                        __segHoverOverlay.setPosition(undefined);
+                    } catch (e) {}
+                }
+
+                function secToNiceText(sec) {
+                    var s = Number(sec);
+                    if (!isFinite(s) || s < 0) return '-';
+                    if (s === 0) return '0초';
+                    if (s < 60) return Math.round(s) + '초';
+                    return Math.ceil(s / 60) + '분';
+                }
+
+                function meterText(m) {
+                    var v = Number(m);
+                    if (!isFinite(v) || v < 0) return '-';
+                    if (v === 0) return '0m';
+                    if (v >= 1000) return (v / 1000).toFixed(2) + 'km';
+                    return Math.round(v) + 'm';
+                }
+
+                function titleByMode(modeUpper) {
+                    modeUpper = String(modeUpper || '').toUpperCase();
+                    if (modeUpper === 'BUS') return '🚌 버스 구간';
+                    if (modeUpper === 'TRAM') return '🚋 트램 구간';
+                    if (modeUpper === 'TRANSFER') return '🔁 환승/연결';
+                    return '🚶 도보 구간';
+                }
+
+                // ✅ dist/time 없을 때 임시 계산(나중에 실제 timeS 넣으면 자동으로 그걸 사용)
+                function estimateTimeSByMode(distM, modeUpper) {
+                    modeUpper = String(modeUpper || '').toUpperCase();
+                    var speed = modeUpper === 'TRAM' ? 7.0 : modeUpper === 'BUS' ? 6.0 : 1.2; // m/s
+                    if (!isFinite(distM) || distM <= 0) return -1;
+                    return Math.round(distM / speed);
+                }
+
+                // ✅ geometry 길이 안전 계산 (LineString / MultiLineString 모두 지원)
+                function calcDistMeters(geom) {
+                    if (!geom) return -1;
+
+                    // 1) sphere.getLength 우선 (가능하면 정확)
+                    try {
+                        if (window.ol && ol.sphere && typeof ol.sphere.getLength === 'function') {
+                            var len1 = ol.sphere.getLength(geom);
+                            if (isFinite(len1) && len1 >= 0) return len1;
+                        }
+                    } catch (e1) {}
+
+                    // 2) geom.getLength (LineString이면 보통 있음)
+                    try {
+                        if (typeof geom.getLength === 'function') {
+                            var len2 = geom.getLength();
+                            if (isFinite(len2) && len2 >= 0) return len2;
+                        }
+                    } catch (e2) {}
+
+                    // 3) MultiLineString이면 각 라인 getLength 합산
+                    try {
+                        if (typeof geom.getLineStrings === 'function') {
+                            var lines = geom.getLineStrings();
+                            if (lines && lines.length) {
+                                var sum = 0;
+                                for (var i = 0; i < lines.length; i++) {
+                                    var li = lines[i];
+                                    if (li && typeof li.getLength === 'function') {
+                                        var l3 = li.getLength();
+                                        if (isFinite(l3)) sum += l3;
+                                    }
+                                }
+                                if (isFinite(sum) && sum >= 0) return sum;
+                            }
+                        }
+                    } catch (e3) {}
+
+                    return -1;
+                }
+
+                // ✅ 이미 bind 됐으면 여기서 끝(태그 갱신만 해도 충분)
+                if (__segHoverBound) return true;
+                __segHoverBound = true;
+
+                if (__segHoverDebug) {
+                    console.log('[seg hover] bound ON', {
+                        allowedTags: __segHoverAllowedTags,
+                        allowedLayerTags: __segHoverAllowedLayerTags,
+                    });
+                }
+
+                var lastKey = null;
+
+                // ✅ layerTag 없을 때도 단일 path 레이어로 허용하기 위한 헬퍼
+                function isSameAsGlobalPathLayer(layer) {
+                    try {
+                        // 프로젝트에서 단일 경로를 pathVectorLayer에 그린다면 이것만으로도 통과시키기
+                        if (typeof pathVectorLayer !== 'undefined' && pathVectorLayer && layer) {
+                            return layer === pathVectorLayer;
+                        }
+                    } catch (e) {}
+                    return false;
+                }
+
+                // ✅ mode가 없을 때 레이어/태그로 추정
+                function guessModeIfEmpty(modeUpper, segTag, layerTag, layerObj) {
+                    modeUpper = String(modeUpper || '').toUpperCase();
+                    if (modeUpper) return modeUpper;
+
+                    // 1) segTag로 추정(혼합이면 기본 BUS로 두면 이상하니 WALK로 두지 말고 BUS로)
+                    var st = String(segTag || '').toLowerCase();
+                    if (st.indexOf('tram') >= 0) return 'TRAM';
+                    if (st.indexOf('bus') >= 0) return 'BUS';
+
+                    // 2) layerTag/레이어 객체 이름 힌트로 추정
+                    var lt = String(layerTag || '').toLowerCase();
+                    if (lt.indexOf('tram') >= 0) return 'TRAM';
+                    if (lt.indexOf('bus') >= 0) return 'BUS';
+
+                    // 3) 전역 레이어 기준(단일 path 레이어는 버스/트램 공용일 수 있으니 BUS 기본)
+                    if (isSameAsGlobalPathLayer(layerObj)) return 'BUS';
+
+                    return 'BUS';
+                }
+
+                map.on('pointermove', function (evt) {
+                    try {
+                        if (evt.dragging) return;
+
+                        var picked = null;
+                        var pickedLayer = null;
+
+                        map.forEachFeatureAtPixel(
+                            evt.pixel,
+                            function (f, layer) {
+                                picked = f;
+                                pickedLayer = layer || null;
+                                return true;
+                            },
+                            { hitTolerance: 12 }
+                        );
+
+                        if (!picked) {
+                            hide();
+                            lastKey = null;
+                            return;
+                        }
+
+                        var geom = picked.getGeometry && picked.getGeometry();
+                        if (!geom) {
+                            hide();
+                            lastKey = null;
+                            return;
+                        }
+
+                        // ✅ LineString + MultiLineString만
+                        var gtype = geom.getType && geom.getType();
+                        var isLine = gtype === 'LineString' || gtype === 'MultiLineString';
+                        if (!isLine) {
+                            hide();
+                            lastKey = null;
+                            return;
+                        }
+
+                        // ✅ segTag / layerTag
+                        var segTag = picked.get && picked.get('segTag');
+                        var layerTag = pickedLayer && pickedLayer.get && pickedLayer.get('tag');
+
+                        var okBySegTag = __segHoverAllowedTags.indexOf(segTag) >= 0;
+                        var okByLayerTag = __segHoverAllowedLayerTags.indexOf(layerTag) >= 0;
+
+                        // ✅✅ 보강: layerTag가 없더라도 “전역 pathVectorLayer면 허용”
+                        var okByGlobalPath = isSameAsGlobalPathLayer(pickedLayer);
+
+                        if (!okBySegTag && !okByLayerTag && !okByGlobalPath) {
+                            hide();
+                            lastKey = null;
+                            return;
+                        }
+
+                        // ✅ mode (없으면 추정)
+                        var mode = String((picked.get && picked.get('mode')) || '').toUpperCase();
+                        mode = guessModeIfEmpty(mode, segTag, layerTag, pickedLayer);
+
+                        // ✅ dist/time
+                        var distRaw = picked.get ? picked.get('distM') : undefined;
+                        var timeRaw = picked.get ? picked.get('timeS') : undefined;
+
+                        var distM = Number(distRaw);
+                        if (!isFinite(distM) || distM < 0) distM = calcDistMeters(geom);
+
+                        var timeS = Number(timeRaw);
+                        if (!isFinite(timeS) || timeS < 0) timeS = estimateTimeSByMode(distM, mode);
+
+                        var fromName = String((picked.get && picked.get('fromName')) || '').trim();
+                        var toName = String((picked.get && picked.get('toName')) || '').trim();
+
+                        var key = (segTag || layerTag || (okByGlobalPath ? 'path' : 'line')) + '|' + mode + '|' + fromName + '|' + toName + '|' + distM + '|' + timeS;
+
+                        if (key === lastKey) {
+                            __segHoverOverlay.setPosition(evt.coordinate);
+                            return;
+                        }
+                        lastKey = key;
+
+                        if (__segHoverDebug) {
+                            console.log('[hover-hit]', {
+                                geomType: gtype,
+                                segTag: segTag,
+                                layerTag: layerTag,
+                                okBySegTag: okBySegTag,
+                                okByLayerTag: okByLayerTag,
+                                okByGlobalPath: okByGlobalPath,
+                                mode: mode,
+                                distM: distM,
+                                timeS: timeS,
+                                props: (picked.getProperties && picked.getProperties()) || null,
+                            });
+                        }
+
+                        var header = titleByMode(mode);
+
+                        var line1 = '<div style="font-weight:700; font-size:13px; margin-bottom:6px;">' + header + '</div>';
+
+                        var line2 = '<div style="opacity:.95">구간: <b>' + secToNiceText(timeS) + '</b> · ' + meterText(distM) + '</div>';
+
+                        var line3 = '';
+                        if (fromName || toName) {
+                            line3 = '<div style="margin-top:6px; opacity:.9">정류장: ' + (fromName || '?') + ' → ' + (toName || '?') + '</div>';
+                        } else if (okByLayerTag || okByGlobalPath) {
+                            line3 = '<div style="margin-top:6px; opacity:.85">※ 단일 path 라인(속성 없음)이라 거리/시간은 즉석 계산값</div>';
                         }
 
                         __segHoverEl.innerHTML = line1 + line2 + line3;
@@ -4157,7 +4564,6 @@
 
         // =========================================================
         // ✅✅✅ [REPLACE] routeId -> load(cache) -> draw (옵션)
-        // - opt.mode='BUS'|'TRAM' 전달하면 단일에서도 hover/마커 동작
         // =========================================================
         function drawBusRouteByRouteId(routeId, opt) {
             opt = opt || {};
@@ -4169,8 +4575,8 @@
 
             return loadRoutePath(rid, {
                 cityCode: cc,
-                mode: opt.mode || 'BUS', // ✅ BUS/TRAM
-                draw: true, // ✅ load 안에서 draw까지 처리
+                mode: opt.mode || 'BUS',
+                draw: true,
                 fit: !!opt.fit,
                 from: opt.reason || 'drawBusRouteByRouteId',
             }).then(function (cached) {
@@ -4189,16 +4595,12 @@
 
         // =========================================================
         // ✅✅✅ [REPLACE] 버스 도착정보 목록에서 버스 클릭
-        // - 단일 BUS 폴리라인: single-seg로 그려서 "hover 팝업" 동작
-        // - 단일 BUS 정류장 마커: single marker layer 표시
-        // - 노선 정류장 필터(applyRouteStopFilter)도 기존대로 유지
+        // - 단일 BUS 폴리라인 + (추가) "경로 관련 정류장만" 별도 레이어로 마킹
         // =========================================================
         $scope.focusBus = function (arrival) {
             if (!arrival) return;
 
             var targetNo = String(arrival.routeNo || arrival.routeno || arrival.route_no || arrival.routeNoNm || '').trim();
-
-            // ✅ routeId: 실제 routePath용
             var arrivalRouteId = String(arrival.routeid || arrival.routeId || arrival.busRouteId || (arrival._raw && (arrival._raw.routeid || arrival._raw.routeId || arrival._raw.busRouteId)) || '').trim();
 
             if (!arrivalRouteId) {
@@ -4208,7 +4610,6 @@
 
             var map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
 
-            // routeNo 정규화: "802번" -> "802"
             function normalizeRouteNo(v) {
                 return String(v || '')
                     .replace(/\s+/g, '')
@@ -4218,14 +4619,13 @@
             var targetNoNorm = normalizeRouteNo(targetNo);
 
             // ---------------------------
-            // ✅ 버스(실시간 위치) 쪽 처리 (있으면 하고, 없어도 아래 노선 작업은 무조건 수행)
+            // ✅ 버스(실시간 위치) 쪽 처리 (가능하면 하고, 없어도 아래 노선 작업은 무조건 수행)
             // ---------------------------
             var moved = false;
             var selectedFeature = null;
 
             if (map && busVectorSource && busVectorSource.getFeatures) {
                 var features = busVectorSource.getFeatures() || [];
-
                 if (features && features.length) {
                     var candidates = [];
 
@@ -4244,7 +4644,6 @@
                     if (candidates && candidates.length) {
                         selectedFeature = candidates[0];
 
-                        // currentStopCoord 기준 가장 가까운 버스 선택
                         var hasStop = currentStopCoord && typeof currentStopCoord === 'object' && isFinite(Number(currentStopCoord.lat)) && (isFinite(Number(currentStopCoord.lon)) || isFinite(Number(currentStopCoord.lng)));
 
                         if (hasStop) {
@@ -4278,7 +4677,6 @@
                             console.log('[focusBus] nearest bus selected:', { bestDist2: best, stopLat: stopLat, stopLon: stopLon });
                         }
 
-                        // 선택 버스 위치로 이동(있으면)
                         try {
                             var geom = selectedFeature.getGeometry && selectedFeature.getGeometry();
                             var coord = geom && geom.getCoordinates ? geom.getCoordinates() : null;
@@ -4292,7 +4690,6 @@
                             }
                         } catch (e) {}
 
-                        // 선택 버스 1대만 남기기(옵션)
                         try {
                             if (typeof setSelectedBusKey === 'function') {
                                 var busObj = selectedFeature.get && selectedFeature.get('bus');
@@ -4314,34 +4711,36 @@
 
             // =========================================================
             // ✅✅✅ 여기부터 "노선 기준" 작업은 무조건 수행
-            // 0) 기존 점 레이어 숨김 + 단일 마커/hover overlay 정리
-            // 1) 단일 BUS 폴리라인을 single-seg로 그리기 (hover 팝업 가능)
-            // 2) 노선 정류장만 표시(applyRouteStopFilter)
-            // 3) 폴리라인 쪽으로 확대(재시도)
+            // 0) 기존 점 레이어 숨김 + 단일 마커/hover overlay 정리 + (추가) routeStopLayer 정리
+            // 1) 단일 BUS 폴리라인(single-seg) 그리기
+            // 2) (옵션) 목록 필터(applyRouteStopFilter) 유지
+            // 3) draw 완료 후: "경로 관련 정류장만" routeStopLayer에 마킹
+            // 4) 폴리라인 쪽으로 확대
             // =========================================================
 
-            // 0) 기존 정류장 점 레이어 강제 숨김
+            // 0) 기존 정류장 점 레이어 숨김
             try {
                 if (typeof hideAllPointLayersOnMap === 'function') hideAllPointLayersOnMap();
             } catch (e) {
                 console.warn('[focusBus] hideAllPointLayersOnMap error:', e);
             }
 
-            // ✅ (중요) 단일 마커/hover overlay 정리(남아있는 거 때문에 안 보이는 경우 방지)
+            // ✅ (추가) 경로 정류장 레이어 초기화
+            clearRouteStops();
+
+            // ✅ 단일 마커/hover overlay 정리
             try {
                 if (window.__singleStopMarkerSource && window.__singleStopMarkerSource.clear) {
                     window.__singleStopMarkerSource.clear(true);
                 }
             } catch (e0) {}
             try {
-                // hover overlay는 ensureSegmentHoverHandler 내부에서 재사용하므로 숨김 처리만(있을 때)
                 if (window.__segHoverOverlay && window.__segHoverOverlay.setPosition) {
                     window.__segHoverOverlay.setPosition(undefined);
                 }
             } catch (e1) {}
 
-            // 1) ✅✅✅ 폴리라인(single-seg) 그리기
-            //    - mode 반드시 전달해야 tryDrawFromCacheKey -> drawSingleRouteSegmentsFromCached 흐름 탐
+            // 1) ✅ 폴리라인(single-seg) 그리기
             var drawRet = null;
             try {
                 drawRet = drawBusRouteByRouteId(arrivalRouteId, { mode: 'BUS', fit: false, reason: 'arrival-click' });
@@ -4350,7 +4749,7 @@
                 console.warn('[focusBus] drawBusRouteByRouteId error:', e);
             }
 
-            // 2) 노선 정류장만 표시
+            // 2) (옵션) 노선 정류장 "목록"만 표시 (지도 마킹은 우리가 routeStopLayer로 별도 처리)
             try {
                 if (typeof applyRouteStopFilter === 'function') {
                     $timeout(function () {
@@ -4360,8 +4759,6 @@
                             console.warn('[focusBus] applyRouteStopFilter inner error:', e2);
                         }
                     }, 0);
-                } else {
-                    console.warn('[focusBus] applyRouteStopFilter is not a function');
                 }
             } catch (e) {
                 console.warn('[focusBus] applyRouteStopFilter error:', e);
@@ -4380,7 +4777,6 @@
                     }
                 }
 
-                // fallback: drawBusRouteByRouteId에 fit 맡기기 (✅ mode 유지)
                 try {
                     drawBusRouteByRouteId(arrivalRouteId, { mode: 'BUS', fit: true, reason: 'arrival-click(fallback-fit:' + tag + ')' });
                     console.log('[focusBus] fallback fit tried:', tag);
@@ -4391,18 +4787,86 @@
                 }
             }
 
+            // ✅ draw 끝나고 "경로 관련 정류장만 마킹"까지 붙이는 핵심 부분
+            function afterDrawMarkRouteStops(cached) {
+                console.log('✅✅ afterDrawMarkRouteStops CALLED', cached ? '(cached ok)' : '(cached null)');
+
+                try {
+                    // 1) stopIds 뽑기
+                    var stopIds = extractStopIdsFromRoutePath(cached);
+
+                    console.log('[route cached keys]', cached && Object.keys(cached));
+                    console.log('[route stopIds len]', stopIds && stopIds.length);
+                    console.log('[route stopIds sample]', (stopIds || []).slice(0, 10));
+
+                    if (!stopIds || !stopIds.length) {
+                        console.warn('[focusBus] no stopIds in cached routePath');
+                        return;
+                    }
+
+                    // ✅ stopCoordMap이 아직 준비 안됐을 수 있어서 "몇 번 재시도"
+                    var tries = 0;
+
+                    function tryMark() {
+                        tries++;
+
+                        // 2) stopId -> [x,y] 맵 준비
+                        var stopCoordMap = buildStopCoordMapFallback();
+                        var mapSize = stopCoordMap ? Object.keys(stopCoordMap).length : -1;
+                        console.log('[stopCoordMap size]', mapSize, 'try=', tries);
+
+                        // ✅ routeStopLayer가 숨겨졌을 수 있으니 무조건 visible 켜기
+                        try {
+                            if (typeof ensureRouteStopLayer === 'function') ensureRouteStopLayer();
+                            // ensureRouteStopLayer 내부에 setVisible(true) 추가 안했으면 여기서라도 켜짐
+                            if (typeof routeStopLayer !== 'undefined' && routeStopLayer && routeStopLayer.setVisible) {
+                                routeStopLayer.setVisible(true);
+                            }
+                        } catch (e0) {}
+
+                        // 3) 마킹 시도
+                        var ok = drawRouteStopsOnly(stopIds, 'BUS', stopCoordMap);
+
+                        var placed = -1;
+                        try {
+                            placed = routeStopSource && routeStopSource.getFeatures ? routeStopSource.getFeatures().length : -1;
+                        } catch (e1) {}
+
+                        console.log('[routeStop mark result]', { ok: ok, inCount: stopIds.length, placed: placed });
+
+                        // ✅ 아직 못 찍었으면(placed=0) 정류장 좌표맵이 늦게 로딩된 것일 수 있음 → 재시도
+                        if ((placed === 0 || mapSize <= 0) && tries < 6) {
+                            setTimeout(tryMark, 250);
+                            return;
+                        }
+
+                        // 그래도 0이면 키 매칭 문제 확률 큼
+                        if (placed === 0) {
+                            var keys = stopCoordMap ? Object.keys(stopCoordMap) : [];
+                            console.warn('[routeStop] placed=0 => key mismatch likely', {
+                                firstStopId: stopIds[0],
+                                coordMapKeySample: keys.slice(0, 10),
+                            });
+                        }
+                    }
+
+                    tryMark();
+                } catch (e) {
+                    console.warn('[focusBus] afterDrawMarkRouteStops error:', e);
+                }
+            }
+
+            console.log('✅✅ focusBus: drawRet=', drawRet, 'hasThen=', !!(drawRet && drawRet.then));
+
             if (drawRet && typeof drawRet.then === 'function') {
                 drawRet
                     .then(function (cached) {
-                        // ✅ draw가 끝난 뒤 hover handler가 map에 붙었는지 확인용 로그
-                        try {
-                            var src = window.__routeVectorSource;
-                            console.log('[focusBus] draw done:', {
-                                cached: !!cached,
-                                features: src && src.getFeatures ? src.getFeatures().length : -1,
-                            });
-                        } catch (e3) {}
+                        console.log('✅✅ drawRet.then CALLED (before marking)', cached ? 'cached ok' : 'cached null');
 
+                        // ✅ 경로 정류장 마킹
+                        afterDrawMarkRouteStops(cached);
+
+                        // ✅ draw 끝난 뒤 fit
                         $timeout(function () {
                             tryFitRouteOnce('then');
                         }, 0);
@@ -4414,6 +4878,8 @@
                         }, 200);
                     });
             } else {
+                console.warn('❌ drawRet is NOT a promise. marking will not run here.');
+
                 (function retryFit(attempt) {
                     var ok = tryFitRouteOnce('retry-' + attempt);
                     if (ok) return;
@@ -5998,7 +6464,7 @@
 
             const STYLE = new ol.style.Style({
                 stroke: new ol.style.Stroke({
-                    color: isTram ? 'rgba(236, 72, 153, 0.95)' : '#2563eb', // TRAM=핑크 / 그 외=파랑
+                    color: isTram ? 'rgba(236, 72, 153, 0.95)' : '#2563eb',
                     width: 5,
                     lineCap: 'round',
                     lineJoin: 'round',
@@ -6011,12 +6477,163 @@
                     style: STYLE,
                     zIndex: 14,
                 });
+
+                // ✅✅✅ 여기 추가 (처음 만들 때)
+                pathVectorLayer.set('tag', 'path');
+
                 map.addLayer(pathVectorLayer);
             } else {
                 pathVectorLayer.setStyle(STYLE);
                 pathVectorLayer.setZIndex(14);
+
+                // ✅✅✅ 여기 추가 (기존 레이어 재사용 시에도 보장)
+                pathVectorLayer.set('tag', 'path');
             }
+
             return true;
+        }
+
+        // =========================================================
+        // ✅ 경로 관련 정류장만 찍는 레이어 (Route Stops Only)
+        // =========================================================
+        var routeStopSource = null;
+        var routeStopLayer = null;
+
+        // ✅ stopId 정규화(매칭 안 될 때가 제일 흔한 원인)
+        // - "DJB8001795" / "25_8001795" / "8001795" 같은 변형을 최대한 동일하게
+        function __normStopId(v) {
+            var s = String(v || '').trim();
+            if (!s) return '';
+
+            // 1) 공백 제거
+            s = s.replace(/\s+/g, '');
+
+            // 2) 구분자 뒤만 사용 (예: "25_8001795" -> "8001795")
+            if (s.indexOf('_') >= 0) s = s.split('_').pop();
+
+            // 3) 앞에 붙은 문자 제거 (예: "DJB8001795" -> "8001795")
+            //    숫자가 포함된 경우 숫자만 남기는 방식이 매칭 성공률 높음
+            var digits = s.replace(/[^0-9]/g, '');
+            if (digits && digits.length >= 5) return digits; // 너무 짧으면 의미 없을 수 있어
+
+            return s;
+        }
+
+        function clearRouteStops() {
+            try {
+                if (routeStopSource && routeStopSource.clear) routeStopSource.clear(true);
+            } catch (e) {}
+        }
+
+        // =========================================================
+        // ✅ routePath 응답에서 "정류장 ID 배열"을 최대한 안전하게 뽑기
+        // =========================================================
+        function extractStopIdsFromRoutePath(cached) {
+            try {
+                if (!cached) return [];
+
+                if (Array.isArray(cached.stops)) {
+                    return cached.stops
+                        .map(function (s) {
+                            return s && (s.stopId || s.nodeId || s.id || s.node || s.stationId);
+                        })
+                        .filter(Boolean)
+                        .map(String);
+                }
+
+                if (Array.isArray(cached.nodes)) {
+                    return cached.nodes
+                        .map(function (n) {
+                            return n && (n.nodeId || n.stopId || n.id);
+                        })
+                        .filter(Boolean)
+                        .map(String);
+                }
+
+                if (Array.isArray(cached.pathStops)) {
+                    return cached.pathStops.filter(Boolean).map(String);
+                }
+
+                if (Array.isArray(cached.path)) {
+                    var ids = [];
+                    for (var i = 0; i < cached.path.length; i++) {
+                        var seg = cached.path[i] || {};
+                        var a = seg.fromStopId || seg.from || seg.a || seg.start || seg.u;
+                        var b = seg.toStopId || seg.to || seg.b || seg.end || seg.v;
+                        if (a) ids.push(String(a));
+                        if (b) ids.push(String(b));
+                    }
+
+                    // 중복 제거 (정규화 기준)
+                    var seen = {};
+                    var out = [];
+                    for (var j = 0; j < ids.length; j++) {
+                        var k = __normStopId(ids[j]);
+                        if (!k || seen[k]) continue;
+                        seen[k] = true;
+                        out.push(k);
+                    }
+                    return out;
+                }
+            } catch (e) {}
+
+            return [];
+        }
+
+        // =========================================================
+        // ✅ stopId -> 좌표맵(stopCoordMap) 만들기
+        // - 좌표는 EPSG:4326 -> 현재 맵 projection으로 변환
+        // =========================================================
+        function buildStopCoordMapFallback() {
+            try {
+                if (window.__stopCoordMap && typeof window.__stopCoordMap === 'object') return window.__stopCoordMap;
+            } catch (e) {}
+
+            var map = getInnerOlMap();
+            if (!map || !window.ol || !ol.proj) return {};
+
+            var list = [];
+            try {
+                if (Array.isArray(window.__allStops)) list = window.__allStops;
+            } catch (e0) {}
+            try {
+                if (Array.isArray($scope && $scope.stops)) list = $scope.stops;
+            } catch (e1) {}
+
+            if (!list || !list.length) return {};
+
+            var view = map.getView && map.getView();
+            var proj = (view && view.getProjection && view.getProjection()) || null;
+
+            function toXY(lon, lat) {
+                lon = Number(lon);
+                lat = Number(lat);
+                if (!isFinite(lon) || !isFinite(lat)) return null;
+                try {
+                    if (proj) return ol.proj.transform([lon, lat], 'EPSG:4326', proj);
+                } catch (e) {}
+                return null;
+            }
+
+            var out = {};
+            for (var i = 0; i < list.length; i++) {
+                var s = list[i] || {};
+
+                // ✅ id 정규화
+                var rawId = s.nodeid || s.nodeId || s.stopId || s.id || '';
+                var id = __normStopId(rawId);
+                if (!id) continue;
+
+                var lat = s.gpslati || s.gpsLati || s.lat || s.latitude || s.y;
+                var lon = s.gpslong || s.gpsLong || s.lon || s.longitude || s.x;
+
+                var xy = toXY(lon, lat);
+                if (xy) out[id] = xy;
+            }
+
+            console.log('[buildStopCoordMapFallback] size=', Object.keys(out).length);
+
+            return out;
         }
 
         // =========================================================
@@ -6383,12 +7000,9 @@
         }
 
         // =========================================================
-        // ✅✅✅ [REPLACE] 세그먼트 추가 (안전/디버그 + 0m/0초 방지)
-        // - feature에 mode/distM/timeS + from/to + segTag 저장
-        // - meta.distM/timeS가 없거나 NaN이면:
-        //    distM = "선(LineString) 길이"로 계산
-        //    timeS = distM / mode별속도 로 계산
-        // - 원본(raw)도 따로 저장해서 원인 추적 가능
+        // ✅✅✅ [REPLACE] 세그먼트 추가 (projection 안전 + time 보정 제거)
+        // - distM: projection 좌표면 getLength() (미터 단위) 사용
+        // - timeS: dist/speed로 계산 (분 보정 로직 제거)
         // =========================================================
         function addSegmentToSourceXY(source, AX, BX, meta) {
             try {
@@ -6408,100 +7022,58 @@
                 // ✅ 세그먼트 태그
                 f.set('segTag', meta.segTag != null ? String(meta.segTag) : 'mixed-seg');
 
-                // -----------------------------
-                // ✅ 숫자 파싱(문자 섞인 케이스 방어)
-                // -----------------------------
                 function toNum(v) {
                     if (v == null) return null;
                     if (typeof v === 'number') return isFinite(v) ? v : null;
-
                     var s = String(v).trim();
                     if (!s) return null;
-
-                    // "1,234" 같은 케이스
                     s = s.replace(/,/g, '');
-
                     var n = Number(s);
                     if (isFinite(n)) return n;
-
-                    // "123m", "12.3sec" 같은 케이스
                     var m = s.match(/-?\d+(\.\d+)?/);
                     if (!m) return null;
                     n = Number(m[0]);
                     return isFinite(n) ? n : null;
                 }
 
-                // -----------------------------
-                // ✅ LineString 길이(m) 계산 fallback
-                // -----------------------------
+                // ✅ projection 좌표(미터) 안전 거리 계산
                 function calcLineMeters(geomLine) {
                     try {
-                        // OpenLayers sphere 길이 계산이 있으면 그걸 우선
-                        if (window.ol && ol.sphere && typeof ol.sphere.getLength === 'function') {
-                            var len = ol.sphere.getLength(geomLine);
-                            if (isFinite(len) && len > 0) return len;
+                        // 대부분 NGII/OpenLayers map projection은 "미터 단위"
+                        if (geomLine && typeof geomLine.getLength === 'function') {
+                            var len = Number(geomLine.getLength());
+                            if (isFinite(len) && len >= 0) return len;
                         }
                     } catch (e) {}
-
-                    // 마지막 fallback: 그냥 유클리드(대략)
-                    try {
-                        var c0 = geomLine.getFirstCoordinate();
-                        var c1 = geomLine.getLastCoordinate();
-                        var dx = Number(c1[0]) - Number(c0[0]);
-                        var dy = Number(c1[1]) - Number(c0[1]);
-                        var d = Math.sqrt(dx * dx + dy * dy);
-                        return isFinite(d) ? d : 0;
-                    } catch (e2) {
-                        return 0;
-                    }
+                    return 0;
                 }
 
-                // -----------------------------
-                // ✅ mode별 속도(m/s) fallback
-                // -----------------------------
                 function speedMpsForMode(m) {
                     m = String(m || '').toUpperCase();
-                    if (m === 'BUS') return 6.0; // ~21.6km/h
-                    if (m === 'TRAM') return 7.0; // ~25.2km/h
+                    if (m === 'BUS') return 6.0;
+                    if (m === 'TRAM') return 7.0;
                     return 1.2; // WALK/TRANSFER
                 }
 
-                // -----------------------------
-                // ✅ raw(원본) 저장(디버그용)
-                // -----------------------------
-                var rawDist = meta.distM;
-                var rawTime = meta.timeS;
-                f.set('rawDistM', rawDist);
-                f.set('rawTimeS', rawTime);
+                // ✅ raw 저장(디버그)
+                f.set('rawDistM', meta.distM);
+                f.set('rawTimeS', meta.timeS);
 
-                // -----------------------------
                 // ✅ distM/timeS 계산
-                // -----------------------------
                 var distM = toNum(meta.distM);
                 var timeS = toNum(meta.timeS);
 
-                // distM이 유효하지 않으면 선 길이로 계산
                 if (!(isFinite(distM) && distM > 0)) {
                     distM = calcLineMeters(line);
                 }
 
-                // timeS가 유효하지 않으면 dist/speed로 계산
                 if (!(isFinite(timeS) && timeS > 0)) {
                     var sp = speedMpsForMode(mode);
                     timeS = sp > 0 ? Math.round(distM / sp) : 0;
-                } else {
-                    // ✅ (선택) timeS가 "분"으로 들어오는 케이스를 아주 보수적으로 보정
-                    // - dist가 충분히 크고(>=200m)
-                    // - timeS가 너무 작으면(<=15) "분"일 가능성만 고려
-                    if (isFinite(distM) && distM >= 200 && timeS > 0 && timeS <= 15) {
-                        // 여기서 100% 확신은 못 하니, 필요하면 주석처리 가능
-                        timeS = Math.round(timeS * 60);
-                    }
                 }
 
-                // ✅ 최종 저장(팝업이 읽는 값)
-                if (isFinite(distM) && distM >= 0) f.set('distM', distM);
-                if (isFinite(timeS) && timeS >= 0) f.set('timeS', timeS);
+                f.set('distM', isFinite(distM) ? distM : 0);
+                f.set('timeS', isFinite(timeS) ? timeS : 0);
 
                 // ✅ from/to 정보
                 if (meta.fromId != null) f.set('fromId', String(meta.fromId));
@@ -7704,6 +8276,18 @@
 
             layers.forEach(function (lyr) {
                 if (!lyr || !lyr.getSource) return;
+
+                // ✅✅✅ route-stops 레이어는 숨기지 않는다 (경로 정류장 마킹용)
+                try {
+                    const tag = typeof lyr.get === 'function' ? lyr.get('tag') : '';
+                    if (tag === 'route-stops') return;
+                } catch (e) {}
+
+                // ✅✅✅ (옵션) 전역 변수로 routeStopLayer를 쓰는 경우도 방어
+                try {
+                    if (typeof routeStopLayer !== 'undefined' && routeStopLayer && lyr === routeStopLayer) return;
+                } catch (e2) {}
+
                 const src = lyr.getSource();
                 if (!src || !src.getFeatures) return;
 
@@ -8033,12 +8617,8 @@
                 .toUpperCase()
                 .trim();
 
-            // ✅ 서버 enum(ShortestPathService.Mode)에 맞추기
-            // - 네 서버 enum: BUS, TRAM, BUS_TRAM, MIXED(추가했었음)
-            // - 그런데 프론트 UI에 MIXED가 와도 내부에서 BUS_TRAM로 처리하는게 안전
-            //   (서버가 MIXED도 받게 해놨으면 그대로 보내도 됨)
             let mode = rawMode;
-            if (mode === 'MIXED') mode = 'BUS_TRAM'; // ✅ 가장 안전 (서버가 MIXED만 받는 경우는 거의 없음)
+            if (mode === 'MIXED') mode = 'BUS_TRAM'; // ✅ 가장 안전
             if (mode !== 'BUS' && mode !== 'TRAM' && mode !== 'BUS_TRAM' && mode !== 'MIXED') {
                 mode = 'BUS_TRAM';
             }
@@ -8052,15 +8632,12 @@
             // ----------------------------
             // 2) from/to 키 호환 (StopId 우선)
             // ----------------------------
-            // ✅ 서버 shortest(cityCode, fromStopId, toStopId, mode, weight) 형태면 stopId가 핵심
-            // ✅ 혹시 서버가 fromNodeId/toNodeId로 받는 코드도 있을 수 있으니 같이 보냄
             if (p.fromStopId && !p.fromNodeId) p.fromNodeId = p.fromStopId;
             if (p.toStopId && !p.toNodeId) p.toNodeId = p.toStopId;
 
             // ----------------------------
             // 3) 타입 힌트(선택)
             // ----------------------------
-            // 트램이 숫자 ID(242/243/244...)인 경우에만 의미 있음
             function isTramId(id) {
                 return /^\d+$/.test(String(id || '').trim());
             }
@@ -8075,41 +8652,29 @@
                 .then(function (res) {
                     const data = (res && res.data) || {};
 
-                    // ✅ found=false면 실패로 처리해서 catch로 보내기
                     if (data.found === false) {
                         const msg = data.message || data.error || '경로를 찾지 못했습니다.';
                         return $q.reject(new Error(msg));
                     }
 
-                    // ✅ 서버/프론트 필드명 혼용 흡수
                     const dist = Number(data.totalDistM ?? data.totalDistanceM ?? data.totalDist ?? data.totalDistance ?? 0);
 
-                    const time = Number(
-                        data.totalTimeS ?? // ✅ 네 백엔드 필드
-                            data.totalTimeSec ?? // 예전 프론트 기대값
-                            data.totalTimeSeconds ??
-                            data.totalTime ??
-                            0
-                    );
+                    const time = Number(data.totalTimeS ?? data.totalTimeSec ?? data.totalTimeSeconds ?? data.totalTime ?? 0);
 
-                    // ✅ 둘 다 숫자 아니면 응답 형식 문제
                     if (!isFinite(dist) && !isFinite(time)) {
                         const msg = data.message || data.error || '최단경로 응답 형식이 올바르지 않습니다.';
                         return $q.reject(new Error(msg));
                     }
 
-                    // ✅ 프론트 표준 필드로 강제 보강 (버튼 잠김/표시 0 문제 방지)
                     data.totalDistM = isFinite(dist) ? dist : Number(data.totalDistM || 0);
                     data.totalTimeS = isFinite(time) ? time : Number(data.totalTimeS || 0);
 
-                    // ✅ 혹시 프론트 다른 코드가 totalTimeSec을 읽는 경우까지 대비(옵션)
                     data.totalTimeSec = data.totalTimeS;
 
                     res.data = data;
-                    return res; // ✅ 반드시 res 반환 (호출부가 res.data를 기대)
+                    return res;
                 })
                 .catch(function (err) {
-                    // ✅ 서버 에러 응답에서 메시지 최대한 추출
                     const resp = err && err.data ? err.data : null;
                     const msg = (resp && (resp.message || resp.error)) || (err && err.message) || '서버 오류';
 
@@ -8172,7 +8737,6 @@
 
                     var d = haversineM(A.lat, A.lon, B.lat, B.lon);
 
-                    // 양방향 연결
                     addEdge(graph, aId, bId, d, 'TRAM');
                     addEdge(graph, bId, aId, d, 'TRAM');
                 }
@@ -8185,6 +8749,226 @@
         $scope.pathPolylineReady = false;
         $scope.pathPolylineFeature = null;
         $scope.pathPolylineExtent = null;
+
+        // =========================================================
+        // ✅✅✅ [ADD] "경로 정류장만" 표시 레이어 (route-stops)
+        //  - 출발(FROM)=초록, 도착(TO)=빨강
+        //  - 나머지: BUS=파랑, TRAM=보라
+        //  - 정류장 이름(label) 표시
+        // =========================================================
+        var routeStopSource = null;
+        var routeStopLayer = null;
+
+        function ensureRouteStopLayer() {
+            var map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
+            if (!map || !window.ol || !ol.layer || !ol.source || !ol.style || !ol.geom) return false;
+
+            if (!routeStopSource) routeStopSource = new ol.source.Vector();
+
+            if (!routeStopLayer) {
+                routeStopLayer = new ol.layer.Vector({
+                    source: routeStopSource,
+                    zIndex: 990,
+                    style: function (feature) {
+                        var mode = String(feature.get('mode') || 'BUS').toUpperCase();
+                        var role = String(feature.get('role') || '').toUpperCase(); // FROM / TO / ''
+
+                        // ✅ 기본 색: TRAM=보라, BUS=파랑
+                        var color = mode === 'TRAM' ? '#a855f7' : '#2563eb';
+
+                        // ✅ 출발/도착은 role이 우선
+                        if (role === 'FROM') color = '#22c55e'; // 초록
+                        else if (role === 'TO') color = '#ef4444'; // 빨강
+
+                        var label = String(feature.get('label') || '');
+
+                        return new ol.style.Style({
+                            image: new ol.style.Circle({
+                                radius: role ? 7 : 6, // 출발/도착은 조금 크게
+                                fill: new ol.style.Fill({ color: color }),
+                                stroke: new ol.style.Stroke({ color: 'rgba(255,255,255,0.95)', width: 2 }),
+                            }),
+                            text: new ol.style.Text({
+                                text: label,
+                                offsetY: -14,
+                                font: '12px sans-serif',
+                                fill: new ol.style.Fill({ color: '#111827' }),
+                                stroke: new ol.style.Stroke({ color: 'rgba(255,255,255,0.95)', width: 3 }),
+                            }),
+                        });
+                    },
+                });
+
+                routeStopLayer.set('tag', 'route-stops');
+                map.addLayer(routeStopLayer);
+            }
+
+            // ✅ 혹시 다른 로직에서 숨겨놨으면 강제로 보이게
+            try {
+                routeStopLayer.setVisible(true);
+            } catch (e) {}
+
+            return true;
+        }
+
+        function clearRouteStopsOnly() {
+            try {
+                if (routeStopSource) routeStopSource.clear(true);
+            } catch (e) {}
+        }
+
+        // ✅ r.stops 기반: stopId -> mapXY(지도 좌표) 맵 만들기
+        function buildStopCoordMapFromServerStops(stops) {
+            var map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
+            if (!map || !window.ol || !ol.proj) return {};
+
+            var view = map.getView && map.getView();
+            var proj = (view && view.getProjection && view.getProjection()) || null;
+            if (!proj) return {};
+
+            function pickId(s) {
+                return String((s && (s.stopId || s.nodeId || s.nodeid || s.id || s.stop_id)) || '').trim();
+            }
+            function pickLon(s) {
+                return Number(s && (s.lon != null ? s.lon : s.gpslong != null ? s.gpslong : s.gpsLong != null ? s.gpsLong : s.lng));
+            }
+            function pickLat(s) {
+                return Number(s && (s.lat != null ? s.lat : s.gpslati != null ? s.gpslati : s.gpsLat != null ? s.gpsLat : s.latitude));
+            }
+
+            var out = {};
+            var arr = Array.isArray(stops) ? stops : [];
+            for (var i = 0; i < arr.length; i++) {
+                var s = arr[i] || {};
+                var id = pickId(s);
+                if (!id) continue;
+
+                var lon = pickLon(s);
+                var lat = pickLat(s);
+                if (!isFinite(lon) || !isFinite(lat)) continue;
+
+                try {
+                    out[id] = ol.proj.transform([lon, lat], 'EPSG:4326', proj);
+                } catch (e) {}
+            }
+            return out;
+        }
+
+        function buildStopIdsFromStops(stops) {
+            var arr = Array.isArray(stops) ? stops : [];
+            var out = [];
+            for (var i = 0; i < arr.length; i++) {
+                var s = arr[i] || {};
+                var id = String(s.stopId || s.nodeId || s.nodeid || s.id || s.stop_id || '').trim();
+                if (!id) continue;
+                out.push(id);
+            }
+            return out;
+        }
+
+        function buildStopLabelMapFromServerStops(stops) {
+            var m = {};
+            var arr = Array.isArray(stops) ? stops : [];
+            for (var i = 0; i < arr.length; i++) {
+                var s = arr[i] || {};
+                var id = String(s.stopId != null ? s.stopId : s.stop_id != null ? s.stop_id : s.nodeid != null ? s.nodeid : s.nodeId != null ? s.nodeId : s.id != null ? s.id : '').trim();
+                if (!id) continue;
+
+                var name = String(s.nodenm != null ? s.nodenm : s.nodeNm != null ? s.nodeNm : s.name != null ? s.name : '').trim();
+
+                if (name) m[id] = name;
+            }
+            return m;
+        }
+
+        function drawRouteStopsOnly(stopIds, mode, stopCoordMap, labelMap, fromId, toId) {
+            if (!ensureRouteStopLayer()) return false;
+
+            clearRouteStopsOnly();
+
+            var ids = Array.isArray(stopIds) ? stopIds : [];
+            if (!ids.length) return false;
+
+            var mapXY = stopCoordMap || {};
+            var labels = labelMap || {};
+            var mm = String(mode || 'BUS').toUpperCase();
+
+            var fromKey = String(fromId || '').trim();
+            var toKey = String(toId || '').trim();
+
+            for (var i = 0; i < ids.length; i++) {
+                var id = String(ids[i] || '').trim();
+                if (!id) continue;
+
+                var xy = mapXY[id];
+                if (!xy || !isFinite(xy[0]) || !isFinite(xy[1])) continue;
+
+                var f = new ol.Feature({
+                    geometry: new ol.geom.Point(xy),
+                });
+
+                f.set('stopId', id);
+                f.set('mode', mm);
+
+                // ✅ role: 출발/도착 색 우선권
+                if (fromKey && id === fromKey) f.set('role', 'FROM');
+                else if (toKey && id === toKey) f.set('role', 'TO');
+                else f.set('role', '');
+
+                // ✅ label: 정류장 이름 표시
+                var lb = String(labels[id] || '').trim();
+                if (!lb) lb = id; // 이름 없으면 id 표시(원하면 ''로 바꿔도 됨)
+                f.set('label', lb);
+
+                routeStopSource.addFeature(f);
+            }
+
+            return true;
+        }
+
+        // =========================================================
+        // ✅✅✅ [ADD] 자동 수집 보장 (destroy 이후 재진입 시 재시작)
+        // - 프로젝트마다 "1회 수집" 함수명이 다르니까 여러 후보를 자동 탐색
+        // =========================================================
+        function runCollectOnceAutoDetect() {
+            try {
+                // ✅ 아래 후보 중 프로젝트에 존재하는걸 자동으로 실행
+                if (typeof runAutoCollectOnce === 'function') return runAutoCollectOnce();
+                if (typeof pollArrivalsAndSave === 'function') return pollArrivalsAndSave();
+                if (typeof collectOnce === 'function') return collectOnce();
+                if (typeof collectArrivalsOnce === 'function') return collectArrivalsOnce();
+                if (typeof collectAndSaveOnce === 'function') return collectAndSaveOnce();
+
+                // 마지막 fallback: 이름 못 찾으면 경고
+                console.warn('[collect] no collect-once function found (runAutoCollectOnce / pollArrivalsAndSave / collectOnce ...)');
+            } catch (e) {
+                console.warn('[collect] runCollectOnceAutoDetect error', e);
+            }
+        }
+
+        function ensureCollectRunning() {
+            try {
+                // collecting 기본값 ON
+                if ($scope.collecting == null) $scope.collecting = true;
+
+                // 이미 타이머 있으면 OK
+                if (collectTimer) return;
+
+                // 폴링/수집 주기
+                var ms = typeof POLL_MS !== 'undefined' && POLL_MS ? POLL_MS : 10000;
+
+                // 즉시 1회 실행 + 주기 실행
+                runCollectOnceAutoDetect();
+                collectTimer = $interval(function () {
+                    if ($scope.collecting === false) return;
+                    runCollectOnceAutoDetect();
+                }, ms);
+
+                console.log('[collect] started', { ms: ms });
+            } catch (e2) {
+                console.warn('[collect] ensureCollectRunning fail', e2);
+            }
+        }
 
         // =========================================================
         // ✅✅✅ [REAL] findShortestPath
@@ -8212,6 +8996,11 @@
                 try {
                     if (typeof clearWalkOnMap === 'function') clearWalkOnMap();
                 } catch (e) {}
+
+                // ✅ 추가: 경로 정류장 레이어도 클리어
+                try {
+                    clearRouteStopsOnly();
+                } catch (e2) {}
             }
 
             // =========================
@@ -8259,7 +9048,6 @@
                 return transfers;
             }
 
-            // ✅ 두 좌표(lon/lat) 사이 거리(m)
             function distanceMeters(lon1, lat1, lon2, lat2) {
                 var R = 6371000;
                 function toRad(d) {
@@ -8275,12 +9063,11 @@
                 return R * c;
             }
 
-            // ✅ 도보/트램 속도
             var WALK_SPEED_MPS = 1.25;
-            var TRAM_SPEED_MPS = 6.94; // 약 25km/h
+            var TRAM_SPEED_MPS = 6.94;
 
             // =========================================================
-            // ✅ (너 코드 그대로) TRAM 전용 계산부...
+            // ✅ TRAM 전용 계산부
             // =========================================================
             function pickStopId(s) {
                 if (!s) return '';
@@ -8354,7 +9141,7 @@
                 var seq = getTramStationSequence();
                 var graph = {};
 
-                function addEdge(a, b, distM, timeS) {
+                function addEdge2(a, b, distM, timeS) {
                     if (!graph[a]) graph[a] = [];
                     graph[a].push({ to: b, distM: distM, timeS: timeS });
                 }
@@ -8371,8 +9158,8 @@
                     var distM = distanceMeters(A.lon, A.lat, B.lon, B.lat);
                     var timeS = Math.max(1, Math.round(distM / TRAM_SPEED_MPS));
 
-                    addEdge(aId, bId, distM, timeS);
-                    addEdge(bId, aId, distM, timeS);
+                    addEdge2(aId, bId, distM, timeS);
+                    addEdge2(bId, aId, distM, timeS);
                 }
 
                 return { graph: graph, stopMap: stopMap, seq: seq };
@@ -8496,15 +9283,12 @@
             try {
                 $scope.pathResult = null;
 
-                // ✅ 지도 싹 초기화
                 safeClearAll();
 
-                // ✅ (중요) 버튼 상태 초기화
                 $scope.pathPolylineReady = false;
                 $scope.pathPolylineExtent = null;
                 $scope.pathPolylineFeature = null;
 
-                // ✅ path 객체 보장
                 if (!$scope.path) $scope.path = {};
 
                 if ($scope.path.from && !$scope.path.from.stopId && typeof normalizeStop === 'function') {
@@ -8526,15 +9310,14 @@
                 }
 
                 $scope.pathLoading = true;
-                // ✅ (원하면 여기 메시지도 짧게: '계산 중...')
                 safeSetPathStatus('info', '최단경로 계산 중...(실제 계산)');
 
                 var params = {
                     cityCode: CITY_CODE,
                     fromStopId: $scope.path.fromNodeId,
                     toStopId: $scope.path.toNodeId,
-                    mode: $scope.path.mode || 'MIXED', // BUS | TRAM | MIXED
-                    weight: $scope.path.weight || 'DIST', // DIST | TIME
+                    mode: $scope.path.mode || 'MIXED',
+                    weight: $scope.path.weight || 'DIST',
                 };
 
                 var promise;
@@ -8557,7 +9340,6 @@
                         var r = res && res.data ? res.data : res || {};
                         console.log('[shortestPath raw]', r);
 
-                        // ✅ stopIds/pathArr 먼저 확보
                         var stopIds = Array.isArray(r && r.stopIds) ? r.stopIds : [];
                         var pathArr = Array.isArray(r && r.path) ? r.path : [];
 
@@ -8700,15 +9482,12 @@
                             }
                         }
 
-                        // ✅✅✅ (핵심) 버튼 unlock: okDraw 기준으로 ready/extent 세팅
+                        // ✅✅✅ 버튼 unlock: okDraw 기준으로 ready/extent 세팅
                         if (okDraw) {
                             if (isMixed) {
-                                // ✅ ext는 여기서 "항상" 정의되게 만든다 (ReferenceError 방지)
                                 var ext = null;
 
                                 try {
-                                    // MIXED는 pathVectorSource가 비어있을 수 있으니,
-                                    // mixed 소스들의 extent를 합쳐서 사용
                                     if (typeof computeExtentFromSources === 'function') {
                                         ext = computeExtentFromSources([mixedBusSource, mixedTramSource, mixedWalkSource, typeof mixedTransferSource !== 'undefined' ? mixedTransferSource : null]);
                                     } else {
@@ -8720,12 +9499,14 @@
                                     ext = null;
                                 }
 
-                                $scope.pathPolylineExtent = ext && isValidExtent(ext) ? ext : null;
-                                $scope.pathPolylineFeature = null; // MIXED는 단일 feature 없음
+                                function _validExt(x) {
+                                    return x && x.length === 4 && isFinite(x[0]) && isFinite(x[1]) && isFinite(x[2]) && isFinite(x[3]) && !(x[0] === x[2] && x[1] === x[3]);
+                                }
+
+                                $scope.pathPolylineExtent = ext && _validExt(ext) ? ext : null;
+                                $scope.pathPolylineFeature = null;
                                 $scope.pathPolylineReady = true;
                             } else {
-                                // 단일은 drawPathPolylineLonLat 내부에서 extent/ready를 세팅할 수도 있지만,
-                                // 혹시 안 하면 여기서라도 unlock
                                 if (!$scope.pathPolylineReady) $scope.pathPolylineReady = true;
                             }
                         } else {
@@ -8739,21 +9520,62 @@
                         }
 
                         // =========================================================
-                        // ✅ 2) 정류장 마커
+                        // ✅✅✅ 2) 정류장 마커 정책
+                        //  - 중복(두 개) 방지: 기본 drawStopsFromServer는 기본적으로 호출하지 않음
+                        //  - route-stops 레이어만 사용(출발/도착 role + label)
                         // =========================================================
-                        if (typeof drawStopsFromServer === 'function' && Array.isArray(r.stops) && r.stops.length) {
-                            drawStopsFromServer(r.stops, $scope.path.fromNodeId, $scope.path.toNodeId);
-                        } else if (typeof drawStopMarker === 'function') {
-                            var fromObj2 = $scope.path.from || {};
-                            var toObj2 = $scope.path.to || {};
+                        try {
+                            // ✅ 혹시 map에 "기본 stops 레이어"가 visible=true라면 숨김(중복 방지)
+                            try {
+                                var map2 = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
+                                if (map2 && map2.getLayers) {
+                                    var layers2 = map2.getLayers().getArray ? map2.getLayers().getArray() : [];
+                                    for (var li = 0; li < layers2.length; li++) {
+                                        var ly2 = layers2[li];
+                                        if (!ly2 || !ly2.get || !ly2.setVisible) continue;
+                                        var tag2 = String(ly2.get('tag') || '').toLowerCase();
+                                        if (tag2 === 'stops') ly2.setVisible(false);
+                                    }
+                                }
+                            } catch (eHide) {}
 
-                            var fLat3 = Number(fromObj2.gpslati || fromObj2.gpsLat || fromObj2.lat);
-                            var fLon3 = Number(fromObj2.gpslong || fromObj2.gpsLong || fromObj2.lon);
-                            var tLat3 = Number(toObj2.gpslati || toObj2.gpsLat || toObj2.lat);
-                            var tLon3 = Number(toObj2.gpslong || toObj2.gpsLong || toObj2.lon);
+                            var routeStopIds = Array.isArray(stopIds) && stopIds.length ? stopIds.slice() : buildStopIdsFromStops(r && r.stops);
 
-                            if (isFinite(fLat3) && isFinite(fLon3)) drawStopMarker(fLon3, fLat3, '#ef4444', '출발', 'FROM');
-                            if (isFinite(tLat3) && isFinite(tLon3)) drawStopMarker(tLon3, tLat3, '#22c55e', '도착', 'TO');
+                            var stopCoordMap2 = buildStopCoordMapFromServerStops(r && r.stops);
+                            if ((!stopCoordMap2 || !Object.keys(stopCoordMap2).length) && typeof buildStopCoordMapFallback === 'function') {
+                                stopCoordMap2 = buildStopCoordMapFallback();
+                            }
+
+                            var stopLabelMap = buildStopLabelMapFromServerStops(r && r.stops);
+
+                            window.__lastRouteStopIds = routeStopIds;
+                            window.__lastStopCoordMap = stopCoordMap2;
+                            window.__lastStopLabelMap = stopLabelMap;
+
+                            var baseMode = modeUpper === 'TRAM' ? 'TRAM' : 'BUS';
+                            drawRouteStopsOnly(routeStopIds, baseMode, stopCoordMap2, stopLabelMap, $scope.path.fromNodeId, $scope.path.toNodeId);
+
+                            var cnt = routeStopSource && routeStopSource.getFeatures ? routeStopSource.getFeatures().length : -1;
+                            console.log('[route-stops] marked', { ids: routeStopIds.length, features: cnt, mode: baseMode });
+                        } catch (e3) {
+                            console.warn('[route-stops] failed', e3);
+
+                            // ✅ fallback: route-stops가 실패하면 그때만 기존 마커 사용
+                            if (typeof drawStopsFromServer === 'function' && Array.isArray(r.stops) && r.stops.length) {
+                                drawStopsFromServer(r.stops, $scope.path.fromNodeId, $scope.path.toNodeId);
+                            } else if (typeof drawStopMarker === 'function') {
+                                var fromObj2 = $scope.path.from || {};
+                                var toObj2 = $scope.path.to || {};
+
+                                var fLat3 = Number(fromObj2.gpslati || fromObj2.gpsLat || fromObj2.lat);
+                                var fLon3 = Number(fromObj2.gpslong || fromObj2.gpsLong || fromObj2.lon);
+                                var tLat3 = Number(toObj2.gpslati || toObj2.gpsLat || toObj2.lat);
+                                var tLon3 = Number(toObj2.gpslong || toObj2.gpsLong || toObj2.lon);
+
+                                // ✅ 출발=초록, 도착=빨강 (요청 반영)
+                                if (isFinite(fLat3) && isFinite(fLon3)) drawStopMarker(fLon3, fLat3, '#22c55e', '출발', 'FROM');
+                                if (isFinite(tLat3) && isFinite(tLon3)) drawStopMarker(tLon3, tLat3, '#ef4444', '도착', 'TO');
+                            }
                         }
 
                         // =========================================================
@@ -8761,7 +9583,7 @@
                         // =========================================================
                         safeSetPathStatus('ok', '최단경로 계산완료');
 
-                        $scope.$applyAsync(); // ✅ 화면 반영 안전
+                        $scope.$applyAsync();
                         endLoading();
                     },
                     function (err) {
@@ -8782,7 +9604,7 @@
         // =========================================================
         // ✅ "경로만 보기" 모드
         // - stops/walk/버스(포인트 대량 레이어)는 숨기고
-        // - path + (mixed line들)은 남긴다
+        // - path + (mixed line들) + (route-stops)는 남긴다 ✅
         // =========================================================
         $scope.onlyPathMode = false;
 
@@ -8799,16 +9621,16 @@
                 tag = tag.toLowerCase();
 
                 if (onlyPath) {
-                    // ✅ stops/walk/bus는 숨기고 path만 남김
                     if (tag === 'stops' || tag === 'walk' || tag === 'bus') ly.setVisible(false);
                     if (tag === 'path') ly.setVisible(true);
+
+                    // ✅✅✅ 추가: 경로 정류장만 마킹 레이어는 보여주기
+                    if (tag === 'route-stops') ly.setVisible(true);
                 } else {
-                    // ✅ 원복
-                    if (tag === 'stops' || tag === 'walk' || tag === 'bus' || tag === 'path') ly.setVisible(true);
+                    if (tag === 'stops' || tag === 'walk' || tag === 'bus' || tag === 'path' || tag === 'route-stops') ly.setVisible(true);
                 }
             }
 
-            // (옵션) 혹시 tag 안 달린 포인트 대량 레이어가 남아있으면 추가로 숨김
             if (onlyPath) {
                 try {
                     if (typeof hideAllPointLayersOnMap === 'function') hideAllPointLayersOnMap();
@@ -8818,9 +9640,6 @@
 
         // =========================================================
         // ✅ "경로로 이동하기" 버튼 동작 (fit + 경로만 보기)
-        // - MIXED에서도 extent만 있으면 이동 가능
-        // - extent 유효성 검사 추가
-        // - setOnlyPathVisible 없어도 크래시 안 나게 방어
         // =========================================================
         $scope.goToPathOnMap = function () {
             try {
@@ -8836,14 +9655,11 @@
 
                 var ext = $scope.pathPolylineExtent;
 
-                // 1) extent가 없으면 feature에서 재추출(단일 모드용)
                 if (!isValidExtent(ext) && $scope.pathPolylineFeature) {
                     var geom = $scope.pathPolylineFeature.getGeometry && $scope.pathPolylineFeature.getGeometry();
                     if (geom && geom.getExtent) ext = geom.getExtent();
                 }
 
-                // 2) 그래도 없으면: MIXED 레이어(source) extent를 합쳐서 생성(있을 때만)
-                //    - mixedBusSource/mixedTramSource/mixedWalkSource/mixedTransferSource가 전역이면 잡힘
                 if (!isValidExtent(ext) && window.ol && ol.extent) {
                     var sources = [];
                     if (typeof mixedBusSource !== 'undefined' && mixedBusSource) sources.push(mixedBusSource);
@@ -8883,7 +9699,6 @@
                     maxZoom: 17,
                 });
 
-                // ✅✅✅ 경로만 보기 모드 ON (함수 없어도 크래시 방지)
                 $scope.onlyPathMode = true;
                 try {
                     if (typeof setOnlyPathVisible === 'function') setOnlyPathVisible(true);
@@ -8912,19 +9727,22 @@
             $scope.path.toNodeId = null;
             $scope.pathResult = null;
 
-            // ✅ 추가: 경로 이동용 캐시도 초기화
             $scope.pathPolylineReady = false;
             $scope.pathPolylineFeature = null;
             $scope.pathPolylineExtent = null;
 
             if (typeof clearPathOnMap === 'function') clearPathOnMap();
 
+            // ✅ 추가: route-stops도 제거
+            try {
+                clearRouteStopsOnly();
+            } catch (e2) {}
+
             if (typeof setPathStatus === 'function') setPathStatus('', '경로를 지웠습니다.');
         };
 
         // =========================================================
         // ✅ 사용자 미니 관리 (ES5 안전버전)
-        // - Set/Map 제거: plain object 인덱스 사용
         // =========================================================
         function buildKeyList(obj) {
             if (!obj) return [];
@@ -8942,7 +9760,6 @@
         }
 
         function makeRoleIndex(roleRows) {
-            // key(lowercase) -> { role: 'ROLE_ADMIN' ... }
             var idx = {};
             var rows = roleRows || [];
             for (var i = 0; i < rows.length; i++) {
@@ -8971,7 +9788,6 @@
                 u._role = role;
                 u._isAdmin = !!(role && String(role).toUpperCase().indexOf('ADMIN') >= 0);
 
-                // roleToLabel/roleToClass는 기존 함수 사용
                 u.roleLabel = typeof roleToLabel === 'function' ? roleToLabel(role) : role || '사용자';
                 u.roleClass = typeof roleToClass === 'function' ? roleToClass(role) : 'badge-user';
             }
@@ -9078,7 +9894,6 @@
                 .then(function (res) {
                     var updated = res.data || {};
 
-                    // ✅ ES5: null/undefined만 fallback 처리
                     u.name = updated.name != null ? updated.name : name ? name : u.name;
                     u.phone = updated.phone != null ? updated.phone : phone ? phone : u.phone;
                     u.email = updated.email != null ? updated.email : email ? email : u.email;
@@ -9100,7 +9915,6 @@
             $http
                 .delete('/user/' + encodeURIComponent(idKey))
                 .then(function () {
-                    // ES5: filter 화살표 제거
                     var next = [];
                     var list = $scope.users || [];
                     for (var i = 0; i < list.length; i++) {
@@ -9122,6 +9936,14 @@
         };
 
         // =========================================================
+        // ✅✅✅ [ADD] 컨트롤러 진입 시 수집 타이머 보장 재시작
+        // - destroy로 꺼졌어도 다시 들어오면 켜짐
+        // =========================================================
+        $timeout(function () {
+            ensureCollectRunning();
+        }, 400);
+
+        // =========================================================
         // ✅✅✅ $destroy 단 한 번만: 폴링 + 수집 타이머 정리 (ES5)
         // =========================================================
         $scope.$on('$destroy', function () {
@@ -9137,7 +9959,7 @@
             collectToken++;
             $scope.collecting = false;
         });
-    }); // ← 네가 붙여준 블록 끝의 컨트롤러 클로징 유지
+    });
 
     // ────────────────────────────────────────────────────────────────
     // ───────────────── 게시판 공통 (페이지네이션 + 서버 검색) ─────────────────
