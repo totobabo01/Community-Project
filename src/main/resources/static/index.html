@@ -350,9 +350,10 @@
                 color: #6b7280;
             }
 
+            /* ✅✅✅ 혼합만 남기므로 1칸짜리로 변경 */
             .mode-row {
                 display: grid;
-                grid-template-columns: repeat(3, 1fr);
+                grid-template-columns: 1fr;
                 gap: 8px;
                 margin-bottom: 10px;
             }
@@ -375,6 +376,11 @@
                 background: #111827;
                 border-color: #111827;
                 color: #fff;
+            }
+            .mode-btn:disabled {
+                opacity: 0.9;
+                cursor: default;
+                transform: none;
             }
 
             .search-row {
@@ -1186,112 +1192,22 @@
                                     </div>
 
                                     <div class="panel-body">
-                                        <!-- 0) 자동 수집 상태 -->
-                                        <div class="seg">
-                                            <div class="seg-title">
-                                                <b>0. 자동 수집 상태</b>
-                                                <span class="muted">시작 버튼 없이 자동으로 수집됩니다</span>
-                                            </div>
-
-                                            <div
-                                                class="collect-mini"
-                                                style="margin-bottom: 10px"
-                                            >
-                                                <div>
-                                                    <b>수집:</b>
-                                                    <span ng-class="collectUi.running ? 'ok' : 'off'"> {{collectUi.running ? 'ON' : 'OFF'}} </span>
-                                                </div>
-                                                <div><b>마지막:</b> {{collectUi.lastAt || '-'}}</div>
-
-                                                <div>
-                                                    <b>최근 결과:</b>
-                                                    {{collectUi.lastMsg || '-'}}
-                                                    <div
-                                                        class="eta-bar"
-                                                        ng-if="collectFromEtaText || collectToEtaText"
-                                                    >
-                                                        <span class="chip green">출발 ETA: <b>{{collectFromEtaText || '-'}}</b></span>
-                                                        <span class="chip blue">도착 ETA: <b>{{collectToEtaText || '-'}}</b></span>
-                                                    </div>
-                                                </div>
-
-                                                <div><b>누적 저장:</b> {{collectUi.savedCount || 0}}</div>
-                                            </div>
-
-                                            <div class="collect-bar">
-                                                <div class="collect-left">
-                                                    <span
-                                                        class="chip green"
-                                                        ng-if="collectUi.running"
-                                                        >● 자동수집: ON</span
-                                                    >
-                                                    <span
-                                                        class="chip red"
-                                                        ng-if="!collectUi.running"
-                                                        >● 자동수집: OFF</span
-                                                    >
-
-                                                    <span
-                                                        class="chip gray"
-                                                        ng-if="collectCycleInfo"
-                                                        >{{ collectCycleInfo }}</span
-                                                    >
-                                                </div>
-
-                                                <div class="collect-actions">
-                                                    <button
-                                                        class="fbtn dark"
-                                                        type="button"
-                                                        ng-click="resumeCollect && resumeCollect()"
-                                                        ng-disabled="collectUi.running"
-                                                    >
-                                                        ▶ 재개
-                                                    </button>
-                                                    <button
-                                                        class="fbtn warn"
-                                                        type="button"
-                                                        ng-click="pauseCollect && pauseCollect()"
-                                                        ng-disabled="!collectUi.running"
-                                                    >
-                                                        ■ 중지
-                                                    </button>
-                                                </div>
-                                            </div>
-
-                                            <div style="margin-top: 8px; font-size: 12px; color: #64748b">※ 페이지 진입 시 자동으로 수집이 시작됩니다. (출발/도착 선택 후 제대로 수집됩니다)</div>
-                                        </div>
-
                                         <!-- 1) 검색 & 필터 -->
                                         <div class="seg">
                                             <div class="seg-title">
                                                 <b>1. 검색 & 필터</b>
-                                                <span class="muted">버스 / 트램 / 혼합</span>
+                                                <span class="muted">혼합(버스+트램) 고정</span>
                                             </div>
 
+                                            <!-- ✅✅✅ 버스/트램 버튼 제거 + 혼합만 남김(고정) -->
                                             <div class="mode-row">
                                                 <button
                                                     type="button"
-                                                    class="mode-btn"
-                                                    ng-class="{active: path.mode==='BUS'}"
-                                                    ng-click="path.mode='BUS'; onPathModeChange && onPathModeChange(); searchStops && searchStops();"
+                                                    class="mode-btn active"
+                                                    disabled
+                                                    title="혼합 모드만 사용합니다"
                                                 >
-                                                    🚌 버스
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    class="mode-btn"
-                                                    ng-class="{active: path.mode==='TRAM'}"
-                                                    ng-click="path.mode='TRAM'; onPathModeChange && onPathModeChange(); searchStops && searchStops();"
-                                                >
-                                                    🚋 트램
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    class="mode-btn"
-                                                    ng-class="{active: path.mode==='MIXED'}"
-                                                    ng-click="path.mode='MIXED'; onPathModeChange && onPathModeChange(); searchStops && searchStops();"
-                                                >
-                                                    🔀 버스+트램
+                                                    🔀 버스+트램 (고정)
                                                 </button>
                                             </div>
 
@@ -1457,10 +1373,10 @@
                                                         class="fbtn primary"
                                                         type="button"
                                                         ng-click="
-                              path.fromNodeId=(collect.fromStopId || (collect.from && collect.from.stopId));
-                              path.toNodeId=(collect.toStopId || (collect.to && collect.to.stopId));
-                              findShortestPath();
-                            "
+                                                          path.fromNodeId=(collect.fromStopId || (collect.from && collect.from.stopId));
+                                                          path.toNodeId=(collect.toStopId || (collect.to && collect.to.stopId));
+                                                          findShortestPath();
+                                                        "
                                                         ng-disabled="pathLoading || !((collect.fromStopId || (collect.from && collect.from.stopId)) && (collect.toStopId || (collect.to && collect.to.stopId)))"
                                                     >
                                                         ▶ 경로 탐색
@@ -1478,13 +1394,12 @@
                                                 <div style="margin-top: 4px; font-size: 12px; color: #334155; display: flex; gap: 6px; flex-wrap: wrap; padding: 0 4px">
                                                     <span class="chip">
                                                         거리:
-                                                        <b>{{ (pathResult && pathResult.totalDistM != null) ? ((pathResult.totalDistM | number:0) + ' m') : '-' }}</b>
+                                                        <b> {{ (pathResult && pathResult.totalDistM != null) ? ((pathResult.totalDistM | number:0) + ' m') : '-' }} </b>
                                                     </span>
 
-                                                    <!-- ✅✅✅ FIX: formatDuration 가드 + 스코프 주입으로 확실히 표시 -->
                                                     <span class="chip">
                                                         시간:
-                                                        <b>{{ (pathResult && pathResult.totalTimeS != null && formatDuration) ? formatDuration(pathResult.totalTimeS) : '-' }}</b>
+                                                        <b> {{ (pathResult && pathResult.totalTimeS != null && formatDuration) ? formatDuration(pathResult.totalTimeS) : '-' }} </b>
                                                     </span>
 
                                                     <span class="chip">
@@ -1648,19 +1563,28 @@
                         '$rootScope',
                         function ($rootScope) {
                             $rootScope.path = $rootScope.path || {};
-                            if (!$rootScope.path.mode) $rootScope.path.mode = 'MIXED';
 
+                            // ✅✅✅ 혼합 모드 고정
+                            $rootScope.path.mode = 'MIXED';
+
+                            // ✅✅✅ stop 리스트는 BUS/TRAM만 보여주기(혼합 전용)
                             $rootScope.stopModeFilter = function (s) {
-                                var m = String(($rootScope.path && $rootScope.path.mode) || 'MIXED').toUpperCase();
                                 var k = String((s && (s.kind || s.type)) || '').toUpperCase();
-
-                                if (m === 'TRAM') return k === 'TRAM';
-                                if (m === 'BUS') return k === 'BUS';
                                 return k === 'BUS' || k === 'TRAM' || k === '';
                             };
 
-                            // ✅✅✅ FIX: 템플릿에서 formatDuration()을 바로 쓰기 위해 스코프에 주입
-                            $rootScope.formatDuration = window.formatDuration;
+                            $rootScope.formatDuration = function (sec) {
+                                var s = Math.round(Number(sec) || 0);
+                                if (s < 0) s = 0;
+
+                                var h = Math.floor(s / 3600);
+                                var m = Math.floor((s % 3600) / 60);
+                                var r = s % 60;
+
+                                if (h <= 0 && m <= 0) return r + '초';
+                                if (h > 0) return h + '시간 ' + String(m).padStart(2, '0') + '분 ' + String(r).padStart(2, '0') + '초';
+                                return m + '분 ' + String(r).padStart(2, '0') + '초';
+                            };
                         },
                     ]);
                 } catch (e) {
@@ -1669,7 +1593,7 @@
             })();
         </script>
 
-        <!-- ✅✅✅ BusController 자동수집 주입 -->
+        <!-- ✅✅✅ BusController 자동수집 주입 (UI만 삭제, 스크립트는 그대로 유지) -->
         <script>
             (function () {
                 try {
@@ -1694,7 +1618,12 @@
                                     var injector = el.injector && el.injector();
                                     var $q = injector && injector.get ? injector.get('$q') : null;
 
-                                    s.collectUi = s.collectUi || { running: false, lastAt: '', lastMsg: '', savedCount: 0 };
+                                    s.collectUi = s.collectUi || {
+                                        running: false,
+                                        lastAt: '',
+                                        lastMsg: '',
+                                        savedCount: 0,
+                                    };
 
                                     function nowStr() {
                                         var d = new Date();
