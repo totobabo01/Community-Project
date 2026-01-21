@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html
     lang="ko"
     ng-app="busApp"
@@ -79,7 +79,14 @@
                 height: auto;
             }
             body {
-                font-family: 'Segoe UI', system-ui, -apple-system, Roboto, Apple SD Gothic Neo, Malgun Gothic, sans-serif;
+                font-family:
+                    'Segoe UI',
+                    system-ui,
+                    -apple-system,
+                    Roboto,
+                    Apple SD Gothic Neo,
+                    Malgun Gothic,
+                    sans-serif;
                 background: #f7f9fc;
                 margin: 0;
                 color: #1f2d3d;
@@ -1207,7 +1214,7 @@
                                                     disabled
                                                     title="혼합 모드만 사용합니다"
                                                 >
-                                                    🔀 버스+트램 (고정)
+                                                    🔀 버스 + 트램(검색)
                                                 </button>
                                             </div>
 
@@ -1518,7 +1525,7 @@
                                                     ng-click="goToPathOnMap && goToPathOnMap()"
                                                     ng-disabled="!pathPolylineReady"
                                                 >
-                                                    🧭 경로로 이동
+                                                    🧭 경로 보이기
                                                 </button>
                                                 <button
                                                     class="fbtn secondary"
