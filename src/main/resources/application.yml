@@ -14,7 +14,7 @@ spring:
         driver-class-name: org.mariadb.jdbc.Driver
         url: jdbc:mariadb://localhost:3306/demo
         username: demo_user
-        password: '1234'
+        password: '0000'
 
 server:
     port: 8091 # 내장 서버 포트
