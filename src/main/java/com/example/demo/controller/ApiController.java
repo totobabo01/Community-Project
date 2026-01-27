@@ -86,11 +86,8 @@ public class ApiController {
 
     private static final String DEFAULT_CITY_CODE = "25";
 
-    // ✅ 핵심 최적화:
     // 대전(cityCode=25) 정류장 총량이 3069개 수준이면 numOfRows=5000 한 번 호출로 끝남
     private static final int DEFAULT_NUM_OF_ROWS = 5000;
-
-    // ✅ maxPages는 여유로 5 정도만 (실제로 1페이지에서 끝날 가능성이 큼)
     private static final int DEFAULT_MAX_PAGES = 5;
 
     // =========================================================
@@ -116,19 +113,10 @@ public class ApiController {
 
     // =========================================================
     // ✅ 1) 정류장 목록 - /api/bus/stops
-    //
-    // ✅ 변경 포인트(속도 핵심):
-    // - 기존: 호출마다 TAGO 외부 API를 직접 호출 → 느림
-    // - 개선: 캐시(stopsCache)가 있으면 캐시에서 "검색/페이징"만 → 매우 빠름
-    // - 캐시가 없으면: 한 번만 로드해서 캐시 채우고 응답
-    //
-    // ✅ 반환 형식:
-    // - 프론트 호환 위해 TAGO 비슷한 구조 유지:
-    //   response.body.items.item (배열) + totalCount
     // =========================================================
     @GetMapping(value = "/stops", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> searchStops(
-            @RequestParam("cityCode") String cityCode,
+            @RequestParam(value = "cityCode", required = false, defaultValue = DEFAULT_CITY_CODE) String cityCode,
             @RequestParam(value = "keyword", required = false) String keyword,
             @RequestParam(defaultValue = "1") int pageNo,
             @RequestParam(defaultValue = "500") int numOfRows
@@ -136,49 +124,49 @@ public class ApiController {
         cityCode = clean(cityCode);
         keyword = clean(keyword);
 
-        // 방어
+        if (cityCode == null || cityCode.isBlank()) cityCode = DEFAULT_CITY_CODE;
+
         if (pageNo < 1) pageNo = 1;
         numOfRows = clamp(numOfRows, 1, 5000, 500);
 
         try {
-            // ✅ 1) 캐시 보장(없으면 1회 로드)
             ArrayNode cache = ensureStopsCache(cityCode);
-
-            // ✅ 2) 캐시 기반 필터링
             ArrayNode filtered = filterStops(cache, keyword);
 
             int total = filtered.size();
-
-            // ✅ 3) 캐시 기반 페이징
             ArrayNode paged = slicePage(filtered, pageNo, numOfRows);
 
-            // ✅ 4) TAGO-like 구조로 반환(프론트 호환)
             ObjectNode out = buildTagoLikeStopsResponse(paged, total, pageNo, numOfRows);
 
-            // ✅ 응답 캐시(브라우저/프록시) 조금 허용: 30초
             return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_JSON)
                     .cacheControl(CacheControl.maxAge(30, TimeUnit.SECONDS))
                     .body(out);
 
         } catch (RestClientResponseException e) {
             System.out.println("[STOPS/CACHE] 에러 status=" + e.getRawStatusCode());
             System.out.println("[STOPS/CACHE] response=" + e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getRawStatusCode()).body(e.getResponseBodyAsString());
+            return ResponseEntity.status(e.getRawStatusCode())
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body(e.getResponseBodyAsString());
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.status(500).body("정류장 캐시 조회 중 서버 내부 오류: " + e.getMessage());
+            return ResponseEntity.status(500)
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body("정류장 캐시 조회 중 서버 내부 오류: " + e.getMessage());
         }
     }
 
     // ================== 1-2) 전체 정류장 목록(캐시 버전) ==================
     @GetMapping(value = "/stops/all", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> getAllStops(
-            @RequestParam("cityCode") String cityCode,
+            @RequestParam(value = "cityCode", required = false, defaultValue = DEFAULT_CITY_CODE) String cityCode,
             @RequestParam(defaultValue = "5000") int numOfRows,
             @RequestParam(defaultValue = "5") int maxPages,
             @RequestParam(value = "refresh", required = false, defaultValue = "false") boolean refresh
     ) {
         cityCode = clean(cityCode);
+        if (cityCode == null || cityCode.isBlank()) cityCode = DEFAULT_CITY_CODE;
 
         numOfRows = clamp(numOfRows, 1, 5000, 5000);
         maxPages = clamp(maxPages, 1, 200, 5);
@@ -190,6 +178,7 @@ public class ApiController {
             if (stopsCache != null) {
                 System.out.println("[TAGO 전체정류장/REFRESH] trigger + return cache size=" + stopsCache.size());
                 return ResponseEntity.ok()
+                        .contentType(MediaType.APPLICATION_JSON)
                         .cacheControl(CacheControl.noCache())
                         .body(stopsCache);
             }
@@ -205,6 +194,7 @@ public class ApiController {
             System.out.println("[TAGO 전체정류장/CACHE HIT] size=" + stopsCache.size() + ", ageMs=" + age);
 
             return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_JSON)
                     .cacheControl(CacheControl.maxAge(30, TimeUnit.SECONDS))
                     .body(stopsCache);
         }
@@ -221,21 +211,26 @@ public class ApiController {
                 } catch (RestClientResponseException e) {
                     System.out.println("[TAGO 전체정류장] 에러 status=" + e.getRawStatusCode());
                     System.out.println("[TAGO 전체정류장] response=" + e.getResponseBodyAsString());
-                    return ResponseEntity.status(e.getRawStatusCode()).body(e.getResponseBodyAsString());
+                    return ResponseEntity.status(e.getRawStatusCode())
+                            .contentType(MediaType.TEXT_PLAIN)
+                            .body(e.getResponseBodyAsString());
                 } catch (Exception e) {
                     e.printStackTrace();
-                    return ResponseEntity.status(500).body("TAGO 전체정류장 호출 중 서버 내부 오류: " + e.getMessage());
+                    return ResponseEntity.status(500)
+                            .contentType(MediaType.TEXT_PLAIN)
+                            .body("TAGO 전체정류장 호출 중 서버 내부 오류: " + e.getMessage());
                 }
             }
         }
 
         return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_JSON)
                 .cacheControl(CacheControl.noCache())
                 .body(stopsCache);
     }
 
     // 캐시 상태 확인용
-    @GetMapping("/stops/cache/status")
+    @GetMapping(value = "/stops/cache/status", produces = MediaType.TEXT_PLAIN_VALUE)
     public ResponseEntity<?> stopsCacheStatus() {
         long now = System.currentTimeMillis();
         long age = stopsCacheAtMs == 0 ? -1 : (now - stopsCacheAtMs);
@@ -251,13 +246,14 @@ public class ApiController {
     // Step1: 전체 정류장 적재(import)
     // POST /api/bus/stops/import?cityCode=25&type=BUS
     // =========================================================
-    @PostMapping("/stops/import")
+    @PostMapping(value = "/stops/import", produces = MediaType.TEXT_PLAIN_VALUE)
     public ResponseEntity<?> importStops(
-            @RequestParam("cityCode") String cityCode,
+            @RequestParam(value = "cityCode", required = false, defaultValue = DEFAULT_CITY_CODE) String cityCode,
             @RequestParam(defaultValue = "BUS") String type
     ) {
         cityCode = clean(cityCode);
         type = clean(type);
+        if (cityCode == null || cityCode.isBlank()) cityCode = DEFAULT_CITY_CODE;
 
         StopDto.StopType stopType = parseStopType(type);
 
@@ -311,13 +307,14 @@ public class ApiController {
     // =========================================================
     // ✅ 노선 목록
     // =========================================================
-    @GetMapping("/routeList")
+    @GetMapping(value = "/routeList", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> getRouteList(
-            @RequestParam("cityCode") String cityCode,
+            @RequestParam(value = "cityCode", required = false, defaultValue = DEFAULT_CITY_CODE) String cityCode,
             @RequestParam(defaultValue = "1") int pageNo,
             @RequestParam(defaultValue = "500") int numOfRows
     ) {
         cityCode = clean(cityCode);
+        if (cityCode == null || cityCode.isBlank()) cityCode = DEFAULT_CITY_CODE;
 
         String serviceKey = serviceKeyForUrl(routeServiceKey);
         String encodedCityCode = enc(cityCode);
@@ -335,27 +332,34 @@ public class ApiController {
 
         try {
             String body = rt.getForObject(url, String.class);
-            return ResponseEntity.ok(body);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body);
         } catch (RestClientResponseException e) {
             System.out.println("[TAGO 노선목록] 에러 status=" + e.getRawStatusCode());
             System.out.println("[TAGO 노선목록] response=" + e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getRawStatusCode()).body(e.getResponseBodyAsString());
+            return ResponseEntity.status(e.getRawStatusCode())
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body(e.getResponseBodyAsString());
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.status(500).body("TAGO 노선목록 호출 중 서버 내부 오류: " + e.getMessage());
+            return ResponseEntity.status(500)
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body("TAGO 노선목록 호출 중 서버 내부 오류: " + e.getMessage());
         }
     }
 
     // =========================================================
     // Step2: "버스 클릭한 노선(routeId)"으로 간선(edge) 저장
     // =========================================================
-    @PostMapping("/edges/import")
+    @PostMapping(value = "/edges/import", produces = MediaType.TEXT_PLAIN_VALUE)
     public ResponseEntity<?> importEdgesForRoute(
-            @RequestParam("cityCode") String cityCode,
+            @RequestParam(value = "cityCode", required = false, defaultValue = DEFAULT_CITY_CODE) String cityCode,
             @RequestParam("routeId") String routeId
     ) {
         cityCode = clean(cityCode);
         routeId = clean(routeId);
+        if (cityCode == null || cityCode.isBlank()) cityCode = DEFAULT_CITY_CODE;
 
         try {
             String body = callRoutePathRaw(cityCode, routeId, 1, 500);
@@ -416,25 +420,30 @@ public class ApiController {
         } catch (RestClientResponseException e) {
             System.out.println("[IMPORT-EDGES] 에러 status=" + e.getRawStatusCode());
             System.out.println("[IMPORT-EDGES] response=" + e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getRawStatusCode()).body(e.getResponseBodyAsString());
+            return ResponseEntity.status(e.getRawStatusCode())
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body(e.getResponseBodyAsString());
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.status(500).body("edges import 실패: " + e.getMessage());
+            return ResponseEntity.status(500)
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body("edges import 실패: " + e.getMessage());
         }
     }
 
     // =========================================================
     // 2) 노선별 버스 위치
     // =========================================================
-    @GetMapping({"/pos", "/location"})
+    @GetMapping(value = {"/pos", "/location"}, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> getBusPos(
-            @RequestParam("cityCode") String cityCode,
+            @RequestParam(value = "cityCode", required = false, defaultValue = DEFAULT_CITY_CODE) String cityCode,
             @RequestParam("routeId") String routeId,
             @RequestParam(defaultValue = "1") int pageNo,
             @RequestParam(defaultValue = "100") int numOfRows
     ) {
         cityCode = clean(cityCode);
         routeId = clean(routeId);
+        if (cityCode == null || cityCode.isBlank()) cityCode = DEFAULT_CITY_CODE;
 
         String serviceKey = serviceKeyForUrl(locationServiceKey);
         String encodedCityCode = enc(cityCode);
@@ -456,29 +465,36 @@ public class ApiController {
 
         try {
             String body = rt.getForObject(url, String.class);
-            return ResponseEntity.ok(body);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body);
         } catch (RestClientResponseException e) {
             System.out.println("[TAGO 노선 위치] 에러 status=" + e.getRawStatusCode());
             System.out.println("[TAGO 노선 위치] response=" + e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getRawStatusCode()).body(e.getResponseBodyAsString());
+            return ResponseEntity.status(e.getRawStatusCode())
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body(e.getResponseBodyAsString());
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.status(500).body("TAGO 노선 위치 호출 중 서버 내부 오류: " + e.getMessage());
+            return ResponseEntity.status(500)
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body("TAGO 노선 위치 호출 중 서버 내부 오류: " + e.getMessage());
         }
     }
 
     // =========================================================
     // 3) 정류장별 도착 정보
     // =========================================================
-    @GetMapping("/arrival")
+    @GetMapping(value = "/arrival", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> getArrival(
-            @RequestParam("cityCode") String cityCode,
+            @RequestParam(value = "cityCode", required = false, defaultValue = DEFAULT_CITY_CODE) String cityCode,
             @RequestParam("nodeId") String nodeId,
             @RequestParam(defaultValue = "50") int numOfRows,
             @RequestParam(defaultValue = "1") int pageNo
     ) {
         cityCode = clean(cityCode);
         nodeId = clean(nodeId);
+        if (cityCode == null || cityCode.isBlank()) cityCode = DEFAULT_CITY_CODE;
 
         debugParam("nodeId", nodeId);
 
@@ -500,32 +516,40 @@ public class ApiController {
 
         try {
             String body = rt.getForObject(url, String.class);
-            return ResponseEntity.ok(body);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body);
         } catch (RestClientResponseException e) {
             System.out.println("[TAGO 도착정보] 에러 status=" + e.getRawStatusCode());
             System.out.println("[TAGO 도착정보] response=" + e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getRawStatusCode()).body(e.getResponseBodyAsString());
+            return ResponseEntity.status(e.getRawStatusCode())
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body(e.getResponseBodyAsString());
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.status(500).body("TAGO 도착정보 호출 중 서버 내부 오류: " + e.getMessage());
+            return ResponseEntity.status(500)
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body("TAGO 도착정보 호출 중 서버 내부 오류: " + e.getMessage());
         }
     }
 
     // =========================================================
     // 4) 노선 경유 정류장(경로)
     // =========================================================
-    @GetMapping("/routePath")
+    @GetMapping(value = "/routePath", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> getRoutePath(
-            @RequestParam("cityCode") String cityCode,
+            @RequestParam(value = "cityCode", required = false, defaultValue = DEFAULT_CITY_CODE) String cityCode,
             @RequestParam("routeId") String routeId,
             @RequestParam(defaultValue = "1") int pageNo,
             @RequestParam(defaultValue = "500") int numOfRows
     ) {
         cityCode = clean(cityCode);
         routeId = clean(routeId);
+        if (cityCode == null || cityCode.isBlank()) cityCode = DEFAULT_CITY_CODE;
 
-        if (cityCode == null || cityCode.isBlank()) return ResponseEntity.badRequest().body("cityCode is empty");
-        if (routeId == null || routeId.isBlank()) return ResponseEntity.badRequest().body("routeId is empty");
+        if (routeId == null || routeId.isBlank()) return ResponseEntity.badRequest()
+                .contentType(MediaType.TEXT_PLAIN)
+                .body("routeId is empty");
 
         debugParam("cityCode", cityCode);
         debugParam("routeId", routeId);
@@ -561,15 +585,21 @@ public class ApiController {
                 }
             } catch (Exception ignore) {}
 
-            return ResponseEntity.ok(body);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body);
 
         } catch (RestClientResponseException e) {
             System.out.println("[TAGO 노선경로] 에러 status=" + e.getRawStatusCode());
             System.out.println("[TAGO 노선경로] response=" + e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getRawStatusCode()).body(e.getResponseBodyAsString());
+            return ResponseEntity.status(e.getRawStatusCode())
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body(e.getResponseBodyAsString());
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.status(500).body("TAGO 노선경로 호출 중 서버 내부 오류: " + e.getMessage());
+            return ResponseEntity.status(500)
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body("TAGO 노선경로 호출 중 서버 내부 오류: " + e.getMessage());
         }
     }
 
@@ -600,17 +630,14 @@ public class ApiController {
     private ArrayNode ensureStopsCache(String cityCode) throws Exception {
         long now = System.currentTimeMillis();
 
-        // 캐시가 있고 TTL 안 지났으면 그대로
         if (stopsCache != null) {
             long age = now - stopsCacheAtMs;
             if (age <= CACHE_TTL_MS) return stopsCache;
 
-            // TTL 지났으면 백그라운드 갱신만 트리거하고 일단 캐시 반환(대기 없음)
             triggerStopsRefreshAsync(cityCode, DEFAULT_NUM_OF_ROWS, DEFAULT_MAX_PAGES);
             return stopsCache;
         }
 
-        // 캐시가 없으면 1회만 로드(여기만 최초 1번 비용)
         synchronized (cacheLock) {
             if (stopsCache == null) {
                 ArrayNode loaded = loadAllStops(cityCode, DEFAULT_NUM_OF_ROWS, DEFAULT_MAX_PAGES);
@@ -622,13 +649,11 @@ public class ApiController {
         return stopsCache;
     }
 
-    // ✅ keyword로 캐시 필터
     private ArrayNode filterStops(ArrayNode src, String keyword) {
         ArrayNode out = om.createArrayNode();
         if (src == null) return out;
 
         if (keyword == null || keyword.isBlank()) {
-            // 그대로 복사(참조 공유 피하려면 add로)
             for (JsonNode n : src) out.add(n);
             return out;
         }
@@ -643,7 +668,6 @@ public class ApiController {
         return out;
     }
 
-    // ✅ page slice
     private ArrayNode slicePage(ArrayNode src, int pageNo, int numOfRows) {
         ArrayNode out = om.createArrayNode();
         if (src == null) return out;
@@ -654,13 +678,10 @@ public class ApiController {
         if (start >= total) return out;
 
         int end = Math.min(total, start + numOfRows);
-        for (int i = start; i < end; i++) {
-            out.add(src.get(i));
-        }
+        for (int i = start; i < end; i++) out.add(src.get(i));
         return out;
     }
 
-    // ✅ TAGO-like response 생성(프론트 호환)
     private ObjectNode buildTagoLikeStopsResponse(ArrayNode itemArr, int totalCount, int pageNo, int numOfRows) {
         ObjectNode root = om.createObjectNode();
         ObjectNode response = root.putObject("response");
@@ -668,16 +689,13 @@ public class ApiController {
         body.put("totalCount", totalCount);
 
         ObjectNode items = body.putObject("items");
-        // TAGO는 items.item
         items.set("item", itemArr != null ? itemArr : om.createArrayNode());
 
         body.put("pageNo", pageNo);
         body.put("numOfRows", numOfRows);
-
         return root;
     }
 
-    // 내부: 전체 정류장 페이지 합쳐 반환
     private ArrayNode loadAllStops(String cityCode, int numOfRows, int maxPages) throws Exception {
         ArrayNode merged = om.createArrayNode();
 
@@ -705,9 +723,9 @@ public class ApiController {
         return merged;
     }
 
-    // 내부: 특정 pageNo 정류장 페이지 호출
     private String callStopsPage(String cityCode, int pageNo, int numOfRows) {
         cityCode = clean(cityCode);
+        if (cityCode == null || cityCode.isBlank()) cityCode = DEFAULT_CITY_CODE;
 
         String serviceKey = serviceKeyForUrl(stationServiceKey);
         String encodedCityCode = enc(cityCode);
@@ -728,6 +746,7 @@ public class ApiController {
     private String callRoutePathRaw(String cityCode, String routeId, int pageNo, int numOfRows) {
         cityCode = clean(cityCode);
         routeId = clean(routeId);
+        if (cityCode == null || cityCode.isBlank()) cityCode = DEFAULT_CITY_CODE;
 
         String serviceKey = serviceKeyForUrl(routeServiceKey);
         String encodedCityCode = enc(cityCode);
@@ -751,11 +770,7 @@ public class ApiController {
         if (bodyString == null || bodyString.isBlank()) return null;
 
         JsonNode root = om.readTree(bodyString);
-
-        JsonNode item = root.path("response")
-                .path("body")
-                .path("items")
-                .path("item");
+        JsonNode item = root.path("response").path("body").path("items").path("item");
 
         if (item.isMissingNode() || item.isNull()) return null;
         return item;
@@ -781,7 +796,6 @@ public class ApiController {
         return URLEncoder.encode(s, StandardCharsets.UTF_8);
     }
 
-    // ✅ serviceKey는 '%'가 이미 있으면 그대로 사용.
     private String serviceKeyForUrl(String key) {
         key = clean(key);
         if (key == null) return "";

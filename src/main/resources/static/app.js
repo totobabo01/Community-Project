@@ -833,7 +833,6 @@
         const busLastProjPos = new Map(); // vehicleKey -> [x,y]
         const busLastHeading = new Map(); // vehicleKey -> rad
 
-        const BUS_ICON_ROT_OFFSET = 0; // 필요시 조정
         const HEADING_MATCH_MIN_MOVE_M = 5;
 
         const busFeatureMap = new Map(); // vehicleKey -> Feature
@@ -1117,29 +1116,230 @@
         }
 
         // =========================================================
-        // ✅ 버스 스타일(화살표)
+        // ✅✅✅ [REPLACE] busArrowStyle (NO CACHE / ALWAYS UPDATE)
+        // - ✅ 번호 항상 표시 (feature/bus 어디에 있든 찾아서 표시)
+        // - ✅ 방향: "폴리라인 방향"을 최우선(강제)
+        // - ✅ 폴리라인이 없으면 heading/rot로 fallback
+        // - ✅ 같은 노선번호 여러대 표시: style은 모두 지원 (실제 표시는 addFeature 로직이 결정)
         // =========================================================
-        function busArrowStyle(feature) {
-            const routeNo = String(feature.get('routeNo') || '');
-            const headingRad = feature.get('headingRad') || 0;
+        (function () {
+            if (!window.ol || !ol.style || !ol.geom) return;
 
-            return new ol.style.Style({
-                image: new ol.style.Icon({
-                    src: '/bus_arrow.svg',
-                    scale: 0.45,
-                    rotation: normalizeAngle(-(headingRad || 0) + BUS_ICON_ROT_OFFSET),
+            var BUS_ICON_SRC = '/bus_arrow.svg';
+            var BUS_ICON_SCALE = 0.42; // ✅ 작게
+            var LABEL_FONT = 'bold 12px sans-serif';
+            var LABEL_OFFSET_Y = -14;
+
+            // ✅ SVG 기본 방향 보정 (너 프로젝트에서 이게 맞았으니 유지)
+            // - 만약 "90도 틀어짐" 보이면 0 또는 -Math.PI/2 로 바꿔서 맞추면 됨
+            var ROT_OFFSET = Math.PI / 2;
+
+            // ------------------------------
+            // ✅ 유틸
+            // ------------------------------
+            function normRouteNo(v) {
+                return String(v == null ? '' : v)
+                    .replace(/\s+/g, '')
+                    .replace(/번/g, '')
+                    .trim();
+            }
+
+            function getPointXY(feature) {
+                try {
+                    var g = feature && feature.getGeometry && feature.getGeometry();
+                    if (!g || g.getType() !== 'Point') return null;
+                    var c = g.getCoordinates();
+                    if (c && isFinite(c[0]) && isFinite(c[1])) return c;
+                } catch (e) {}
+                return null;
+            }
+
+            // ✅ "현재 선택된 노선 폴리라인"을 최대한 잘 찾기
+            function getRouteLineFeature() {
+                // 1) 외부에서 강제로 박아둔 경우 우선
+                if (window.__routeLineFeature && window.__routeLineFeature.getGeometry) return window.__routeLineFeature;
+
+                // 2) 전역 routeVectorSource 후보들
+                var src = window.routeVectorSource || window.__routeVectorSource || null;
+                if (!src || !src.getFeatures) return null;
+
+                var fs = src.getFeatures() || [];
+                for (var i = 0; i < fs.length; i++) {
+                    var f = fs[i];
+                    var g = f && f.getGeometry && f.getGeometry();
+                    if (!g || g.getType() !== 'LineString') continue;
+
+                    // ✅ single-seg(정류장→정류장) 이 있으면 그걸 최우선
+                    var segTag = String(f.get('segTag') || '');
+                    if (segTag === 'single-seg') return f;
+
+                    // ✅ 일반 path/route 라인 후보
+                    var kind = String(f.get('kind') || f.get('layerTag') || f.get('pathKind') || '').toLowerCase();
+                    if (kind.indexOf('route') >= 0 || kind.indexOf('path') >= 0) return f;
+                }
+                return null;
+            }
+
+            // ✅ 포인트(pt)에 가장 가까운 polyline 세그먼트를 찾아 그 방향 각도(rad) 리턴
+            function angleFromNearestSegment(pt, lineF) {
+                if (!pt || !lineF) return null;
+                try {
+                    var g = lineF.getGeometry();
+                    var coords = g.getCoordinates();
+                    if (!coords || coords.length < 2) return null;
+
+                    var px = pt[0],
+                        py = pt[1];
+                    var bestI = -1,
+                        bestD2 = Infinity;
+
+                    for (var i = 0; i < coords.length - 1; i++) {
+                        var ax = coords[i][0],
+                            ay = coords[i][1];
+                        var bx = coords[i + 1][0],
+                            by = coords[i + 1][1];
+
+                        var abx = bx - ax,
+                            aby = by - ay;
+                        var apx = px - ax,
+                            apy = py - ay;
+                        var ab2 = abx * abx + aby * aby;
+
+                        var t = ab2 > 0 ? (apx * abx + apy * aby) / ab2 : 0;
+                        if (t < 0) t = 0;
+                        else if (t > 1) t = 1;
+
+                        var cx = ax + t * abx,
+                            cy = ay + t * aby;
+                        var dx = px - cx,
+                            dy = py - cy;
+                        var d2 = dx * dx + dy * dy;
+
+                        if (d2 < bestD2) {
+                            bestD2 = d2;
+                            bestI = i;
+                        }
+                    }
+
+                    if (bestI < 0) return null;
+                    var p0 = coords[bestI],
+                        p1 = coords[bestI + 1];
+                    var vx = p1[0] - p0[0],
+                        vy = p1[1] - p0[1];
+                    if (!isFinite(vx) || !isFinite(vy) || (vx === 0 && vy === 0)) return null;
+
+                    return Math.atan2(vy, vx);
+                } catch (e) {
+                    return null;
+                }
+            }
+
+            // ------------------------------
+            // ✅ 핵심: 회전 각도 결정
+            // - ✅ 폴리라인 방향을 "무조건 우선" 적용
+            // - 폴리라인 못 찾으면 heading/rot fallback
+            // ------------------------------
+            function resolveRotation(feature) {
+                // ✅ 1) 폴리라인 기반 회전(강제)
+                var pt = getPointXY(feature);
+                var lineF = getRouteLineFeature();
+                var a = angleFromNearestSegment(pt, lineF);
+                if (isFinite(a)) return a + ROT_OFFSET;
+
+                // ✅ 2) fallback: feature/bus에 있는 heading/rot 사용
+                var rot = NaN;
+                try {
+                    rot = Number(feature.get('rot'));
+                    if (!isFinite(rot)) rot = Number(feature.get('headingRad'));
+                    if (!isFinite(rot)) rot = Number(feature.get('heading'));
+
+                    var bus = feature.get('bus') || feature.get('data') || feature.get('item');
+                    if (!isFinite(rot) && bus) rot = Number(bus.headingRad);
+                    if (!isFinite(rot) && bus) rot = Number(bus.heading);
+                } catch (e) {}
+
+                // degree로 보이면 rad로
+                if (isFinite(rot) && Math.abs(rot) > 2 * Math.PI && Math.abs(rot) <= 360) {
+                    rot = (rot * Math.PI) / 180;
+                }
+
+                if (!isFinite(rot)) rot = 0;
+                return rot + ROT_OFFSET;
+            }
+
+            // ------------------------------
+            // ✅ 노선번호 추출(최대한 많이 커버)
+            // ------------------------------
+            function pickRouteNo(feature) {
+                try {
+                    var bus = feature.get('bus') || feature.get('data') || feature.get('item');
+
+                    var raw =
+                        feature.get('routeNo') ||
+                        feature.get('routeno') ||
+                        feature.get('route_no') ||
+                        feature.get('routeNm') ||
+                        feature.get('routenm') ||
+                        feature.get('label') ||
+                        (bus && (bus.routeno || bus.routeNo || bus.route_no || bus.routenm || bus.routeNm || bus.lineNo || bus.busRouteNm)) ||
+                        '';
+
+                    return normRouteNo(raw);
+                } catch (e) {
+                    return '';
+                }
+            }
+
+            // ------------------------------
+            // ✅ 스타일 본체 (매 호출마다 Icon/Text 새로 생성)
+            // ------------------------------
+            function busArrowStyle(feature) {
+                var rno = pickRouteNo(feature);
+                var rot = resolveRotation(feature);
+
+                // ✅ 아이콘(매번 생성: 캐시로 인해 방향/텍스트 안 바뀌는 문제 방지)
+                var icon = new ol.style.Icon({
+                    src: BUS_ICON_SRC,
+                    scale: BUS_ICON_SCALE,
+                    rotation: rot,
                     rotateWithView: true,
                     anchor: [0.5, 0.5],
-                }),
-                text: new ol.style.Text({
-                    text: routeNo,
-                    font: 'bold 11px Arial',
-                    offsetY: -22,
-                    fill: new ol.style.Fill({ color: '#003366' }),
-                    stroke: new ol.style.Stroke({ color: '#ffffff', width: 3 }),
-                }),
-            });
-        }
+                    anchorXUnits: 'fraction',
+                    anchorYUnits: 'fraction',
+                });
+
+                var iconStyle = new ol.style.Style({ image: icon });
+
+                // ✅ 텍스트(항상 표시)
+                var textStyle = new ol.style.Style({
+                    text: new ol.style.Text({
+                        text: rno ? String(rno) : '',
+                        font: LABEL_FONT,
+                        offsetY: LABEL_OFFSET_Y,
+                        fill: new ol.style.Fill({ color: '#111' }),
+                        stroke: new ol.style.Stroke({ color: 'rgba(255,255,255,0.95)', width: 4 }),
+                    }),
+                });
+
+                return [iconStyle, textStyle];
+            }
+
+            // ✅ 전역으로 노출 (버스 레이어 style에서 이 함수 쓰게)
+            window.busArrowStyle = busArrowStyle;
+
+            // ✅ BUS 스타일 registry가 있는 구조면 여기도 맞춰줌
+            window.__ensureBusStyles = function () {
+                window.__BUS_STYLES__ = window.__BUS_STYLES__ || {};
+                window.__BUS_STYLES__.__ready = true;
+                window.__BUS_STYLES__.normal = function (feature) {
+                    return busArrowStyle(feature);
+                };
+                window.__BUS_STYLES__.selected = function (feature) {
+                    // 선택 스타일이 따로 필요하면 여기서 글자/스케일만 살짝 키워도 됨
+                    return busArrowStyle(feature);
+                };
+            };
+        })();
 
         // =========================================================
         // ✅ Bus Vector Layer (버스 마커 레이어)
@@ -1149,8 +1349,6 @@
 
         // ✅ 컨트롤러 스코프 전역 상태(중복 선언 금지!)
         let __selectedBusKey = null; // "버스 1대" 식별키(가장 가까운 버스 선택 결과)
-
-        // ✅ 라벨/표시용 옵션(원하면)
         let __hideOthersOpacity = 0.1; // 나머지 버스 희미하게(0이면 완전 숨김)
 
         // routeNo 정규화
@@ -1215,17 +1413,13 @@
         }
 
         // ---------------------------------------------------------
-        // ✅ 버스 스타일(캐시) - 단일 정의로 통일 (REPLACE ALL)
-        // - busArrowStyle(네 기존 화살표 스타일) "위에" 번호(Text)만 얹음
-        // - normal/selected 둘 다 함수로 통일해서 feature별 routeNo/heading 반영
+        // ✅ 버스 스타일(캐시)
+        // - normal/selected 모두 function으로 통일
         // ---------------------------------------------------------
         function __ensureBusStyles() {
             if (!window.ol || !ol.style) return;
-
-            // ✅ 캐시는 window로 1개만
             if (window.__BUS_STYLES__ && window.__BUS_STYLES__.__ready) return;
 
-            // routeNo 안전 추출 (feature 우선)
             function pickRouteNo(feature) {
                 const bus = feature && feature.get ? feature.get('bus') || feature.get('data') || feature.get('item') : null;
 
@@ -1240,33 +1434,35 @@
 
             function pickHeadingRad(feature) {
                 try {
-                    const bus = feature && feature.get ? feature.get('bus') || feature.get('data') || feature.get('item') : null;
+                    var bus = feature && feature.get ? feature.get('bus') || feature.get('data') || feature.get('item') : null;
 
-                    // headingRad 우선
-                    let r = Number(feature && feature.get && feature.get('headingRad'));
+                    // 1) headingRad (이미 라디안)
+                    var r = Number(feature && feature.get && feature.get('headingRad'));
                     if (isFinite(r)) return r;
 
-                    // heading(도) -> rad
-                    let hd = Number((feature && feature.get && (feature.get('heading') || feature.get('angle') || feature.get('hd'))) || (bus && (bus.heading || bus.angle || bus.hd)));
+                    // 2) bus.headingRad
+                    r = Number(bus && bus.headingRad);
+                    if (isFinite(r)) return r;
+
+                    // 3) heading/angle/bearing (도 단위) -> rad
+                    var hd = Number((feature && feature.get && (feature.get('heading') || feature.get('angle') || feature.get('hd') || feature.get('bearing'))) || (bus && (bus.heading || bus.angle || bus.hd || bus.bearing || bus.azimuth)));
 
                     if (isFinite(hd)) return (hd * Math.PI) / 180;
                 } catch (e) {}
                 return 0;
             }
 
-            // ✅ busArrowStyle을 "Style 또는 함수" 모두 지원
             function baseStyle(feature) {
                 try {
                     if (typeof busArrowStyle === 'function') return busArrowStyle(feature);
-                    return busArrowStyle; // Style 객체
+                    return busArrowStyle;
                 } catch (e) {
                     return null;
                 }
             }
 
-            // ✅ baseStyle + 번호(Text) 오버레이 (Style 1개 또는 배열 모두 처리)
             function withLabel(feature, isSelected) {
-                const label = pickRouteNo(feature); // ''면 안 보이게 처리
+                const label = pickRouteNo(feature);
                 const rot = pickHeadingRad(feature);
 
                 const txt = new ol.style.Style({
@@ -1279,28 +1475,21 @@
                     }),
                 });
 
-                // ✅ base arrow rotation이 busArrowStyle에 반영 안 되는 케이스 대비:
-                //    feature에 'headingRad'를 이미 넣고 있으니, busArrowStyle이 그걸 쓰게 두고
-                //    여기서는 label만 얹는다.
-                //    (만약 네 busArrowStyle이 rotation을 직접 계산하면 이 rot는 참고용)
-                void rot;
-
                 const base = baseStyle(feature);
 
-                // base가 배열(Style[])이면 뒤에 txt 추가
                 if (Array.isArray(base)) return base.concat([txt]);
-
-                // base가 Style이면 [base, txt]
                 if (base) return [base, txt];
 
-                // base가 없으면 fallback: 삼각형 + 텍스트
+                // fallback: 삼각형 + 텍스트
                 return [
                     new ol.style.Style({
                         image: new ol.style.RegularShape({
                             points: 3,
                             radius: isSelected ? 12 : 10,
                             rotation: rot,
-                            fill: new ol.style.Fill({ color: isSelected ? 'rgba(239,68,68,0.95)' : 'rgba(37,99,235,0.95)' }),
+                            fill: new ol.style.Fill({
+                                color: isSelected ? 'rgba(239,68,68,0.95)' : 'rgba(37,99,235,0.95)',
+                            }),
                             stroke: new ol.style.Stroke({ color: '#ffffff', width: 2 }),
                         }),
                     }),
@@ -1310,124 +1499,383 @@
 
             window.__BUS_STYLES__ = {
                 __ready: true,
-
-                // ✅ normal/selected 둘 다 "함수"로 통일
                 normal: function (feature) {
                     return withLabel(feature, false);
                 },
-
                 selected: function (feature) {
                     return withLabel(feature, true);
                 },
             };
         }
 
-        // ---------------------------------------------------------
-        // ✅✅✅ (REPLACE) Bus Layer 생성
-        // - 소스(busVectorSource)는 유지(= nearest pick용 데이터 유지)
-        // - 레이어(busVectorLayer)는 "항상 숨김"으로 고정 => 얇은 화살표 제거
-        // ---------------------------------------------------------
-        function ensureBusVectorLayer() {
-            var map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
-            if (!map) return;
+        // =========================================================
+        // ✅✅✅ (REPLACE) ensureBusVectorLayer (ARROW SCALE FIX + RESOLUTION STYLE + LOCK UNDO)
+        // - tag='bus' 레이어가 있으면 최우선
+        // - 숨김락/스타일락 delete로 해제
+        // - 스타일 함수는 (feature, resolution) 지원 → 줌에 따라 화살표 크기 자동 조절
+        // - Point 피처에만 적용 (오염 방지)
+        // =========================================================
+        function ensureBusVectorLayer(map) {
+            map = map || (typeof getInnerOlMap === 'function' ? getInnerOlMap() : null);
+            if (!map) return false;
+            if (!window.ol || !ol.layer || !ol.source || !ol.style) return false;
 
-            if (!window.ol || !ol.layer || !ol.source || !ol.geom || !ol.style) return;
+            // ✅ 스타일 캐시 준비(네가 이미 만든 함수)
+            try {
+                if (typeof __ensureBusStyles === 'function') __ensureBusStyles();
+            } catch (e) {}
 
-            if (!window.busVectorSource) window.busVectorSource = null;
-            if (!window.busVectorLayer) window.busVectorLayer = null;
-
-            // 소스는 유지(데이터는 계속 들어와야 nearest pick 가능)
-            if (!window.busVectorSource) window.busVectorSource = new ol.source.Vector();
-
-            // 레이어는 만들되 "무조건 숨김"
-            if (!window.busVectorLayer) {
-                window.busVectorLayer = new ol.layer.Vector({
-                    source: window.busVectorSource,
-                    // 화면에 안 보일거라 style은 의미없지만 안전하게 null
-                    style: function () {
-                        return null;
-                    },
-                    zIndex: 30,
-                });
+            function __isPointFeature(f) {
                 try {
-                    window.busVectorLayer.set('tag', 'bus');
-                } catch (eT) {}
-                map.addLayer(window.busVectorLayer);
-            } else {
-                // map에 빠졌으면 재-add
-                try {
-                    var arr = map.getLayers && map.getLayers().getArray ? map.getLayers().getArray() : [];
-                    if (arr && arr.indexOf(window.busVectorLayer) === -1) map.addLayer(window.busVectorLayer);
-                } catch (eA) {}
+                    var g = f && f.getGeometry && f.getGeometry();
+                    return g && g.getType && g.getType() === 'Point';
+                } catch (e) {
+                    return false;
+                }
             }
 
-            // ✅ 핵심: 얇은 화살표 레이어 영구 숨김
-            try {
-                window.busVectorLayer.setVisible(false);
-            } catch (eV) {}
+            // =========================================================
+            // ✅✅✅ (ADD) ensureBusLiveLayer (버스 전용 레이어/소스 고정)
+            // - 맵 안의 다른 Point 레이어에 절대 섞이지 않게 분리
+            // - tag='bus-live'
+            // =========================================================
+            function ensureBusLiveLayer(map) {
+                map = map || (typeof getInnerOlMap === 'function' ? getInnerOlMap() : null);
+                if (!map || !window.ol || !ol.layer || !ol.source || !ol.style || !ol.geom) return false;
 
-            // 디버그
-            window.__busVectorLayer = window.busVectorLayer;
-            window.__busVectorSource = window.busVectorSource;
-
-            // 강제 리렌더
-            try {
-                if (map.renderSync) map.renderSync();
-                else if (map.render) map.render();
-            } catch (eR) {}
-        }
-
-        // ---------------------------------------------------------
-        // ✅✅✅ busVectorLayer(얇은 화살표) 강제 숨김
-        // - 어디서 setVisible(true) 해도 다시 꺼지게 잠금
-        // ---------------------------------------------------------
-        function __forceHideBusArrowLayer() {
-            try {
-                if (typeof busVectorLayer !== 'undefined' && busVectorLayer && busVectorLayer.setVisible) {
-                    busVectorLayer.setVisible(false);
-                    // 스타일도 아예 제거(그림 자체 차단)
+                // 이미 있으면 재사용
+                if (window.__busLiveLayer && window.__busLiveSource) {
                     try {
-                        busVectorLayer.setStyle(null);
+                        var arr = map.getLayers().getArray();
+                        if (arr.indexOf(window.__busLiveLayer) === -1) map.addLayer(window.__busLiveLayer);
+                        window.__busLiveLayer.setVisible(true);
+                        window.__busLiveLayer.setZIndex(9999);
                     } catch (e0) {}
+                    // 전역 동기화(중요)
+                    window.busVectorLayer = window.__busLiveLayer;
+                    window.busVectorSource = window.__busLiveSource;
                     try {
-                        busVectorLayer.changed && busVectorLayer.changed();
+                        busVectorLayer = window.__busLiveLayer;
                     } catch (e1) {}
+                    try {
+                        busVectorSource = window.__busLiveSource;
+                    } catch (e2) {}
+                    return true;
                 }
-            } catch (e) {}
 
-            // map에 붙어있으면 아예 remove (가장 확실)
-            try {
-                var map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
-                if (map && busVectorLayer) {
-                    var arr = map.getLayers && map.getLayers().getArray ? map.getLayers().getArray() : [];
-                    if (arr && arr.indexOf(busVectorLayer) !== -1 && map.removeLayer) {
-                        map.removeLayer(busVectorLayer);
+                // 새로 생성
+                window.__busLiveSource = new ol.source.Vector();
+
+                window.__busLiveLayer = new ol.layer.Vector({
+                    source: window.__busLiveSource,
+                    declutter: true, // 텍스트 겹침 완화
+                    zIndex: 9999,
+                    style: function (feature) {
+                        // ✅ 번호/방향 스타일: busArrowStyle 사용(없으면 기본)
+                        if (typeof busArrowStyle === 'function') return busArrowStyle(feature);
+
+                        // fallback(안보이는 것 방지)
+                        return new ol.style.Style({
+                            image: new ol.style.Circle({
+                                radius: 5,
+                                fill: new ol.style.Fill({ color: 'rgba(37,99,235,0.9)' }),
+                                stroke: new ol.style.Stroke({ color: '#fff', width: 2 }),
+                            }),
+                        });
+                    },
+                });
+
+                try {
+                    window.__busLiveLayer.set('tag', 'bus-live');
+                } catch (e3) {}
+
+                try {
+                    map.addLayer(window.__busLiveLayer);
+                    window.__busLiveLayer.setVisible(true);
+                    window.__busLiveLayer.setZIndex(9999);
+                } catch (e4) {}
+
+                // 전역 동기화(중요)
+                window.busVectorLayer = window.__busLiveLayer;
+                window.busVectorSource = window.__busLiveSource;
+                try {
+                    busVectorLayer = window.__busLiveLayer;
+                } catch (e5) {}
+                try {
+                    busVectorSource = window.__busLiveSource;
+                } catch (e6) {}
+
+                try {
+                    map.renderSync ? map.renderSync() : map.render && map.render();
+                } catch (e7) {}
+                return true;
+            }
+
+            // =========================================================
+            // ✅ LayerGroup 포함 재귀 탐색:
+            // 1) tag==='bus' 레이어 우선
+            // 2) 없으면 Point 피처 가장 많은 레이어
+            // =========================================================
+            function __findBusLayerDeep(map) {
+                var best = null;
+                var bestPoint = -1;
+
+                function walk(ly) {
+                    if (!ly) return;
+
+                    // LayerGroup
+                    if (ly.getLayers && ly.getLayers().getArray) {
+                        ly.getLayers().getArray().forEach(walk);
+                        return;
+                    }
+
+                    if (!ly.getSource) return;
+
+                    var tag = null;
+                    try {
+                        tag = ly.get && ly.get('tag');
+                    } catch (e) {}
+
+                    var src = null;
+                    try {
+                        src = ly.getSource();
+                    } catch (e2) {}
+                    if (!src || !src.getFeatures) return;
+
+                    var feats = [];
+                    try {
+                        feats = src.getFeatures() || [];
+                    } catch (e3) {}
+
+                    if (!feats.length) return;
+
+                    var p = 0;
+                    for (var i = 0; i < feats.length; i++) if (__isPointFeature(feats[i])) p++;
+
+                    // ✅ tag='bus'면 무조건 채택
+                    if (tag === 'bus' && p > 0) {
+                        best = { layer: ly, source: src, pointCount: p, feats: feats.length };
+                        bestPoint = 1e9;
+                        return;
+                    }
+
+                    // ✅ 아니면 point 가장 많은 레이어
+                    if (p > bestPoint) {
+                        bestPoint = p;
+                        best = { layer: ly, source: src, pointCount: p, feats: feats.length };
                     }
                 }
-            } catch (e2) {}
-        }
 
-        // ---------------------------------------------------------
-        // ✅✅✅ 얇은 화살표(busVectorLayer) "강제 숨김 1회 + 유지" 유틸
-        // - map init 끝나고 1번 호출하면 됨
-        // ---------------------------------------------------------
-        function __hideRealtimeBusLayerOnce() {
+                var top = map.getLayers && map.getLayers().getArray ? map.getLayers().getArray() : [];
+                for (var i = 0; i < top.length; i++) walk(top[i]);
+                return best;
+            }
+
+            var found = __findBusLayerDeep(map);
+            if (!found || !found.layer || !found.source || found.pointCount <= 0) {
+                console.warn('[ensureBusVectorLayer] bus layer not found or no point features.');
+                return false;
+            }
+
+            var ly = found.layer;
+
+            // =========================================================
+            // ✅✅✅ 핵심: 예전에 걸어둔 "숨김 락" 풀기
+            // =========================================================
             try {
-                var map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
-                if (!map) return;
+                if (ly.__lockedHideVisible || ly.__hideLockInstalled) {
+                    try {
+                        delete ly.setVisible;
+                    } catch (e) {}
+                    try {
+                        delete ly.__lockedHideVisible;
+                    } catch (e2) {}
+                    try {
+                        delete ly.__hideLockInstalled;
+                    } catch (e3) {}
+                }
+            } catch (eV) {}
 
-                // ensureBusVectorLayer가 아직 안 돌았으면 한 번 돌려서 layer 확보
+            try {
+                if (ly.__lockedHideStyle) {
+                    try {
+                        delete ly.setStyle;
+                    } catch (e) {}
+                    try {
+                        delete ly.__lockedHideStyle;
+                    } catch (e2) {}
+                }
+            } catch (eS) {}
+
+            // =========================================================
+            // ✅ 전역 참조 동기화
+            // =========================================================
+            window.busVectorLayer = ly;
+            window.busVectorSource = found.source;
+            try {
+                busVectorLayer = ly;
+            } catch (e1) {}
+            try {
+                busVectorSource = found.source;
+            } catch (e2) {}
+
+            // tag 보정
+            try {
+                ly.set('tag', 'bus');
+            } catch (eT) {}
+
+            // =========================================================
+            // ✅ 화살표 크기 문제 해결: resolution 기반 scale
+            // - resolution이 작아질수록(줌인) scale을 줄여서 "너무 커짐" 방지
+            // - resolution이 커질수록(줌아웃) scale을 키워서 "너무 작아짐" 방지
+            // =========================================================
+            function __clamp(v, lo, hi) {
+                return Math.max(lo, Math.min(hi, v));
+            }
+
+            // ✅ 방향값(bearing/heading/angle/dir 등) 흡수 + 라디안 변환
+            function __getRotationRad(feature) {
                 try {
-                    if (typeof ensureBusVectorLayer === 'function') ensureBusVectorLayer();
-                } catch (e0) {}
+                    var v =
+                        feature.get('bearing') ??
+                        feature.get('heading') ??
+                        feature.get('angle') ??
+                        feature.get('dir') ??
+                        feature.get('direction') ??
+                        (feature.get('_raw') && (feature.get('_raw').bearing ?? feature.get('_raw').heading ?? feature.get('_raw').angle));
 
-                if (window.busVectorLayer && window.busVectorLayer.setVisible) {
-                    window.busVectorLayer.setVisible(false);
+                    v = Number(v);
+                    if (!isFinite(v)) return 0;
+
+                    // 대부분 도(deg)로 들어오니까 라디안 변환
+                    return (v * Math.PI) / 180;
+                } catch (e) {
+                    return 0;
+                }
+            }
+
+            // ✅ 이미지/아이콘 기반 스타일 생성 (resolution 반영)
+            function __buildArrowStyle(feature, resolution) {
+                // resolution이 없으면 대충 map에서 가져오기
+                if (!resolution) {
+                    try {
+                        resolution = map.getView && map.getView().getResolution ? map.getView().getResolution() : 1;
+                    } catch (e) {
+                        resolution = 1;
+                    }
                 }
 
-                if (map.renderSync) map.renderSync();
-                else if (map.render) map.render();
-            } catch (e) {}
+                // ⭐ scale 모델(프로젝트마다 조금씩 다를 수 있음)
+                // - baseRes는 "적당한 줌"에서의 resolution을 의미
+                // - scale은 baseScale을 기준으로 resolution 비율에 따라 조절
+                var baseRes = 2.0; // <- 여기만 상황에 따라 살짝 조절하면 됨(대부분 이 값으로 충분)
+                var baseScale = 0.75; // <- 기본 화살표 크기 (기존보다 작게)
+                var k = Math.sqrt(baseRes / Math.max(0.000001, resolution));
+                var scale = __clamp(baseScale * k, 0.35, 0.95); // ✅ 너무 커지는 것 방지
+
+                // ✅ 네가 이미 가진 스타일 함수가 "resolution"을 받을 수도 있으니 먼저 시도
+                // 1) __BUS_STYLES__.normal(feature, resolution)
+                // 2) busArrowStyle(feature, resolution)
+                try {
+                    if (window.__BUS_STYLES__ && typeof window.__BUS_STYLES__.normal === 'function') {
+                        var out = window.__BUS_STYLES__.normal(feature, resolution);
+                        if (out) return out;
+                    }
+                } catch (e0) {}
+
+                try {
+                    if (typeof busArrowStyle === 'function') {
+                        var out2 = busArrowStyle(feature, resolution);
+                        if (out2) return out2;
+                    }
+                } catch (e1) {}
+
+                // ✅ fallback: 여기서 직접 아이콘 스타일 생성
+                // (아이콘 src는 프로젝트에 맞게 교체 가능)
+                var src = null;
+                try {
+                    src = feature.get('icon') || feature.get('iconUrl') || feature.get('img') || null;
+                } catch (e2) {}
+
+                // src가 없으면 기본 화살표 이미지로(있으면 그걸 사용)
+                if (!src) {
+                    // ⚠️ 프로젝트에 실제 존재하는 화살표 이미지 경로로 맞춰줘
+                    // 예: '/img/bus_arrow.png' 또는 'assets/bus_arrow.png'
+                    src = window.__BUS_ARROW_ICON_SRC || '/img/bus_arrow.png';
+                }
+
+                var rot = __getRotationRad(feature);
+
+                try {
+                    return new ol.style.Style({
+                        image: new ol.style.Icon({
+                            src: src,
+                            scale: scale,
+                            rotateWithView: true,
+                            rotation: rot,
+                            anchor: [0.5, 0.5],
+                            anchorXUnits: 'fraction',
+                            anchorYUnits: 'fraction',
+                        }),
+                    });
+                } catch (e3) {
+                    // 아이콘 생성 실패 시 점으로 대체
+                    return new ol.style.Style({
+                        image: new ol.style.Circle({
+                            radius: 4,
+                            fill: new ol.style.Fill({ color: 'rgba(0, 90, 255, 0.9)' }),
+                            stroke: new ol.style.Stroke({ color: 'rgba(255,255,255,0.9)', width: 1 }),
+                        }),
+                    });
+                }
+            }
+
+            // =========================================================
+            // ✅ 스타일 적용 (Point만 적용 + resolution 기반)
+            // =========================================================
+            try {
+                var styleFn = function (feature, resolution) {
+                    if (!__isPointFeature(feature)) return null;
+                    return __buildArrowStyle(feature, resolution);
+                };
+
+                // proto 메서드로 강제 적용
+                var proto = Object.getPrototypeOf(ly);
+                if (proto && proto.setStyle) proto.setStyle.call(ly, styleFn);
+                else if (ly.setStyle) ly.setStyle(styleFn);
+            } catch (eSt) {
+                console.warn('[ensureBusVectorLayer] setStyle fail', eSt);
+            }
+
+            // =========================================================
+            // ✅ 보이게 + zIndex
+            // =========================================================
+            try {
+                if (ly.setZIndex) ly.setZIndex(999);
+            } catch (eZ) {}
+
+            try {
+                var proto2 = Object.getPrototypeOf(ly);
+                if (proto2 && proto2.setVisible) proto2.setVisible.call(ly, true);
+                else if (ly.setVisible) ly.setVisible(true);
+            } catch (eVis) {}
+
+            try {
+                console.log('[ensureBusVectorLayer] BUS LAYER ENABLED ✅', 'pointFeats=', found.pointCount, 'feats=', found.feats);
+            } catch (eL) {}
+
+            try {
+                map.renderSync ? map.renderSync() : map.render && map.render();
+            } catch (eR) {}
+
+            try {
+                if (busVectorLayer && busVectorLayer.changed) busVectorLayer.changed();
+            } catch (eA) {}
+            try {
+                if (busVectorSource && busVectorSource.changed) busVectorSource.changed();
+            } catch (eB) {}
+
+            return true;
         }
 
         // =========================================================
@@ -1985,6 +2433,69 @@
                 };
             }
 
+            // =========================================================
+            // ✅✅✅ [ADD] 중복 path/route 레이어 숨김 (2줄 방지 핵심)
+            // - map에 path/route 레이어가 2개 이상 있으면 1개만 남기고 나머지는 hidden
+            // =========================================================
+            function pruneDuplicatePathLayers() {
+                var map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
+                if (!map || !map.getLayers) return;
+
+                function isRouteLike(ly) {
+                    try {
+                        var t = String(ly.get('tag') || '').toLowerCase();
+                        var lt = String(ly.get('layerTag') || '').toLowerCase();
+                        var nm = String(ly.get('name') || '').toLowerCase();
+                        return t === 'path' || lt === 'path' || nm === 'path' || t === 'route' || lt === 'route' || nm === 'route';
+                    } catch (e) {
+                        return false;
+                    }
+                }
+
+                var arr = map.getLayers().getArray ? map.getLayers().getArray() : [];
+                var keep = null;
+                var dup = [];
+
+                // 1) 우선 window.routeVectorLayer 있으면 그걸 keep
+                try {
+                    keep = window.routeVectorLayer || window.__routeVectorLayer || null;
+                } catch (e) {}
+
+                // 2) 없으면 첫 route-like 레이어를 keep
+                if (!keep) {
+                    for (var i = 0; i < arr.length; i++) {
+                        if (isRouteLike(arr[i])) {
+                            keep = arr[i];
+                            break;
+                        }
+                    }
+                }
+
+                // 3) keep 이외 route-like는 숨김
+                for (var j = 0; j < arr.length; j++) {
+                    var ly = arr[j];
+                    if (!isRouteLike(ly)) continue;
+                    if (ly === keep) continue;
+                    dup.push(ly);
+                }
+
+                dup.forEach(function (ly) {
+                    try {
+                        ly.setVisible && ly.setVisible(false);
+                    } catch (e) {}
+                    try {
+                        ly.setStyle && ly.setStyle(null);
+                    } catch (e) {}
+                    try {
+                        ly.changed && ly.changed();
+                    } catch (e) {}
+                });
+
+                if (dup.length) {
+                    console.warn('[pruneDuplicatePathLayers] hidden dup path layers =', dup.length);
+                }
+            }
+
             function __isVectorSourceOk(src) {
                 return !!(src && src.getFeatures && src.clear && src.addFeature);
             }
@@ -2228,145 +2739,115 @@
         }
 
         // =========================================================
-        // ✅✅✅ [REPLACE] drawBusRouteFromIndex (FAST + EPSG:5179 + source오염 교정 + transform fail 로그)
-        // - 핵심 성능:
-        //   1) routeId|mapProj 투영변환 결과 캐시
-        //   2) LineString feature 1개 재사용(geometry만 교체)
-        //   3) clear는 기본 false (opts.clear=true일 때만 "다른 feature 제거" 방식)
+        // ✅✅✅ [REPLACE] bus-route 전용 레이어 + "항상 1개만" 그리기 세트
+        // - map이 바뀌면 레이어를 새 map에 재생성 (안보임 원인 차단)
+        // - 새 노선 그리기 전 bus-route 소스 clear 해서 누적 방지
         // =========================================================
         (function () {
-            // ====== PERF caches (전역) ======
-            // routeId|mapProj -> { ts, coords }
-            var __routeProjCache = window.__routeProjCache || (window.__routeProjCache = {});
-            var __routeFeature = window.__routeFeature || null;
-            var __ROUTE_PROJ_TTL_MS = 1000 * 60 * 60; // 1시간
-            var __routePerfDebug = false; // 필요하면 true
+            if (!window.ol || !ol.layer || !ol.source || !ol.style || !ol.geom) return;
 
+            // ---- cache ----
+            var __routeProjCache = window.__routeProjCache || (window.__routeProjCache = {});
+            var __ROUTE_PROJ_TTL_MS = 1000 * 60 * 60; // 1h
             function __isFresh(ts) {
                 return ts && Date.now() - ts < __ROUTE_PROJ_TTL_MS;
             }
 
-            // =========================================================
-            // ✅ route source 안전 getter (tram tool에서도 동일 소스 사용)
-            // =========================================================
-            function __getRouteSourceSafe() {
-                try {
-                    if (window.routeVectorSource && window.routeVectorSource.getFeatures) return window.routeVectorSource;
-                } catch (e0) {}
-                try {
-                    if (window.__routeVectorSource && window.__routeVectorSource.getFeatures) return window.__routeVectorSource;
-                } catch (e1) {}
-                return null;
+            // ✅ routeId -> line feature 저장소 (노선별 1개)  ※ "항상 1개만" 모드에서는 사실상 1개만 씀
+            window.__routeLineFeatureById = window.__routeLineFeatureById || Object.create(null);
+
+            function __normRid(v) {
+                return String(v == null ? '' : v).trim();
             }
 
             // =========================================================
-            // ✅ routeSrc를 "진짜 VectorSource"로 확보 (layer 오염 자동 교정)
+            // ✅✅✅ 버스 노선 "전용" 레이어/소스 만들기 (핵심)
+            // - tag='path' 사용 금지. bus-route로 완전 분리.
+            // - ✅ map 바뀌면 레이어 재생성 (안보임 문제 차단)
             // =========================================================
-            function __getRouteSourceFixed(map) {
-                var src = null;
+            function __ensureBusRouteLayer(map) {
+                if (!map || !window.ol || !ol.layer || !ol.source) return null;
 
-                try {
-                    src = window.__routeVectorSource || window.routeVectorSource || null;
-                } catch (e0) {}
-
-                // ✅ src가 레이어면 source로 교정
-                if (src && !src.getFeatures && src.getSource) {
-                    try {
-                        src = src.getSource();
-                    } catch (e1) {}
-                }
-
-                // ✅ 그래도 안되면 layer에서 끌어오기
-                if (!src || !src.getFeatures) {
-                    var ly = null;
-                    try {
-                        ly = window.__routeVectorLayer || window.routeVectorLayer || null;
-                    } catch (e2) {}
-                    if (ly && ly.getSource) {
-                        try {
-                            src = ly.getSource();
-                        } catch (e3) {}
+                // ✅ 이미 있으면 재사용 (단, 같은 map에 붙어있을 때만)
+                if (window.__busRouteVectorLayer && window.__busRouteVectorLayer.getSource) {
+                    if (window.__busRouteVectorLayer.__mapRef === map) {
+                        return window.__busRouteVectorLayer;
                     }
-                }
 
-                // ✅ 마지막: map에서 tag='path' 레이어 탐색
-                if ((!src || !src.getFeatures) && map && map.getLayers) {
+                    // map이 달라졌으면 예전 레이어 제거 후 재생성
                     try {
-                        var arr = map.getLayers().getArray ? map.getLayers().getArray() : [];
-                        for (var i = 0; i < arr.length; i++) {
-                            var ly2 = arr[i];
-                            if (!ly2 || !ly2.get) continue;
-                            if (ly2.get('tag') === 'path') {
-                                var s2 = ly2.getSource && ly2.getSource();
-                                if (s2 && s2.getFeatures) {
-                                    src = s2;
-                                    window.__routeVectorSource = s2;
-                                    window.routeVectorSource = s2;
-                                    break;
-                                }
-                            }
-                        }
-                    } catch (e4) {}
+                        var oldMap = window.__busRouteVectorLayer.__mapRef;
+                        if (oldMap && oldMap.removeLayer) oldMap.removeLayer(window.__busRouteVectorLayer);
+                    } catch (e0) {}
+
+                    window.__busRouteVectorLayer = null;
+                    window.__busRouteVectorSource = null;
                 }
 
-                // ✅ 최종 검사
+                var src = new ol.source.Vector();
+
+                var layer = new ol.layer.Vector({
+                    source: src,
+                    style: function () {
+                        try {
+                            return [
+                                new ol.style.Style({
+                                    stroke: new ol.style.Stroke({
+                                        color: 'rgba(37,99,235,0.95)',
+                                        width: 6,
+                                    }),
+                                }),
+                            ];
+                        } catch (e) {
+                            return null;
+                        }
+                    },
+                });
+
+                layer.set('tag', 'bus-route');
+                layer.setZIndex(999); // ✅ 다른 레이어에 묻히지 않게
+
+                layer.__mapRef = map; // ✅ 어떤 map에 붙었는지 기억
+                map.addLayer(layer);
+
+                window.__busRouteVectorLayer = layer;
+                window.__busRouteVectorSource = src;
+
+                console.log('[bus-route] layer created (map changed safe)');
+                return layer;
+            }
+
+            // =========================
+            // ✅ routeSrc 확보 (전용 레이어만!)
+            // =========================
+            function __getRouteSourceFixed(map) {
+                var layer = __ensureBusRouteLayer(map);
+                if (!layer || !layer.getSource) return null;
+
+                var src = layer.getSource();
                 if (!src || !src.getFeatures || !src.addFeature) return null;
+
                 return src;
             }
 
-            // =========================================================
-            // ✅ coords 추출 유틸 (다양한 키 흡수 + TAGO 응답도 흡수)
-            // =========================================================
-            function pickCoordsLike(info) {
-                if (!info) return null;
-
-                // 1) 기존 구조(dirs/coords/line 등)
-                var dirs = info.dirs || info.dir || info.paths || info.path || {};
-                var cand =
-                    (dirs.ALL && dirs.ALL.length >= 2 && dirs.ALL) ||
-                    (dirs.all && dirs.all.length >= 2 && dirs.all) ||
-                    (dirs.UP && dirs.UP.length >= 2 && dirs.UP) ||
-                    (dirs.up && dirs.up.length >= 2 && dirs.up) ||
-                    (dirs.DOWN && dirs.DOWN.length >= 2 && dirs.DOWN) ||
-                    (dirs.down && dirs.down.length >= 2 && dirs.down) ||
-                    null;
-
-                if (!cand && Array.isArray(dirs) && dirs.length >= 2) cand = dirs;
-
-                if (!cand && Array.isArray(info.coords) && info.coords.length >= 2) cand = info.coords;
-                if (!cand && Array.isArray(info.line) && info.line.length >= 2) cand = info.line;
-
-                if (!cand && Array.isArray(info.lines) && info.lines.length) {
-                    if (Array.isArray(info.lines[0]) && info.lines[0].length >= 2) cand = info.lines[0];
-                }
-
-                if (!cand && Array.isArray(info.geometry) && info.geometry.length >= 2) cand = info.geometry;
-                if (!cand && Array.isArray(info.points) && info.points.length >= 2) cand = info.points;
-
-                // 2) TAGO 응답 통째로 들어온 경우
-                var d = info.raw || info.data || info.res || info;
-                var items = null;
-
+            // =========================
+            // ✅✅✅ (ADD) bus-route 싹 지우기: "항상 1개만" 모드 핵심
+            // =========================
+            function __clearAllBusRoutes(routeSrc) {
+                // source clear
                 try {
-                    if (!cand) {
-                        if (d && Array.isArray(d.itemList)) items = d.itemList;
-                        else if (d && Array.isArray(d.items)) items = d.items;
-                        else if (d && d.response && d.response.body && d.response.body.items) {
-                            var it = d.response.body.items.item;
-                            if (Array.isArray(it)) items = it;
-                            else if (it) items = [it];
-                        }
-                    }
-                } catch (eI2) {}
+                    if (routeSrc && routeSrc.clear) routeSrc.clear(true);
+                } catch (e0) {}
 
-                if (!cand && items && items.length >= 2) cand = items;
-
-                return cand || null;
+                // featureById 캐시도 초기화(누적 방지)
+                try {
+                    window.__routeLineFeatureById = Object.create(null);
+                } catch (e1) {}
             }
 
-            // =========================================================
-            // ✅ 한 점 파싱
-            // =========================================================
+            // =========================
+            // ✅ 좌표 파싱
+            // =========================
             function parsePoint(p) {
                 if (!p) return null;
 
@@ -2423,19 +2904,37 @@
                 return isFinite(x) && isFinite(y) && Math.abs(x) <= 180 && Math.abs(y) <= 90;
             }
 
-            function normProj(v) {
-                v = String(v || '')
-                    .trim()
-                    .toUpperCase()
-                    .replace(/\s+/g, '');
-                if (!v) return '';
-                if (v === '4326' || v === 'EPSG4326' || v === 'WGS84' || v === 'EPSG:4326') return 'EPSG:4326';
-                return v;
+            function fixLatLonIfSwapped(xy) {
+                if (!xy) return xy;
+                var a = Number(xy[0]),
+                    b = Number(xy[1]);
+                if (!isFinite(a) || !isFinite(b)) return xy;
+
+                var aLatLike = a >= 30 && a <= 45;
+                var bLonLike = b >= 120 && b <= 135;
+                var aLonLike = a >= 120 && a <= 135;
+                var bLatLike = b >= 30 && b <= 45;
+
+                if (aLatLike && bLonLike && !aLonLike && !bLatLike) return [b, a];
+                return xy;
             }
 
-            // =========================================================
-            // ✅ map projection
-            // =========================================================
+            function looksLike5179XY(xy) {
+                if (!xy || xy.length < 2) return false;
+                var x = Number(xy[0]),
+                    y = Number(xy[1]);
+                if (!isFinite(x) || !isFinite(y)) return false;
+                return x > 500000 && x < 2000000 && y > 1000000 && y < 4000000;
+            }
+
+            function looksLike3857XY(xy) {
+                if (!xy || xy.length < 2) return false;
+                var x = Number(xy[0]),
+                    y = Number(xy[1]);
+                if (!isFinite(x) || !isFinite(y)) return false;
+                return Math.abs(x) > 1000000 && Math.abs(y) > 1000000 && Math.abs(x) < 30000000 && Math.abs(y) < 30000000;
+            }
+
             function getMapProjCode(map) {
                 var view = null,
                     mapProj = null,
@@ -2453,9 +2952,6 @@
                 return mapProjCode;
             }
 
-            // =========================================================
-            // ✅ EPSG:5179 변환 가능 상태인지 체크(핵심)
-            // =========================================================
             function ensureProj5179IfNeeded(OL, toCode) {
                 try {
                     if (String(toCode || '').toUpperCase() !== 'EPSG:5179') return true;
@@ -2473,7 +2969,6 @@
                         return false;
                     }
 
-                    // ✅ 5179 정의
                     window.proj4.defs('EPSG:5179', '+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 +x_0=1000000 +y_0=2000000 +ellps=GRS80 +units=m +no_defs');
                     OL.proj.proj4.register(window.proj4);
 
@@ -2487,7 +2982,7 @@
                         return false;
                     }
 
-                    console.log('[proj] EPSG:5179 registered (inside drawBusRouteFromIndex)');
+                    console.log('[proj] EPSG:5179 registered');
                     return true;
                 } catch (e) {
                     console.warn('[drawBusRouteFromIndex] ensureProj5179 fail', e);
@@ -2495,11 +2990,81 @@
                 }
             }
 
-            // =========================================================
-            // ✅ coords 변환 캐시 (routeId|mapProj)
-            // =========================================================
+            // =========================
+            // ✅ dirs 선택: UP/DOWN 우선, ALL은 마지막
+            // =========================
+            function pickCoordsLike_ONE_DIR(info) {
+                if (!info) return null;
+
+                var dirs = info.dirs || info.dir || info.paths || info.path || {};
+
+                var up = (dirs.UP && dirs.UP.length >= 2 && dirs.UP) || (dirs.up && dirs.up.length >= 2 && dirs.up) || null;
+                var down = (dirs.DOWN && dirs.DOWN.length >= 2 && dirs.DOWN) || (dirs.down && dirs.down.length >= 2 && dirs.down) || null;
+
+                if (up && down) return up.length >= down.length ? up : down;
+                if (up) return up;
+                if (down) return down;
+
+                var all = (dirs.ALL && dirs.ALL.length >= 2 && dirs.ALL) || (dirs.all && dirs.all.length >= 2 && dirs.all) || null;
+                if (all) return all;
+
+                if (Array.isArray(dirs) && dirs.length >= 2) return dirs;
+                if (Array.isArray(info.coords) && info.coords.length >= 2) return info.coords;
+                if (Array.isArray(info.line) && info.line.length >= 2) return info.line;
+                if (Array.isArray(info.geometry) && info.geometry.length >= 2) return info.geometry;
+                if (Array.isArray(info.points) && info.points.length >= 2) return info.points;
+
+                // TAGO 흡수
+                var d = info.raw || info.data || info.res || info;
+                var items = null;
+                try {
+                    if (d && Array.isArray(d.itemList)) items = d.itemList;
+                    else if (d && Array.isArray(d.items)) items = d.items;
+                    else if (d && d.response && d.response.body && d.response.body.items) {
+                        var it = d.response.body.items.item;
+                        if (Array.isArray(it)) items = it;
+                        else if (it) items = [it];
+                    }
+                } catch (eI2) {}
+
+                if (items && items.length >= 2) return items;
+                return null;
+            }
+
+            function splitByJump(coordsLonLat, jumpMeters) {
+                jumpMeters = jumpMeters || 700;
+                var segs = [];
+                var cur = [];
+
+                function distM(a, b) {
+                    var dx = (a[0] - b[0]) * 88000;
+                    var dy = (a[1] - b[1]) * 111000;
+                    return Math.sqrt(dx * dx + dy * dy);
+                }
+
+                for (var i = 0; i < coordsLonLat.length; i++) {
+                    var p = coordsLonLat[i];
+                    if (!p) continue;
+
+                    if (cur.length === 0) {
+                        cur.push(p);
+                        continue;
+                    }
+
+                    var prev = cur[cur.length - 1];
+                    if (distM(prev, p) > jumpMeters) {
+                        if (cur.length >= 2) segs.push(cur);
+                        cur = [p];
+                    } else {
+                        cur.push(p);
+                    }
+                }
+                if (cur.length >= 2) segs.push(cur);
+                return segs;
+            }
+
             function getProjectedCoordsCached(OL, routeId, coordsAny, needTransform, mapProjCode) {
-                var key = routeId + '|' + mapProjCode;
+                var key = routeId + '|' + mapProjCode + '|' + (needTransform ? 'T' : 'N');
 
                 var hit = __routeProjCache[key];
                 if (hit && __isFresh(hit.ts) && hit.coords && hit.coords.length >= 2) return hit.coords;
@@ -2510,6 +3075,8 @@
                 for (var i = 0; i < coordsAny.length; i++) {
                     var xy = parsePoint(coordsAny[i]);
                     if (!xy) continue;
+
+                    xy = fixLatLonIfSwapped(xy);
 
                     if (needTransform && OL.proj && typeof OL.proj.transform === 'function' && looksLikeLonLat(xy)) {
                         try {
@@ -2530,274 +3097,151 @@
             }
 
             // =========================================================
-            // ✅ feature 1개 재사용 (geometry만 교체)
-            // =========================================================
-            function ensureRouteFeature(routeSrc, OL) {
-                if (__routeFeature && __routeFeature.getGeometry) {
-                    // source에 빠졌으면 재삽입
-                    try {
-                        var fs = routeSrc.getFeatures ? routeSrc.getFeatures() || [] : [];
-                        if (fs.indexOf(__routeFeature) < 0) routeSrc.addFeature(__routeFeature);
-                    } catch (e0) {}
-                    return __routeFeature;
-                }
-
-                __routeFeature = new OL.Feature();
-                try {
-                    __routeFeature.set('layerTag', 'path');
-                } catch (e1) {}
-                try {
-                    __routeFeature.set('segTag', 'single-seg');
-                } catch (e2) {}
-                try {
-                    __routeFeature.set('kind', 'routeLine');
-                } catch (e3) {}
-                routeSrc.addFeature(__routeFeature);
-
-                // window에도 저장(다른 함수에서도 재사용 가능)
-                try {
-                    window.__routeFeature = __routeFeature;
-                } catch (e4) {}
-                return __routeFeature;
-            }
-
-            // =========================================================
             // ✅✅✅ [REPLACE] drawBusRouteFromIndex
-            // - 무조건 "한 줄"만 유지: routeSrc에 routeLine feature 1개만 남김
-            // - 연속 클릭 시 이전 rAF 취소
-            // - setGeometry 대신 setCoordinates 우선(빠름)
+            // - 기본 동작: "항상 1개만" (새로 그리기 전에 clear)
+            // - keepOld:true 주면 누적 표시도 가능
             // =========================================================
             function drawBusRouteFromIndex(routeId, opts) {
                 opts = opts || {};
-                routeId = String(routeId || '').trim();
+                routeId = __normRid(routeId);
                 if (!routeId) return false;
 
-                // ✅ clear 기본은 false 권장 (성능)
-                var shouldClear = opts.clear === true;
-
-                // map
                 var map = (typeof getInnerOlMap === 'function' ? getInnerOlMap() : null) || window.__olMap || null;
-                if (!map) {
-                    console.warn('[drawBusRouteFromIndex] map not ready');
-                    return false;
-                }
+                if (!map) return (console.warn('[drawBusRouteFromIndex] no map'), false);
 
-                // OL
                 var OL = typeof ol !== 'undefined' ? ol : window && window.ol ? window.ol : null;
-                if (!OL || !OL.Feature || !OL.geom) {
-                    console.warn('[drawBusRouteFromIndex] OL not ready');
-                    return false;
-                }
+                if (!OL || !OL.Feature || !OL.geom) return (console.warn('[drawBusRouteFromIndex] no OL'), false);
 
-                // route layer/source 보장
-                try {
-                    if (typeof ensureRouteLayer === 'function') ensureRouteLayer();
-                    if (typeof __syncRouteGlobals === 'function') __syncRouteGlobals();
-                } catch (e0) {}
+                // ✅ 전용 source 확보
+                var routeSrc = __getRouteSourceFixed(map);
+                if (!routeSrc) return (console.warn('[drawBusRouteFromIndex] bus-route source not ready'), false);
 
-                // source 확보
-                var routeSrc = null;
-                try {
-                    if (typeof __getRouteSourceFixed === 'function') routeSrc = __getRouteSourceFixed(map);
-                } catch (e1) {}
-                if (!routeSrc) {
-                    try {
-                        if (typeof __getRouteSourceSafe === 'function') routeSrc = __getRouteSourceSafe();
-                    } catch (e2) {}
-                }
-                if (!routeSrc || !routeSrc.getFeatures) {
-                    console.warn('[drawBusRouteFromIndex] routeSrc not ready');
-                    return false;
-                }
+                // ✅ 핵심: 기본은 항상 1개만 → 새로 그릴 때 기존 싹 지움
+                var keepOld = !!opts.keepOld;
+                if (!keepOld) __clearAllBusRoutes(routeSrc);
 
-                // info 찾기
                 var info = null;
                 try {
                     info = (window.routePathIndex && window.routePathIndex[routeId]) || null;
                 } catch (eI) {}
-                if (!info) {
-                    console.warn('[drawBusRouteFromIndex] routePathIndex missing:', routeId);
-                    return false;
-                }
+                if (!info) return (console.warn('[drawBusRouteFromIndex] routePathIndex missing:', routeId), false);
 
-                // coords 추출
-                var coordsAny = null;
+                var coordsAny = pickCoordsLike_ONE_DIR(info);
+                if (!coordsAny || coordsAny.length < 2) return (console.warn('[drawBusRouteFromIndex] coords missing'), false);
+
+                var mapProjCode = getMapProjCode(map);
+
+                var rawProj = info.proj || info.projection || info.crs || '';
+                var infoProj = String(rawProj || '')
+                    .toUpperCase()
+                    .trim();
+                var needTransform = infoProj === 'EPSG:4326' || infoProj === '4326';
+
                 try {
-                    coordsAny = typeof pickCoordsLike === 'function' ? pickCoordsLike(info) : info.coords || null;
-                } catch (eC) {
-                    coordsAny = info.coords || null;
-                }
-                if (!coordsAny || coordsAny.length < 2) {
-                    console.warn('[drawBusRouteFromIndex] coords missing', routeId);
-                    return false;
+                    var s0 = parsePoint(coordsAny[0]) || parsePoint(coordsAny[1]);
+                    if (s0) s0 = fixLatLonIfSwapped(s0);
+
+                    if (s0 && looksLike5179XY(s0)) needTransform = false;
+                    else if (!rawProj && s0 && looksLikeLonLat(s0)) needTransform = true;
+                    else if (!rawProj && s0 && looksLike3857XY(s0)) needTransform = false;
+                } catch (eS) {}
+
+                if (needTransform && String(mapProjCode).toUpperCase() === 'EPSG:5179') {
+                    if (!ensureProj5179IfNeeded(OL, mapProjCode)) return false;
                 }
 
-                // map projection
-                var mapProjCode = 'EPSG:3857';
+                // ALL만 있는 경우 덩어리 하나만
                 try {
-                    if (typeof getMapProjCode === 'function') mapProjCode = getMapProjCode(map);
-                } catch (eP) {}
+                    var dirs = info.dirs || info.dir || info.paths || info.path || {};
+                    var hasUpDown = (dirs.UP && dirs.UP.length >= 2) || (dirs.up && dirs.up.length >= 2) || (dirs.DOWN && dirs.DOWN.length >= 2) || (dirs.down && dirs.down.length >= 2);
 
-                // needTransform 판단
-                var infoProj = '';
-                try {
-                    infoProj = typeof normProj === 'function' ? normProj(info.proj || info.projection || info.crs || '') : info.proj || '';
-                } catch (eNP) {
-                    infoProj = info.proj || '';
-                }
-
-                var needTransform = false;
-                if (String(infoProj).toUpperCase() === 'EPSG:4326') needTransform = true;
-
-                if (!infoProj) {
-                    try {
-                        var sample = typeof parsePoint === 'function' ? parsePoint(coordsAny[0]) || parsePoint(coordsAny[1]) : null;
-                        if (sample && typeof looksLikeLonLat === 'function' && looksLikeLonLat(sample)) needTransform = true;
-                    } catch (eS) {}
-                }
-
-                if (needTransform) {
-                    try {
-                        var sm = typeof parsePoint === 'function' ? parsePoint(coordsAny[0]) || null : null;
-                        if (sm && typeof looksLikeLonLat === 'function' && !looksLikeLonLat(sm)) needTransform = false;
-                    } catch (eSM) {}
-                }
-
-                // EPSG:5179 체크
-                if (needTransform) {
-                    try {
-                        if (typeof ensureProj5179IfNeeded === 'function') {
-                            if (!ensureProj5179IfNeeded(OL, mapProjCode) && String(mapProjCode).toUpperCase() === 'EPSG:5179') {
-                                return false;
-                            }
+                    if (!hasUpDown && needTransform) {
+                        var lonlatList = [];
+                        for (var i2 = 0; i2 < coordsAny.length; i2++) {
+                            var p = parsePoint(coordsAny[i2]);
+                            if (!p) continue;
+                            p = fixLatLonIfSwapped(p);
+                            if (!looksLikeLonLat(p)) continue;
+                            lonlatList.push(p);
                         }
-                    } catch (e5179) {}
-                }
-
-                // ✅ 투영변환 캐시 가져오기
-                var coordsProj = null;
-                try {
-                    if (typeof getProjectedCoordsCached === 'function') {
-                        coordsProj = getProjectedCoordsCached(OL, routeId, coordsAny, needTransform, mapProjCode);
-                    } else {
-                        coordsProj = coordsAny;
+                        var segs = splitByJump(lonlatList, 700);
+                        if (segs && segs.length >= 2) {
+                            segs.sort(function (a, b) {
+                                return (b ? b.length : 0) - (a ? a.length : 0);
+                            });
+                            coordsAny = segs[0];
+                        }
                     }
-                } catch (ePC) {
-                    coordsProj = coordsAny;
-                }
+                } catch (eSplit) {}
 
-                if (!coordsProj || coordsProj.length < 2) {
-                    console.warn('[drawBusRouteFromIndex] coordsProj too short', routeId);
-                    return false;
-                }
-
-                // =========================================================
-                // ✅✅✅ 여기부터가 "두 줄 방지" 핵심
-                // 1) routeLine feature 1개만 확보
-                // 2) routeSrc에는 그 1개만 남김
-                // =========================================================
-
-                // 전역 재사용 feature 저장(없으면 생성)
-                if (!window.__routeLineFeature) {
-                    window.__routeLineFeature = new OL.Feature({ geometry: new OL.geom.LineString([]) });
-                    try {
-                        window.__routeLineFeature.set('kind', 'routeLine');
-                        window.__routeLineFeature.set('layerTag', 'path');
-                        window.__routeLineFeature.set('segTag', 'single-seg');
-                    } catch (eF0) {}
-
-                    try {
-                        routeSrc.addFeature(window.__routeLineFeature);
-                    } catch (eAdd0) {}
-                }
-
-                var f = window.__routeLineFeature;
-
-                // clear 요청이면 geometry만 비움
-                if (shouldClear) {
-                    try {
-                        var g0 = f.getGeometry && f.getGeometry();
-                        if (g0 && g0.setCoordinates) g0.setCoordinates([]);
-                    } catch (eClr0) {}
-                }
-
-                // ✅ routeSrc에 있는 다른 feature 전부 제거 → 무조건 1줄 유지
-                try {
-                    var all = routeSrc.getFeatures() || [];
-                    for (var i = all.length - 1; i >= 0; i--) {
-                        if (all[i] !== f) routeSrc.removeFeature(all[i]);
-                    }
-                    // 혹시 f가 source에 빠져있으면 다시 추가
-                    if (routeSrc.getFeatures().indexOf(f) < 0) routeSrc.addFeature(f);
-                } catch (ePurge) {}
-
-                // 메타 업데이트
-                try {
-                    f.set('pathKind', 'BUS');
-                } catch (eS0) {}
-                try {
-                    f.set('routeId', routeId);
-                } catch (eS1) {}
-                try {
-                    f.set('coordsLen', coordsProj.length);
-                } catch (eS3) {}
-
-                // ✅ 연속 클릭 시 이전 rAF 취소
-                try {
-                    if (window.__routeLineRafId) cancelAnimationFrame(window.__routeLineRafId);
-                } catch (eCan) {}
-
-                window.__routeLineRafId = requestAnimationFrame(function () {
-                    try {
-                        var g = f.getGeometry && f.getGeometry();
-                        if (g && g.setCoordinates) g.setCoordinates(coordsProj);
-                        else f.setGeometry(new OL.geom.LineString(coordsProj));
-                    } catch (eG) {
-                        console.warn('[drawBusRouteFromIndex] setGeometry/coords fail', eG);
-                    }
-
-                    // fit
-                    if (opts.fit) {
-                        try {
-                            var ext = f.getGeometry().getExtent();
-                            if (ext && map.getView && map.getView()) {
-                                map.getView().fit(ext, { padding: [40, 40, 40, 40], duration: 180, maxZoom: 17 });
-                            }
-                        } catch (eFit) {}
-                    }
-
-                    // render
-                    try {
-                        if (map.renderSync) map.renderSync();
-                        else if (map.render) map.render();
-                    } catch (eR) {}
+                var coordsProj = getProjectedCoordsCached(OL, routeId, coordsAny, needTransform, mapProjCode);
+                coordsProj = (coordsProj || []).filter(function (p) {
+                    return p && p.length >= 2 && isFinite(p[0]) && isFinite(p[1]);
                 });
+                if (!coordsProj || coordsProj.length < 2) return (console.warn('[drawBusRouteFromIndex] coordsProj too short'), false);
 
-                // 로그
+                // ✅ feature 생성/재사용
+                var f = window.__routeLineFeatureById[routeId];
+                if (!f) {
+                    f = new OL.Feature({ geometry: new OL.geom.LineString([]) });
+                    try {
+                        f.set('kind', 'routeLine');
+                        f.set('layerTag', 'bus-route');
+                        f.set('segTag', 'bus-route');
+                        f.set('routeId', routeId);
+                        f.set('pathKind', 'BUS');
+                    } catch (eF0) {}
+                    window.__routeLineFeatureById[routeId] = f;
+                }
+
+                // ✅ 항상 source에 1개만 들어가게 (keepOld=false면 이미 clear됨)
                 try {
-                    console.log(
-                        '[drawBusRouteFromIndex] ok',
-                        routeId,
-                        'len=',
-                        coordsProj.length,
-                        'needTransform=',
-                        needTransform,
-                        'infoProj=',
-                        infoProj,
-                        'mapProj=',
-                        mapProjCode,
-                        'routeFeatures(after)=',
-                        routeSrc.getFeatures ? routeSrc.getFeatures().length : '?',
-                    );
-                } catch (eDbg) {}
+                    routeSrc.addFeature(f);
+                } catch (eAdd0) {}
+
+                // geometry set
+                try {
+                    var g = f.getGeometry && f.getGeometry();
+                    if (g && g.setCoordinates) g.setCoordinates(coordsProj);
+                    else f.setGeometry(new OL.geom.LineString(coordsProj));
+                } catch (eG) {
+                    console.warn('[drawBusRouteFromIndex] setGeometry fail', eG);
+                }
+
+                // ✅ 기본은 자동 fit (opts.fit === false면 끔)
+                try {
+                    if (opts.fit !== false) {
+                        var ext = f.getGeometry().getExtent();
+                        map.getView().fit(ext, { padding: [40, 40, 40, 40], duration: 180, maxZoom: 17 });
+                    }
+                } catch (eFit) {}
+
+                try {
+                    if (map.renderSync) map.renderSync();
+                    else if (map.render) map.render();
+                } catch (eR) {}
+
+                console.log(
+                    '[drawBusRouteFromIndex] ok',
+                    routeId,
+                    'len=',
+                    coordsProj.length,
+                    'needTransform=',
+                    needTransform,
+                    'infoProj=',
+                    infoProj || '(auto)',
+                    'mapProj=',
+                    mapProjCode,
+                    'busRouteFeatures(total)=',
+                    routeSrc.getFeatures ? routeSrc.getFeatures().length : '?',
+                    'keepOld=',
+                    keepOld,
+                );
 
                 return true;
             }
 
-            // ✅ 전역 노출
-            try {
-                window.drawBusRouteFromIndex = drawBusRouteFromIndex;
-            } catch (e0) {}
+            window.drawBusRouteFromIndex = drawBusRouteFromIndex;
         })();
 
         // =========================================================
@@ -3290,7 +3734,41 @@
         }
 
         // =========================================================
-        // ✅ NGII 지도 초기화 (안정/락 강화 버전)
+        // ✅ [ADD] Angle helpers (없어서 터지는거 방지)
+        // =========================================================
+        var BUS_ICON_ROT_OFFSET = typeof BUS_ICON_ROT_OFFSET !== 'undefined' ? BUS_ICON_ROT_OFFSET : 0;
+
+        function normalizeAngle(rad) {
+            rad = Number(rad);
+            if (!isFinite(rad)) return 0;
+            while (rad > Math.PI) rad -= 2 * Math.PI;
+            while (rad < -Math.PI) rad += 2 * Math.PI;
+            return rad;
+        }
+        function safeNorm(rad) {
+            return normalizeAngle(rad);
+        }
+
+        function angleDiff(a, b) {
+            a = normalizeAngle(a);
+            b = normalizeAngle(b);
+            var d = a - b;
+            d = normalizeAngle(d);
+            return Math.abs(d);
+        }
+        function lerpAngle(a, b, t) {
+            a = normalizeAngle(a);
+            b = normalizeAngle(b);
+            var d = normalizeAngle(b - a);
+            return normalizeAngle(a + d * (t || 0));
+        }
+
+        // =========================================================
+        // ✅ NGII 지도 초기화 (안정/락 강화 버전) - FINAL+
+        // - map 준비될 때까지 재시도
+        // - ensureBusVectorLayer는 인자 없이 호출
+        // - ✅ 버스 화살표 표시 모드 지원(숨김락 조건부)
+        // - ✅ 전체정류장(빨간점) 재등장 방지: prerender/postrender 락 + layer-add 감시 + addLayer 훅
         // =========================================================
         function initMap() {
             if (ngiiMap) {
@@ -3303,6 +3781,7 @@
 
             var div = document.getElementById('busMap');
             if (!div) return;
+
             if (!window.ngii_wmts) {
                 console.error('[BusController] ngii_wmts 없음(스크립트 로드 확인)');
                 return;
@@ -3314,10 +3793,31 @@
                 ngiiMap = new ngii_wmts.map('busMap', { zoom: 7 });
                 window.busNgiiMap = ngiiMap;
 
-                // ✅✅✅ map/layer 준비가 끝난 다음에 해야 하므로 200ms 콜백 안에서 처리
-                $timeout(function () {
-                    var m = getInnerOlMap();
-                    if (!m) return;
+                (function waitMapReady(tryN) {
+                    tryN = tryN || 0;
+
+                    var m = null;
+                    try {
+                        m = getInnerOlMap();
+                    } catch (e) {}
+
+                    // map이 아직 준비 안됐으면 재시도 (최대 30회 * 120ms ≈ 3.6s)
+                    if (!m || !m.getView || typeof m.getView !== 'function') {
+                        if (tryN < 30) {
+                            return $timeout(function () {
+                                waitMapReady(tryN + 1);
+                            }, 120);
+                        }
+                        console.warn('[initMap] getInnerOlMap not ready after retries');
+                        return;
+                    }
+
+                    // ✅✅✅ [ADD] 버스 화살표 표시 모드 토글 (기본: 표시)
+                    // - true  : 버스 화살표 보이게
+                    // - false : (예전처럼) 얇은 화살표 숨김락 ON
+                    if (typeof window.__SHOW_BUS_ARROWS__ === 'undefined') {
+                        window.__SHOW_BUS_ARROWS__ = true;
+                    }
 
                     // 1) 초기 center/zoom 저장
                     var view = m.getView && m.getView();
@@ -3339,9 +3839,85 @@
                     try {
                         ensureVectorLayer();
                     } catch (e3) {}
+
+                    // ✅ 버스 레이어/소스 연결(인자 없이)
                     try {
                         ensureBusVectorLayer();
                     } catch (e4) {}
+
+                    // ✅✅✅ [ADD] 버스 레이어를 "표시 모드"로 강제(늦게 꺼지는 케이스 대비)
+                    // - ensureBusVectorLayer가 제대로 연결했더라도,
+                    //   기존 코드/락이 visible=false로 다시 만들 수 있어서 한번 더 켜준다
+                    try {
+                        if (window.__SHOW_BUS_ARROWS__) {
+                            var lyBus = null;
+                            try {
+                                lyBus = window && window.busVectorLayer ? window.busVectorLayer : null;
+                            } catch (eA) {}
+                            try {
+                                if (!lyBus && typeof busVectorLayer !== 'undefined') lyBus = busVectorLayer;
+                            } catch (eB) {}
+
+                            if (lyBus) {
+                                // 예전 숨김 락 흔적이 있으면 풀어주기(가능한 경우)
+                                try {
+                                    if (lyBus.__lockedHideVisible || lyBus.__hideLockInstalled) {
+                                        try {
+                                            delete lyBus.setVisible;
+                                        } catch (e) {}
+                                    }
+                                } catch (eC) {}
+                                try {
+                                    if (lyBus.__lockedHideStyle) {
+                                        try {
+                                            delete lyBus.setStyle;
+                                        } catch (e) {}
+                                    }
+                                } catch (eD) {}
+
+                                // 보이게
+                                try {
+                                    var proto = Object.getPrototypeOf(lyBus);
+                                    if (proto && proto.setVisible) proto.setVisible.call(lyBus, true);
+                                    else if (lyBus.setVisible) lyBus.setVisible(true);
+                                } catch (eE) {}
+
+                                // zIndex 올리기
+                                try {
+                                    if (lyBus.setZIndex) lyBus.setZIndex(999);
+                                } catch (eF) {}
+
+                                // 스타일 다시 먹이기(있으면)
+                                try {
+                                    if (typeof __ensureBusStyles === 'function') __ensureBusStyles();
+                                    var styleFn = function (feature) {
+                                        if (window.__BUS_STYLES__ && window.__BUS_STYLES__.normal) return window.__BUS_STYLES__.normal(feature);
+                                        if (typeof busArrowStyle === 'function') return busArrowStyle(feature);
+                                        return null;
+                                    };
+                                    var proto2 = Object.getPrototypeOf(lyBus);
+                                    if (proto2 && proto2.setStyle) proto2.setStyle.call(lyBus, styleFn);
+                                    else if (lyBus.setStyle) lyBus.setStyle(styleFn);
+                                } catch (eG) {}
+                            }
+
+                            // 렌더 갱신
+                            try {
+                                m.renderSync ? m.renderSync() : m.render && m.render();
+                            } catch (eH) {}
+                        }
+                    } catch (eBusForce) {}
+
+                    // ✅ 얇은 화살표(busVectorLayer) 숨김 락
+                    // ⚠️ 화살표를 보이게 하려면 이걸 켜면 안 됨
+                    try {
+                        if (!window.__SHOW_BUS_ARROWS__) {
+                            if (typeof __forceHideBusArrowLayer === 'function') {
+                                __forceHideBusArrowLayer({ removeFromMap: false });
+                            }
+                        }
+                    } catch (e4b) {}
+
                     try {
                         ensureRouteLayer();
                     } catch (e5) {}
@@ -3350,96 +3926,198 @@
                     } catch (e6) {}
 
                     // =========================================================
-                    // ✅✅✅ (추가) 전체정류장(빨간점) "초기 1회" 숨김 락
+                    // ✅✅✅ 전체정류장(빨간점) 숨김 락 ON
                     // =========================================================
                     try {
                         window.__forceHideAllStops = true;
                     } catch (e7) {}
 
-                    // ✅ fallback: __hideAllStopsLayerOnly / __lockHideAllStops 없으면 직접 layer 찾아 숨김
+                    // ✅ all-stops 레이어 판별 (tag/name/source feature 수 기반)
+                    function __isAllStopsLayer(lyr) {
+                        if (!lyr || !lyr.get || !lyr.getSource) return false;
+
+                        var tag = '';
+                        var name = '';
+                        try {
+                            tag = String(lyr.get('tag') || '').toLowerCase();
+                        } catch (e) {}
+                        try {
+                            name = String(lyr.get('name') || '').toLowerCase();
+                        } catch (e2) {}
+
+                        // selected-stop은 절대 숨기지 않음
+                        if (tag === 'selected-stop' || tag === 'selectedstop') return false;
+
+                        // tag/name 힌트
+                        var hint = (tag.indexOf('all') >= 0 && tag.indexOf('stop') >= 0) || tag === 'stops' || tag === 'stop' || tag === 'allstops' || (name.indexOf('all') >= 0 && name.indexOf('stop') >= 0);
+
+                        // ✅ 힌트가 약하면 source feature 수로 보강
+                        // (대전 전체정류장처럼 3천개대 피처면 거의 확정)
+                        try {
+                            var src = lyr.getSource && lyr.getSource();
+                            var feats = src && src.getFeatures ? src.getFeatures() || [] : [];
+                            if (feats.length >= 500) return true; // ✅ 전체정류장 후보로 강하게 판단
+                        } catch (e3) {}
+
+                        return !!hint;
+                    }
+
+                    // ✅✅✅ [ADD] all-stops 레이어를 숨기는 공통 함수
+                    function __hideAllStopsLayerIfNeeded(lyr, reason) {
+                        try {
+                            if (!window.__forceHideAllStops) return;
+                            if (!__isAllStopsLayer(lyr)) return;
+
+                            // selected-stop은 보호
+                            try {
+                                var t = String(lyr.get('tag') || '').toLowerCase();
+                                if (t === 'selected-stop' || t === 'selectedstop') return;
+                            } catch (e0) {}
+
+                            try {
+                                if (lyr.setVisible) lyr.setVisible(false);
+                            } catch (e1) {}
+                            try {
+                                if (lyr.setStyle) lyr.setStyle(null);
+                            } catch (e2) {}
+                            try {
+                                lyr.changed && lyr.changed();
+                            } catch (e3) {}
+
+                            console.warn('[all-stops] hidden:', reason || 'unknown');
+                        } catch (e) {}
+                    }
+
+                    // ✅✅✅ [ADD] map.addLayer 훅: 늦게 추가되는 all-stops 레이어 즉시 숨김
+                    try {
+                        if (!m.__allStopsAddLayerHooked && m.addLayer) {
+                            var __origAddLayer = m.addLayer.bind(m);
+                            m.addLayer = function (lyr) {
+                                var r = __origAddLayer(lyr);
+                                try {
+                                    __hideAllStopsLayerIfNeeded(lyr, 'addLayer-hook');
+                                } catch (e) {}
+                                return r;
+                            };
+                            m.__allStopsAddLayerHooked = true;
+                        }
+                    } catch (eAddHook) {}
+
                     function __fallbackHideAllStops() {
                         try {
+                            if (!window.__forceHideAllStops) return;
+
+                            // 프로젝트 제공 함수가 있으면 사용
                             if (typeof __hideAllStopsLayerOnly === 'function') {
                                 __hideAllStopsLayerOnly();
                                 return;
                             }
 
-                            // fallback: tag나 source로 추정해서 숨김 (프로젝트마다 다름)
                             var layers = m.getLayers && m.getLayers().getArray ? m.getLayers().getArray() : [];
                             for (var i = 0; i < layers.length; i++) {
                                 var lyr = layers[i];
-                                if (!lyr || !lyr.get || !lyr.setVisible) continue;
+                                if (!lyr || !lyr.setVisible) continue;
 
-                                var tag = String(lyr.get('tag') || '').toLowerCase();
-                                // 너 프로젝트에서 all-stops / stops / stop 등으로 태그 달아둔 케이스 방어
-                                if (tag.indexOf('all') >= 0 && tag.indexOf('stop') >= 0) lyr.setVisible(false);
-                                else if (tag === 'stops' || tag === 'stop' || tag === 'allstops') lyr.setVisible(false);
+                                if (__isAllStopsLayer(lyr)) {
+                                    try {
+                                        lyr.setVisible(false);
+                                    } catch (eV) {}
+                                    try {
+                                        lyr.changed && lyr.changed();
+                                    } catch (eC) {}
+                                }
                             }
                         } catch (e) {}
                     }
 
-                    function __fallbackLockHideAllStops() {
-                        try {
-                            if (typeof __lockHideAllStops === 'function') {
-                                __lockHideAllStops();
-                                return;
-                            }
-                            // lock 함수가 없으면 최소한 지금 당장은 숨김 유지
-                            __fallbackHideAllStops();
-                        } catch (e) {}
-                    }
-
-                    try {
-                        __fallbackHideAllStops();
-                    } catch (e8) {}
-                    try {
-                        __fallbackLockHideAllStops();
-                    } catch (e9) {}
-
-                    // =========================================================
-                    // ✅✅✅ (추가) 얇은 버스 화살표(busVectorLayer)도 "초기 1회" 강제 숨김
-                    // - 두꺼운(nearest)만 남기려면 필수
-                    // =========================================================
-                    function __hideThinBusArrowLayer() {
-                        try {
-                            // 네가 이전에 붙여둔 유틸이 있으면 그거 우선
-                            if (typeof __hideRealtimeBusLayerOnce === 'function') {
-                                __hideRealtimeBusLayerOnce();
-                                return;
-                            }
-
-                            // fallback: busVectorLayer 전역이 있으면 숨김
-                            if (window.busVectorLayer && window.busVectorLayer.setVisible) {
-                                window.busVectorLayer.setVisible(false);
-                            }
-                        } catch (e) {}
-                    }
-
-                    try {
-                        __hideThinBusArrowLayer();
-                    } catch (e10) {}
-
-                    // ✅ 레이어가 더 늦게 붙는 경우 대비: 여러 타이밍으로 재숨김
-                    function __rehideAll() {
+                    // ✅ 여러 타이밍으로 한번 더 숨김
+                    function __rehideAllStops() {
                         try {
                             __fallbackHideAllStops();
                         } catch (e1) {}
+
+                        // ✅✅✅ [ADD] init 시점 스캔: 이미 존재하는 all-stops도 확실히 숨김
                         try {
-                            __hideThinBusArrowLayer();
-                        } catch (e2) {}
-                        try {
-                            if (m) {
-                                if (m.renderSync) m.renderSync();
-                                else if (m.render) m.render();
+                            var arr0 = m.getLayers && m.getLayers().getArray ? m.getLayers().getArray() : [];
+                            for (var i0 = 0; i0 < arr0.length; i0++) {
+                                __hideAllStopsLayerIfNeeded(arr0[i0], 'init-scan');
                             }
-                        } catch (e3) {}
+                        } catch (eScan) {}
+
+                        try {
+                            m.renderSync ? m.renderSync() : m.render && m.render();
+                        } catch (e2) {}
                     }
 
-                    $timeout(__rehideAll, 60);
-                    $timeout(__rehideAll, 200);
-                    $timeout(__rehideAll, 700);
-                    $timeout(__rehideAll, 1200);
-                }, 200);
+                    __rehideAllStops();
+                    $timeout(__rehideAllStops, 120);
+                    $timeout(__rehideAllStops, 350);
+                    $timeout(__rehideAllStops, 900);
+
+                    // ✅✅✅ 핵심 락: 렌더 때마다 다시 OFF
+                    // - OL6에서는 precompose 대신 prerender/postrender가 더 안정적
+                    try {
+                        if (!window.__allStopsHideLockBound) {
+                            window.__allStopsHideLockBound = true;
+                            var __lastHideAt = 0;
+
+                            function __tickHide() {
+                                try {
+                                    if (!window.__forceHideAllStops) return;
+                                    var now = Date.now();
+                                    if (now - __lastHideAt < 400) return; // 0.4초 1번
+                                    __lastHideAt = now;
+
+                                    // ✅ 기존 숨김
+                                    __fallbackHideAllStops();
+
+                                    // ✅✅✅ [ADD] 레이어 배열 스캔 숨김도 같이
+                                    try {
+                                        var arr = m.getLayers && m.getLayers().getArray ? m.getLayers().getArray() : [];
+                                        for (var i = 0; i < arr.length; i++) __hideAllStopsLayerIfNeeded(arr[i], 'render-tick');
+                                    } catch (eX) {}
+                                } catch (e) {}
+                            }
+
+                            // ✅ map 이벤트
+                            try {
+                                m.on('prerender', __tickHide);
+                            } catch (eA) {}
+                            try {
+                                m.on('postrender', __tickHide);
+                            } catch (eB) {}
+
+                            // ✅ layerGroup 변화 감지(늦게 추가되는 전체정류장 레이어 대응)
+                            try {
+                                var lg = m.getLayerGroup && m.getLayerGroup();
+                                if (lg && lg.getLayers && lg.getLayers().on) {
+                                    lg.getLayers().on('add', function () {
+                                        $timeout(__rehideAllStops, 0);
+                                        $timeout(__rehideAllStops, 120);
+                                    });
+                                }
+                            } catch (eC) {}
+                        }
+                    } catch (eLock) {}
+
+                    // ✅✅✅ [ADD] (선택) 버스 화살표도 늦게 다시 꺼지는 케이스 대비 재시도
+                    try {
+                        if (window.__SHOW_BUS_ARROWS__) {
+                            $timeout(function () {
+                                try {
+                                    ensureBusVectorLayer();
+                                } catch (e) {}
+                                try {
+                                    var lyBus = null;
+                                    try {
+                                        lyBus = window && window.busVectorLayer ? window.busVectorLayer : null;
+                                    } catch (eA) {}
+                                    if (lyBus && lyBus.setVisible) lyBus.setVisible(true);
+                                } catch (e2) {}
+                            }, 800);
+                        }
+                    } catch (eRetry) {}
+                })(0);
             } catch (e) {
                 console.error('[BusController] NGII 지도 생성 실패:', e);
             }
@@ -3449,45 +4127,10 @@
         $timeout(initMap, 0);
 
         // =========================================================
-        // ✅ 지도 이동
-        // =========================================================
-        function moveMap(lon, lat, zoom) {
-            $timeout(function () {
-                const map = getInnerOlMap();
-
-                lon = parseFloat(lon);
-                lat = parseFloat(lat);
-                if (!isFinite(lon) || !isFinite(lat)) return;
-
-                if (map && window.ol) {
-                    try {
-                        const view = map.getView();
-                        if (!view) throw new Error('view 없음');
-
-                        let coord = [lon, lat];
-                        if (ol.proj && ol.proj.transform && mapProjection) {
-                            coord = ol.proj.transform([lon, lat], 'EPSG:4326', mapProjection);
-                        } else if (ol.proj && ol.proj.fromLonLat && !mapProjection) {
-                            coord = ol.proj.fromLonLat([lon, lat]);
-                        }
-
-                        view.setCenter(coord);
-                        if (typeof zoom === 'number') view.setZoom(zoom);
-                        return;
-                    } catch (e) {}
-                }
-
-                if (ngiiMap && typeof ngiiMap._setCenter === 'function') {
-                    try {
-                        if (typeof zoom === 'number') ngiiMap._setCenter(lon, lat, zoom);
-                        else ngiiMap._setCenter(lon, lat);
-                    } catch (e) {}
-                }
-            }, 150);
-        }
-
-        // =========================================================
-        // ✅ 정류장 좌표로 이동 + 빨간 마커
+        // ✅✅✅ (REPLACE) moveMapToStop (nearest bus arrow 연동 포함)
+        // - 전체정류장 숨김락 켜져있으면 drawAllMarkers 절대 그리지 않음
+        // - moveMap 없어도 안전하게 이동
+        // - ✅ 선택 정류장 mapXY(coord) 계산 후 showNearestBusArrow(coord) 호출
         // =========================================================
         function moveMapToStop(stop, drawAllMarkers) {
             if (!stop) return;
@@ -3500,20 +4143,70 @@
             if (!isFinite(lat) || !isFinite(lon)) return;
 
             currentStopCoord = { lat: lat, lon: lon };
-            moveMap(lon, lat, 13);
+
+            // ✅ moveMap이 없어서 죽는 케이스 방지 (안전 이동)
+            (function __moveMapSafe(lon, lat, zoom) {
+                if (typeof moveMap === 'function') {
+                    try {
+                        return moveMap(lon, lat, zoom);
+                    } catch (e) {}
+                }
+                try {
+                    const map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
+                    if (!map || !window.ol) return;
+                    const view = map.getView && map.getView();
+                    if (!view) return;
+
+                    let coord = [lon, lat];
+                    if (ol.proj && ol.proj.transform && typeof mapProjection !== 'undefined' && mapProjection) {
+                        coord = ol.proj.transform([lon, lat], 'EPSG:4326', mapProjection);
+                    } else if (ol.proj && ol.proj.fromLonLat) {
+                        coord = ol.proj.fromLonLat([lon, lat]);
+                    }
+
+                    view.setCenter(coord);
+                    if (typeof zoom === 'number') view.setZoom(zoom);
+
+                    try {
+                        map.renderSync ? map.renderSync() : map.render && map.render();
+                    } catch (eR) {}
+                } catch (e2) {}
+            })(lon, lat, 13);
 
             $timeout(function () {
                 ensureVectorLayer();
                 const map = getInnerOlMap();
                 if (!map || !vectorSource || !window.ol || !ol.Feature || !ol.geom) return;
 
+                // ✅ 이 레이어(선택 정류장)는 allStops 숨김 대상이 아니게 tag 부여
+                try {
+                    if (typeof vectorLayer !== 'undefined' && vectorLayer && vectorLayer.set) {
+                        vectorLayer.set('tag', 'selected-stop');
+                    } else if (window.vectorLayer && window.vectorLayer.set) {
+                        window.vectorLayer.set('tag', 'selected-stop');
+                    }
+                } catch (eTag) {}
+
                 const view = map.getView && map.getView();
                 const proj = view && view.getProjection ? view.getProjection() : mapProjection;
 
-                vectorSource.clear();
+                // ✅ 기존 마커 제거
+                try {
+                    vectorSource.clear(true);
+                } catch (eClr) {
+                    try {
+                        vectorSource.clear();
+                    } catch (eClr2) {}
+                }
+
+                // ✅✅✅ 전체정류장 숨김락이 켜져있으면, drawAllMarkers 무조건 false 처리
+                if (window.__forceHideAllStops) drawAllMarkers = false;
 
                 const targets = drawAllMarkers ? $scope.stops || [] : [stop];
                 const features = [];
+
+                // ✅✅✅ "선택 정류장 1개"의 mapXY를 따로 확보해두기 (nearest 화살표용)
+                var selectedStopMapXY = null;
 
                 targets.forEach(function (s) {
                     const rLat = s.gpslati || s.gpsLat || s.lat || s.latitude;
@@ -3526,6 +4219,11 @@
                     let coord = [xx, yy];
                     if (ol.proj && ol.proj.transform && proj) coord = ol.proj.transform([xx, yy], 'EPSG:4326', proj);
 
+                    // ✅ drawAllMarkers=false(=선택정류장 단일)일 때, 이 coord가 nearest 기준점
+                    if (!drawAllMarkers && s === stop) {
+                        selectedStopMapXY = coord;
+                    }
+
                     const f = new ol.Feature({
                         geometry: new ol.geom.Point(coord),
                         stop: s,
@@ -3534,103 +4232,485 @@
                     features.push(f);
                 });
 
-                if (features.length) vectorSource.addFeatures(features);
+                if (features.length) {
+                    try {
+                        vectorSource.addFeatures(features);
+                    } catch (eAdd) {
+                        for (var i = 0; i < features.length; i++) {
+                            try {
+                                vectorSource.addFeature(features[i]);
+                            } catch (eAdd2) {}
+                        }
+                    }
+                }
+
+                // ✅✅✅ nearest 화살표 표시 (정류장 단일 선택일 때만)
+                // - allStops(빨간점 전체) 모드면 nearest가 의미 없고 성능도 떨어짐
+                try {
+                    if (!drawAllMarkers) {
+                        // coord를 못 잡았으면 stop에서 다시 계산
+                        if (!selectedStopMapXY) {
+                            try {
+                                var xx2 = lon,
+                                    yy2 = lat;
+                                var c2 = [xx2, yy2];
+                                if (ol.proj && ol.proj.transform && proj) c2 = ol.proj.transform([xx2, yy2], 'EPSG:4326', proj);
+                                selectedStopMapXY = c2;
+                            } catch (eFix) {}
+                        }
+
+                        if (selectedStopMapXY && typeof showNearestBusArrow === 'function') {
+                            showNearestBusArrow(selectedStopMapXY);
+                        }
+                    } else {
+                        // 전체 마커 모드면 nearest 표시 제거
+                        if (window.__nearestBusSource && window.__nearestBusSource.clear) {
+                            try {
+                                window.__nearestBusSource.clear(true);
+                            } catch (eC) {
+                                try {
+                                    window.__nearestBusSource.clear();
+                                } catch (eC2) {}
+                            }
+                        }
+                    }
+                } catch (eNear) {
+                    console.warn('[moveMapToStop] showNearestBusArrow fail:', eNear);
+                }
+
+                // 렌더 보강
+                try {
+                    if (map.renderSync) map.renderSync();
+                    else if (map.render) map.render();
+                } catch (eR) {}
             }, 300);
         }
 
         // =========================================================
-        // ✅✅✅ 버스 feature 재사용 (ULTRA STABLE v2)
-        // - window.busVectorSource 동기화
-        // - routeId / routeNo 키 통일
-        // - lon/lat 좌표 들어와도 map projection 변환
-        // - changed() + source.changed() + map.render 보강
+        // ✅✅✅ BUS: Small Arrow + Label + Multi + Route-aligned Rotation
+        // - busArrowStyle(feature): 작은 화살표 + 노선번호 표시
+        // - headingRad/rot 있으면 사용, 없으면 routeLine(폴리라인)에서 가장 가까운 segment 방향 사용
         // =========================================================
-        function upsertBusFeature(vehicleKey, coord, b, rid, routeNo, headingRad) {
-            try {
-                // ✅ busVectorSource 전역 동기화
-                if (window && window.busVectorSource) {
-                    busVectorSource = window.busVectorSource;
-                } else {
-                    window.busVectorSource = busVectorSource;
-                }
+        (function () {
+            if (!window.ol || !ol.style || !ol.geom) return;
 
-                if (!busVectorSource || !window.ol || !ol.Feature || !ol.geom) return;
+            // ---- 조절 포인트 ----
+            var BUS_ICON_SRC = '/bus_arrow.svg';
+            var BUS_ICON_SCALE = 1.0; // ✅ 더 작게(원하면 0.9 / 0.8)
+            var LABEL_FONT = 'bold 12px sans-serif';
+            var LABEL_OFFSET_Y = -14; // ✅ 경로 안 벗어나게 위로 덜 띄움
+            var ROT_OFFSET = Math.PI / 2; // SVG 기본 방향 보정(필요시 0 또는 -Math.PI/2로 조정)
 
-                // ✅ 좌표 안전 처리 (lon/lat → map projection 변환)
-                function toMapXY(coord) {
-                    if (!coord || coord.length < 2) return null;
+            window.__BUS_STYLES__ = window.__BUS_STYLES__ || {};
+            window.__busStyleCache = window.__busStyleCache || {};
 
-                    var x = Number(coord[0]);
-                    var y = Number(coord[1]);
-                    if (!isFinite(x) || !isFinite(y)) return null;
+            function normRouteNo(v) {
+                return String(v == null ? '' : v)
+                    .replace(/\s+/g, '')
+                    .replace(/번/g, '');
+            }
 
-                    // lon/lat처럼 보이면 transform
-                    var looksLonLat = Math.abs(x) <= 180 && Math.abs(y) <= 90;
+            function getPointXY(feature) {
+                try {
+                    var g = feature && feature.getGeometry && feature.getGeometry();
+                    if (!g || !g.getType || g.getType() !== 'Point') return null;
+                    var c = g.getCoordinates && g.getCoordinates();
+                    if (c && c.length >= 2 && isFinite(c[0]) && isFinite(c[1])) return [c[0], c[1]];
+                } catch (e) {}
+                return null;
+            }
 
-                    if (looksLonLat && window.ol && ol.proj && ol.proj.transform) {
+            function getRouteLineFeature() {
+                if (window.__routeLineFeature && window.__routeLineFeature.getGeometry) return window.__routeLineFeature;
+
+                var src = window.routeVectorSource || window.__routeVectorSource || null;
+                if (!src || !src.getFeatures) return null;
+
+                try {
+                    var fs = src.getFeatures() || [];
+                    for (var i = 0; i < fs.length; i++) {
+                        var f = fs[i];
+                        var g = f && f.getGeometry && f.getGeometry();
+                        if (!g || !g.getType || g.getType() !== 'LineString') continue;
+
+                        var segTag = '';
                         try {
-                            var map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
-                            var view = map && map.getView && map.getView();
-                            var proj = view && view.getProjection && view.getProjection();
-                            var code = proj && proj.getCode ? proj.getCode() : 'EPSG:3857';
-                            return ol.proj.transform([x, y], 'EPSG:4326', code);
-                        } catch (e) {}
+                            segTag = String(f.get('segTag') || '');
+                        } catch (e0) {}
+                        if (segTag === 'single-seg') return f;
+
+                        var kind = '';
+                        try {
+                            kind = String(f.get('kind') || f.get('layerTag') || f.get('pathKind') || '').toLowerCase();
+                        } catch (e1) {}
+                        if (kind.indexOf('route') >= 0 || kind.indexOf('path') >= 0) return f;
                     }
-                    return [x, y];
+                } catch (e2) {}
+                return null;
+            }
+
+            function angleFromRouteNearestSegment(pointXY, routeLineFeature) {
+                if (!pointXY || !routeLineFeature) return null;
+
+                try {
+                    var g = routeLineFeature.getGeometry && routeLineFeature.getGeometry();
+                    if (!g || !g.getType || g.getType() !== 'LineString') return null;
+
+                    var coords = g.getCoordinates && g.getCoordinates();
+                    if (!coords || coords.length < 2) return null;
+
+                    var px = pointXY[0],
+                        py = pointXY[1];
+                    var bestI = -1,
+                        bestD2 = Infinity;
+
+                    for (var i = 0; i < coords.length - 1; i++) {
+                        var ax = coords[i][0],
+                            ay = coords[i][1];
+                        var bx = coords[i + 1][0],
+                            by = coords[i + 1][1];
+
+                        var abx = bx - ax,
+                            aby = by - ay;
+                        var apx = px - ax,
+                            apy = py - ay;
+                        var ab2 = abx * abx + aby * aby;
+
+                        var t = ab2 > 0 ? (apx * abx + apy * aby) / ab2 : 0;
+                        if (t < 0) t = 0;
+                        else if (t > 1) t = 1;
+
+                        var cx = ax + t * abx,
+                            cy = ay + t * aby;
+                        var dx = px - cx,
+                            dy = py - cy;
+                        var d2 = dx * dx + dy * dy;
+
+                        if (d2 < bestD2) {
+                            bestD2 = d2;
+                            bestI = i;
+                        }
+                    }
+
+                    if (bestI < 0) return null;
+
+                    var p0 = coords[bestI];
+                    var p1 = coords[bestI + 1];
+                    var vx = p1[0] - p0[0];
+                    var vy = p1[1] - p0[1];
+                    if (!isFinite(vx) || !isFinite(vy) || (vx === 0 && vy === 0)) return null;
+
+                    return Math.atan2(vy, vx);
+                } catch (e) {
+                    return null;
+                }
+            }
+
+            function resolveRotation(feature) {
+                var rot = NaN;
+                try {
+                    rot = Number(feature.get('rot'));
+                    if (!isFinite(rot)) rot = Number(feature.get('headingRad'));
+                    if (!isFinite(rot)) rot = Number(feature.get('heading'));
+                } catch (e) {}
+
+                // degree로 들어오면 rad로
+                if (isFinite(rot) && Math.abs(rot) > 2 * Math.PI && Math.abs(rot) <= 360) {
+                    rot = (rot * Math.PI) / 180.0;
                 }
 
-                var mapXY = toMapXY(coord);
-                if (!mapXY) return;
-
-                // ✅ routeNo 복구
-                var rn = String(routeNo || '').trim();
-                if (!rn && b) {
-                    rn = String(b.routeno || b.routeNo || b.routenm || b.routeNm || b.lineNo || b.busRouteNm || '').trim();
+                // 없으면 route polyline 방향으로 보정
+                if (!isFinite(rot)) {
+                    var pt = getPointXY(feature);
+                    var rf = getRouteLineFeature();
+                    var r2 = angleFromRouteNearestSegment(pt, rf);
+                    if (isFinite(r2)) rot = r2;
                 }
 
-                // ✅ routeId 복구
+                if (!isFinite(rot)) rot = 0;
+                return rot + ROT_OFFSET;
+            }
+
+            function buildBusStyle(rot, routeNo) {
+                var icon = new ol.style.Icon({
+                    src: BUS_ICON_SRC,
+                    scale: BUS_ICON_SCALE,
+                    rotation: rot,
+                    rotateWithView: true,
+                    anchor: [0.5, 0.5],
+                    anchorXUnits: 'fraction',
+                    anchorYUnits: 'fraction',
+                });
+
+                var iconStyle = new ol.style.Style({ image: icon });
+
+                var textStyle = new ol.style.Style({
+                    text: new ol.style.Text({
+                        text: routeNo || '',
+                        font: LABEL_FONT,
+                        offsetY: LABEL_OFFSET_Y,
+                        fill: new ol.style.Fill({ color: '#111' }),
+                        stroke: new ol.style.Stroke({ color: 'rgba(255,255,255,0.95)', width: 4 }),
+                    }),
+                });
+
+                return [iconStyle, textStyle];
+            }
+
+            function busArrowStyle(feature) {
+                var rno = '';
+                try {
+                    rno = normRouteNo(feature.get('routeNo') || feature.get('routeno') || feature.get('route_no') || feature.get('label') || '');
+                } catch (e0) {}
+
+                var rot = resolveRotation(feature);
+
+                // 캐시 폭발 방지: 0.1rad 버킷
+                var rotBucket = Math.round(rot * 10) / 10;
+                var key = (rno || 'BUS') + '|' + rotBucket;
+
+                var cache = window.__busStyleCache;
+                if (!cache[key]) cache[key] = buildBusStyle(rotBucket, rno);
+
+                return cache[key];
+            }
+
+            window.busArrowStyle = busArrowStyle;
+
+            window.__ensureBusStyles = function () {
+                window.__BUS_STYLES__ = window.__BUS_STYLES__ || {};
+                window.__BUS_STYLES__.normal = function (feature) {
+                    return busArrowStyle(feature);
+                };
+            };
+        })();
+
+        // =========================================================
+        // ✅✅✅ (REPLACE) ensureBusVectorLayer (네 버전 유지 + 스타일 연결)
+        // =========================================================
+        function ensureBusVectorLayer(map) {
+            map = map || (typeof getInnerOlMap === 'function' ? getInnerOlMap() : null);
+            if (!map) return false;
+            if (!window.ol || !ol.layer || !ol.source || !ol.style) return false;
+
+            try {
+                if (typeof __ensureBusStyles === 'function') __ensureBusStyles();
+            } catch (e) {}
+
+            function __isPointFeature(f) {
+                try {
+                    var g = f && f.getGeometry && f.getGeometry();
+                    return g && g.getType && g.getType() === 'Point';
+                } catch (e) {
+                    return false;
+                }
+            }
+
+            function __findBusLayerDeep(map) {
+                var best = null;
+                var bestPoint = -1;
+
+                function walk(ly) {
+                    if (!ly) return;
+
+                    if (ly.getLayers && ly.getLayers().getArray) {
+                        ly.getLayers().getArray().forEach(walk);
+                        return;
+                    }
+
+                    var tag = null;
+                    try {
+                        tag = ly.get && ly.get('tag');
+                    } catch (e) {}
+
+                    if (!ly.getSource) return;
+                    var src = null;
+                    try {
+                        src = ly.getSource();
+                    } catch (e2) {}
+                    if (!src || !src.getFeatures) return;
+
+                    var feats = [];
+                    try {
+                        feats = src.getFeatures() || [];
+                    } catch (e3) {}
+                    if (!feats.length) return;
+
+                    var p = 0;
+                    for (var i = 0; i < feats.length; i++) if (__isPointFeature(feats[i])) p++;
+
+                    if (tag === 'bus' && p > 0) {
+                        best = { layer: ly, source: src, pointCount: p, feats: feats.length };
+                        bestPoint = 1e9;
+                        return;
+                    }
+
+                    if (p > bestPoint) {
+                        bestPoint = p;
+                        best = { layer: ly, source: src, pointCount: p, feats: feats.length };
+                    }
+                }
+
+                var top = map.getLayers && map.getLayers().getArray ? map.getLayers().getArray() : [];
+                for (var i = 0; i < top.length; i++) walk(top[i]);
+                return best;
+            }
+
+            var found = __findBusLayerDeep(map);
+            if (!found || !found.layer || !found.source || found.pointCount <= 0) {
+                console.warn('[ensureBusVectorLayer] bus layer not found or no point features.');
+                return false;
+            }
+
+            var ly = found.layer;
+
+            // 숨김락 풀기
+            try {
+                if (ly.__lockedHideVisible || ly.__hideLockInstalled) {
+                    try {
+                        delete ly.setVisible;
+                    } catch (e) {}
+                    try {
+                        delete ly.__lockedHideVisible;
+                    } catch (e2) {}
+                    try {
+                        delete ly.__hideLockInstalled;
+                    } catch (e3) {}
+                }
+            } catch (eV) {}
+
+            try {
+                if (ly.__lockedHideStyle) {
+                    try {
+                        delete ly.setStyle;
+                    } catch (e) {}
+                    try {
+                        delete ly.__lockedHideStyle;
+                    } catch (e2) {}
+                }
+            } catch (eS) {}
+
+            // 전역 동기화
+            window.busVectorLayer = ly;
+            window.busVectorSource = found.source;
+            try {
+                busVectorLayer = ly;
+            } catch (e1) {}
+            try {
+                busVectorSource = found.source;
+            } catch (e2) {}
+
+            try {
+                ly.set('tag', 'bus');
+            } catch (eT) {}
+
+            // 스타일 적용
+            try {
+                var styleFn = function (feature) {
+                    if (window.__BUS_STYLES__ && window.__BUS_STYLES__.normal) return window.__BUS_STYLES__.normal(feature);
+                    if (typeof busArrowStyle === 'function') return busArrowStyle(feature);
+                    return null;
+                };
+
+                var proto = Object.getPrototypeOf(ly);
+                if (proto && proto.setStyle) proto.setStyle.call(ly, styleFn);
+                else if (ly.setStyle) ly.setStyle(styleFn);
+            } catch (eSt) {}
+
+            // 보이게 + 위로
+            try {
+                if (ly.setZIndex) ly.setZIndex(999);
+            } catch (eZ) {}
+            try {
+                var proto2 = Object.getPrototypeOf(ly);
+                if (proto2 && proto2.setVisible) proto2.setVisible.call(ly, true);
+                else if (ly.setVisible) ly.setVisible(true);
+            } catch (eVis) {}
+
+            try {
+                console.log('[ensureBusVectorLayer] BUS LAYER ENABLED ✅', 'pointFeats=', found.pointCount, 'feats=', found.feats);
+            } catch (eL) {}
+
+            try {
+                map.renderSync ? map.renderSync() : map.render && map.render();
+            } catch (eR) {}
+            try {
+                if (busVectorLayer && busVectorLayer.changed) busVectorLayer.changed();
+            } catch (e) {}
+            try {
+                if (busVectorSource && busVectorSource.changed) busVectorSource.changed();
+            } catch (e) {}
+
+            return true;
+        }
+
+        // =========================================================
+        // ✅✅✅ (REPLACE) upsertBusFeature (번호/방향 보정 포함)
+        // - bus-live source에만 add/update
+        // - routeNo/label 세팅 확실히
+        // - headingRad 없으면 이전 좌표 대비 방향 atan2로 계산(후순위)
+        // =========================================================
+        function upsertBusFeature(vehicleKey, mapXY, b, rid, routeNo, headingRad) {
+            try {
+                var src = window.busVectorSource; // ✅ bus-live로 고정될 것
+                if (!src || !src.addFeature) return;
+
+                if (!mapXY || mapXY.length < 2 || !isFinite(mapXY[0]) || !isFinite(mapXY[1])) return;
+
                 var rId = String(rid || (b && (b.routeid || b.routeId || b.busRouteId || b.route_id)) || '').trim();
+                var rNo = String(routeNo || (b && (b.routeno || b.routeNo || b.routenm || b.routeNm || b.lineNo || b.busRouteNm)) || '').trim();
 
-                let f = busFeatureMap.get(vehicleKey);
+                // map들 없으면 생성
+                if (typeof busFeatureMap === 'undefined' || !busFeatureMap) window.busFeatureMap = busFeatureMap = new Map();
+                if (typeof busLastSeen === 'undefined' || !busLastSeen) window.busLastSeen = busLastSeen = new Map();
+                if (typeof busLastProjPos === 'undefined' || !busLastProjPos) window.busLastProjPos = busLastProjPos = new Map();
+
+                var f = busFeatureMap.get(vehicleKey);
 
                 if (!f) {
-                    f = new ol.Feature({ geometry: new ol.geom.Point(mapXY) });
+                    f = new ol.Feature(new ol.geom.Point(mapXY));
                     f.set('kind', 'bus');
                     busFeatureMap.set(vehicleKey, f);
-                    busVectorSource.addFeature(f);
+                    src.addFeature(f);
                 } else {
-                    const g = f.getGeometry && f.getGeometry();
+                    var g = f.getGeometry();
                     if (g && g.setCoordinates) g.setCoordinates(mapXY);
                 }
 
-                // ✅ 표준 키로 통일
-                f.set('bus', b || null);
+                // ✅ 표시용 키들 (번호가 안 나오던 원인 1순위가 여기 비어있는 케이스)
                 f.set('routeId', rId);
-                f.set('routeNo', rn);
-                f.set('headingRad', headingRad);
-
-                // 🔥 nearest 함수가 보는 키들도 같이 세팅
+                f.set('routeNo', rNo);
                 f.set('routeid', rId);
-                f.set('routeno', rn);
+                f.set('routeno', rNo);
+                f.set('label', rNo); // ✅ 스타일에서 label 읽는 경우도 커버
+                f.set('bus', b || null);
 
-                // ✅ 스타일/렌더 강제 갱신
-                try {
-                    f.changed && f.changed();
-                } catch (e0) {}
-                try {
-                    busVectorSource.changed && busVectorSource.changed();
-                } catch (e1) {}
-
-                // map render 보강
-                try {
-                    var map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
-                    if (map) {
-                        if (map.renderSync) map.renderSync();
-                        else if (map.render) map.render();
+                // ✅ headingRad 보정: 값이 없으면 "이전 좌표 → 현재 좌표"로 계산
+                var rot = Number(headingRad);
+                if (!isFinite(rot)) {
+                    var prev = null;
+                    try {
+                        prev = busLastProjPos.get(vehicleKey);
+                    } catch (e0) {}
+                    if (prev && prev.length >= 2 && isFinite(prev[0]) && isFinite(prev[1])) {
+                        var dx = mapXY[0] - prev[0];
+                        var dy = mapXY[1] - prev[1];
+                        if (isFinite(dx) && isFinite(dy) && (dx !== 0 || dy !== 0)) rot = Math.atan2(dy, dx);
                     }
-                } catch (e2) {}
+                }
+                if (!isFinite(rot)) rot = 0;
 
+                // ✅ 스타일이 rot/headingRad 둘 다 읽게 세팅
+                f.set('headingRad', rot);
+                f.set('rot', rot);
+
+                // ✅ lastSeen/prev 저장
                 busLastSeen.set(vehicleKey, Date.now());
+                busLastProjPos.set(vehicleKey, mapXY);
+
+                try {
+                    src.changed();
+                } catch (e1) {}
             } catch (e) {
                 console.warn('[upsertBusFeature] error', e);
             }
@@ -3638,7 +4718,6 @@
 
         // =========================================================
         // ✅ 오래된 버스 제거 (ULTRA STABLE v2)
-        // - window.busVectorSource 동기화
         // =========================================================
         function cleanupStaleBuses() {
             try {
@@ -3647,6 +4726,9 @@
                 }
 
                 if (!busVectorSource) return;
+
+                if (typeof busFeatureMap === 'undefined' || !busFeatureMap) return;
+                if (typeof busLastSeen === 'undefined' || !busLastSeen) return;
 
                 const now = Date.now();
                 for (const [vehicleKey, f] of busFeatureMap.entries()) {
@@ -3657,9 +4739,16 @@
                         } catch (e) {}
                         busFeatureMap.delete(vehicleKey);
                         busLastSeen.delete(vehicleKey);
-                        busLastPos.delete(vehicleKey);
-                        busLastProjPos.delete(vehicleKey);
-                        busLastHeading.delete(vehicleKey);
+
+                        try {
+                            busLastPos && busLastPos.delete(vehicleKey);
+                        } catch (e1) {}
+                        try {
+                            busLastProjPos && busLastProjPos.delete(vehicleKey);
+                        } catch (e2) {}
+                        try {
+                            busLastHeading && busLastHeading.delete(vehicleKey);
+                        } catch (e3) {}
                     }
                 }
             } catch (e) {
@@ -3668,40 +4757,58 @@
         }
 
         // =========================================================
-        // ✅ 버스 위치 조회 + 마커 갱신 (loadRoutePath 없어도 안 죽게 안전화 + stopIds 캐시)
-        // - 핵심 수정:
-        //   1) rid / rid2 혼용 제거 (항상 rid2를 기준으로 upsert)
-        //   2) computeHeadingRad에 넘기는 routeId도 rid2로 통일
-        //   3) loadRoutePath 결과에 stops/stopIds가 있으면 routePathIndex[routeId].stopIds에 저장
+        // ✅✅✅ (REPLACE) 버스 위치 조회 + 마커 갱신
+        // - 네 코드 기반 유지
+        // - ✅ bus-live 레이어 강제 사용(가장 중요: 버스가 다른 레이어로 새지 않게)
+        // - ✅ coordMap 1회 변환 유지(이중변환 방지)
         // =========================================================
         function fetchAndDrawBusLocations(arrivalList) {
-            ensureBusVectorLayer();
+            var map = typeof getInnerOlMap === 'function' ? getInnerOlMap() : null;
+            if (!map) return;
 
-            const map = getInnerOlMap();
-            if (!map || !busVectorSource || !window.ol || !ol.Feature || !ol.geom) return;
+            // =========================================================
+            // ✅ 0) 버스 전용 레이어/소스 강제 생성 & 고정
+            // - ensureBusVectorLayer(map) 대신 bus-live를 우선 사용
+            // - (기존 ensureBusVectorLayer가 잘못된 레이어 잡는 문제를 완전히 회피)
+            // =========================================================
+            try {
+                if (typeof ensureBusLiveLayer === 'function') {
+                    ensureBusLiveLayer(map);
+                } else {
+                    // fallback: 기존 함수라도 실행
+                    ensureBusVectorLayer(map);
+                }
+            } catch (e0) {}
+
+            // ✅ 중요: window.busVectorSource ↔ 로컬 동기화
+            try {
+                if (window && window.busVectorSource) busVectorSource = window.busVectorSource;
+            } catch (eSync) {}
+
+            if (!busVectorSource || !window.ol || !ol.Feature || !ol.geom) return;
 
             if (!arrivalList || !arrivalList.length) {
                 cleanupStaleBuses();
                 return;
             }
 
-            // ------------------------------
-            // routeId -> routeNo 인덱스
-            // ------------------------------
-            const routeNoIndex = {};
+            // ---------------------------------------------------------
+            // routeId -> routeNo
+            // ---------------------------------------------------------
+            var routeNoIndex = {};
             arrivalList.forEach(function (x) {
-                const rid = String(x.routeid || x.routeId || x.busRouteId || x.route_id || '').trim();
+                var rid = String(x.routeid || x.routeId || x.busRouteId || x.route_id || '').trim();
                 if (!rid) return;
-                const routeNoRaw = x.routeno || x.routeNo || x.routenm || x.routeNm || x.lineNo || x.busRouteNm || '';
+                var routeNoRaw = x.routeno || x.routeNo || x.routenm || x.routeNm || x.lineNo || x.busRouteNm || '';
                 routeNoIndex[rid] = routeNoRaw != null ? String(routeNoRaw) : '';
             });
 
-            // ------------------------------
+            // ---------------------------------------------------------
             // routeId set
-            // ------------------------------
-            const routeIdSet = new Set();
+            // ---------------------------------------------------------
+            var routeIdSet = new Set();
             arrivalList.forEach(function (x) {
-                const rid = String(x.routeid || x.routeId || x.busRouteId || x.route_id || '').trim();
+                var rid = String(x.routeid || x.routeId || x.busRouteId || x.route_id || '').trim();
                 if (rid) routeIdSet.add(rid);
             });
 
@@ -3710,22 +4817,33 @@
                 return;
             }
 
-            // =========================================================
-            // ✅ bus 위치 갱신 루프 (네 코드 그대로 유지 + warmRes/캐시로그 강화)
-            // =========================================================
+            // ---------------------------------------------------------
+            // map projection code
+            // ---------------------------------------------------------
+            function __getMapProjCode() {
+                try {
+                    var view = map.getView && map.getView();
+                    var proj = view && view.getProjection && view.getProjection();
+                    return (proj && proj.getCode && proj.getCode()) || (typeof mapProjection === 'string' ? mapProjection : null) || 'EPSG:3857';
+                } catch (e) {
+                    return (typeof mapProjection === 'string' ? mapProjection : null) || 'EPSG:3857';
+                }
+            }
+            var mapProjCode = __getMapProjCode();
+
             var promises = [];
 
             routeIdSet.forEach(function (rid) {
                 promises.push(
-                    safeLoadRoutePath(rid, { debug: false }) // 필요하면 debug:true
+                    // ✅ routePath warmup(있으면 유지)
+                    safeLoadRoutePath(rid, { debug: false })
                         .then(function (warmRes) {
-                            // ✅ stopIds 캐시(가능하면)
-                            hydrateRouteStopIds(rid, warmRes);
-
-                            // ✅ 전역 캐시 확인 로그
+                            try {
+                                hydrateRouteStopIds(rid, warmRes);
+                            } catch (eH) {}
                             try {
                                 console.log('[warmup] rid=', rid, 'hasIndex=', !!(window.routePathIndex && window.routePathIndex[rid]));
-                            } catch (e0) {}
+                            } catch (eLog) {}
                             return null;
                         })
                         .catch(function (eWarm) {
@@ -3744,7 +4862,6 @@
                         .then(function (res) {
                             var data = res && res.data;
 
-                            // ✅ JSON parse 안전화
                             if (typeof data === 'string') {
                                 try {
                                     data = JSON.parse(data);
@@ -3758,10 +4875,6 @@
                             var list = (body.items && body.items.item) || [];
                             if (!Array.isArray(list)) list = list ? [list] : [];
 
-                            var mapObj = getInnerOlMap();
-                            var view = mapObj && mapObj.getView && mapObj.getView();
-                            var proj = view && view.getProjection ? view.getProjection() : mapProjection;
-
                             for (var ii = 0; ii < list.length; ii++) {
                                 var b = list[ii];
 
@@ -3772,29 +4885,46 @@
                                 var lon = parseFloat(rawLon);
                                 if (!isFinite(lat) || !isFinite(lon)) continue;
 
-                                var coord = [lon, lat];
-                                if (ol.proj && ol.proj.transform && proj) {
-                                    coord = ol.proj.transform([lon, lat], 'EPSG:4326', proj);
-                                }
-
-                                // ✅ routeId는 b에서 추출 우선
                                 var rid2 = String(b.routeid || b.routeId || b.busRouteId || b.route_id || rid || '').trim();
                                 if (!rid2) continue;
 
                                 var routeNoRaw = (routeNoIndex && routeNoIndex[rid2]) || b.routeno || b.routeNo || b.routenm || b.routeNm || b.lineNo || b.busRouteNm || '';
                                 var routeNo = routeNoRaw != null ? String(routeNoRaw) : '';
 
+                                // ✅ vehicleKey는 "같은 노선 여러대"를 구분하는 핵심
                                 var vehicleKey = b.vehicleno || b.vehicleNo || b.carNo || b.busId || b.plainNo || b.vehId || b.veh_id;
                                 if (!vehicleKey) vehicleKey = rid2 + ':' + routeNo + ':' + ii;
                                 vehicleKey = String(vehicleKey);
 
-                                var headingRad = computeHeadingRad(b, lon, lat, vehicleKey, coord, rid2);
+                                // ✅ 여기서 map좌표로 1회 변환(이중변환 방지)
+                                var coordMap = [lon, lat];
+                                try {
+                                    if (window.ol && ol.proj && ol.proj.transform) {
+                                        coordMap = ol.proj.transform([lon, lat], 'EPSG:4326', mapProjCode);
+                                    }
+                                } catch (eTr) {}
 
-                                upsertBusFeature(vehicleKey, coord, b, rid2, routeNo, headingRad);
+                                var headingRad = 0;
+                                try {
+                                    // computeHeadingRad가 lon/lat 원본을 쓰는게 더 안정적이면 그대로 유지
+                                    headingRad = computeHeadingRad(b, lon, lat, vehicleKey, coordMap, rid2);
+                                } catch (eHd) {}
 
-                                busLastPos.set(vehicleKey, { lon: lon, lat: lat });
-                                busLastProjPos.set(vehicleKey, coord);
+                                // ✅ upsert에는 이미 map좌표 전달(이중 transform 방지)
+                                // ✅ upsert 내부에서 routeNo/label/rot/headingRad 를 확실히 세팅해야 "번호/방향"이 나옴
+                                upsertBusFeature(vehicleKey, coordMap, b, rid2, routeNo, headingRad);
+
+                                try {
+                                    busLastPos && busLastPos.set(vehicleKey, { lon: lon, lat: lat });
+                                } catch (eP) {}
+                                try {
+                                    busLastProjPos && busLastProjPos.set(vehicleKey, coordMap);
+                                } catch (ePP) {}
                             }
+
+                            try {
+                                busVectorSource.changed && busVectorSource.changed();
+                            } catch (eCh) {}
                         }),
                 );
             });
@@ -3802,6 +4932,24 @@
             $q.all(promises)
                 .then(function () {
                     cleanupStaleBuses();
+
+                    // ✅ 마지막 동기화/렌더
+                    try {
+                        if (window && window.busVectorSource) busVectorSource = window.busVectorSource;
+                    } catch (eS2) {}
+
+                    try {
+                        busVectorSource.changed && busVectorSource.changed();
+                    } catch (eCh2) {}
+                    try {
+                        map.renderSync ? map.renderSync() : map.render && map.render();
+                    } catch (eR) {}
+
+                    // ✅ 디버그: 현재 버스 피처 수 확인
+                    try {
+                        var n = (window.busVectorSource && window.busVectorSource.getFeatures && window.busVectorSource.getFeatures().length) || 0;
+                        console.log('[bus-live] features=', n);
+                    } catch (eDbg) {}
                 })
                 .catch(function (err) {
                     console.error('[BusController] 버스 위치 갱신 실패:', err);
@@ -4876,41 +6024,48 @@
         };
 
         // =========================================================
-        // ✅✅✅ [PASTE ONCE - CLEAN FINAL] focusStop + (필수 유틸) + nearestBus + fit lock + StopFilterOwner
-        // - 중복 없음 / ES5 호환
-        // - $timeout 있으면 사용, 없으면 setTimeout fallback
-        // - nearest bus 레이어 1대만 표시(화살표 아이콘)
-        // - 선택 정류장(__lastStopXY) + 버스(busXY) 함께 fit + 되돌림 방지 lockFit
-        // - 전체정류장(빨간점) owner layer 자동 탐지 후 숨김/복구 지원
+        // ✅✅✅ [PASTE ONCE - FINAL SINGLE BLOCK]
+        // - 중복 전부 제거한 "최종 1개 블록"
+        // - nearest(파란 화살표) : 실시간 방향 + 버스번호 텍스트
+        // - 폴리라인 fit -> 이후 버스(화살표) 중앙으로 animate
+        // - lockFit(되돌림 방지) 포함
+        // - showNearestBusArrow: stop 기준으로 가장 가까운 버스 1대 표시
+        // - (옵션) route line 기반 진행방향 계산 함수도 포함(원하면 연결 가능)
         // =========================================================
 
-        // =========================================================
+        // ===============================
         // (0) Global-ish State (딱 1번만)
-        // =========================================================
+        // ===============================
         var __lastStopXY = null;
-
-        // stop marker filter guard (네 프로젝트에서 drawStopMarker 차단용)
         var __stopFilterOn = false;
 
-        // nearest bus layer (1대만)
-        var __nearestBusSource = null;
-        var __nearestBusLayer = null;
+        // nearest bus (두꺼운 화살표 1대)
+        window.__nearestBusSource = window.__nearestBusSource || null;
+        window.__nearestBusLayer = window.__nearestBusLayer || null;
 
-        // lockFit token/timers
+        // lockFit
         var __focusBusFitToken = 0;
-        var __focusBusFitTimers = []; // ✅ 누락되어있어서 추가
+        var __focusBusFitTimers = [];
+
+        // 선택된 버스(노선) 상태 (실시간 업데이트에 쓸 수 있음)
+        window.__selectedBus = window.__selectedBus || {
+            routeId: null,
+            routeNo: null,
+            lastXY: null,
+            lastTs: 0,
+        };
 
         // $timeout 사용 여부
         var __useNgTimeout = typeof $timeout === 'function';
 
-        // =========================================================
-        // (1) timeout wrapper
-        // =========================================================
+        // ===============================
+        // (1) schedule / cancel
+        // ===============================
         function __schedule(ms, fn) {
             try {
                 if (__useNgTimeout) return $timeout(fn, ms);
             } catch (e1) {}
-            return setTimeout(fn, ms);
+            return setTimeout(fn, ms || 0);
         }
 
         function __cancelScheduled(t) {
@@ -4927,19 +6082,15 @@
 
         function __cancelAllFitTimers() {
             try {
-                if (__focusBusFitTimers && __focusBusFitTimers.length) {
-                    for (var i = 0; i < __focusBusFitTimers.length; i++) {
-                        __cancelScheduled(__focusBusFitTimers[i]);
-                    }
-                }
+                for (var i = 0; i < __focusBusFitTimers.length; i++) __cancelScheduled(__focusBusFitTimers[i]);
             } catch (e) {}
             __focusBusFitTimers = [];
-            __focusBusFitToken++; // ✅ 이전 lock 무효화
+            __focusBusFitToken++;
         }
 
-        // =========================================================
-        // (2) map getter (프로젝트별 안전)
-        // =========================================================
+        // ===============================
+        // (2) map getter (안전)
+        // ===============================
         function __getMapSafe() {
             try {
                 if (typeof getInnerOlMap === 'function') {
@@ -4947,12 +6098,12 @@
                     if (m) return m;
                 }
             } catch (e) {}
-            return window.map || window.olMap || window.__olMap || window.ngiiMap || null;
+            return window.__olMap || window.olMap || window.map || (window.ngiiMap && window.ngiiMap.map) || null;
         }
 
-        // =========================================================
-        // (3) routeNo 정규화
-        // =========================================================
+        // ===============================
+        // (3) routeNo normalize
+        // ===============================
         function __normRouteNo(v) {
             return String(v || '')
                 .replace(/\s+/g, '')
@@ -4960,88 +6111,32 @@
                 .trim();
         }
 
-        // =========================================================
-        // (4) stop 객체에서 nodeId 추출(ES5)
-        // =========================================================
-        function __pickStopNodeId(s) {
-            if (!s) return null;
-
-            // 전역으로 더 강한 함수가 있으면 우선 사용
-            try {
-                if (typeof window.__pickStopNodeId === 'function') return window.__pickStopNodeId(s);
-            } catch (e0) {}
-
-            var id = s.nodeid || s.nodeId || s.nodeID || s.stopId || s.stopid || s.id || s.ID || s.node_id || s.stop_id || s.nodeno || s.nodeNo || s.node_no || null;
-
-            id = String(id != null ? id : '').trim();
-            return id ? id : null;
-        }
-
-        // =========================================================
-        // (5) 좌표를 map XY로 정규화 (lon/lat이면 map projection으로 변환)
-        // =========================================================
+        // ===============================
+        // (4) lon/lat -> mapXY normalize
+        // ===============================
         function __toMapXY(map, xyOrLonLat) {
             try {
                 if (!map || !xyOrLonLat || xyOrLonLat.length < 2) return null;
 
-                var x = Number(xyOrLonLat[0]);
-                var y = Number(xyOrLonLat[1]);
+                var x = Number(xyOrLonLat[0]),
+                    y = Number(xyOrLonLat[1]);
                 if (!isFinite(x) || !isFinite(y)) return null;
 
-                // lon/lat처럼 보이면 변환
                 var looksLonLat = Math.abs(x) <= 180 && Math.abs(y) <= 90;
                 if (looksLonLat && window.ol && ol.proj && ol.proj.transform) {
                     var view = map.getView && map.getView();
                     var proj = view && view.getProjection && view.getProjection();
                     if (proj) return ol.proj.transform([x, y], 'EPSG:4326', proj);
                 }
-
                 return [x, y];
             } catch (e) {
                 return null;
             }
         }
 
-        // =========================================================
-        // (6) stop 좌표 저장 (__lastStopXY)
-        // =========================================================
-        function __saveLastStopXYFromStop(s) {
-            try {
-                var map = __getMapSafe();
-                if (!map || !window.ol || !ol.proj) {
-                    __lastStopXY = null;
-                    return;
-                }
-
-                var view = map.getView && map.getView();
-                var proj = view && view.getProjection && view.getProjection();
-
-                // gpsx/gpsy가 mapXY인 경우
-                var x = parseFloat(s.gpsx || s.gpsX);
-                var y = parseFloat(s.gpsy || s.gpsY);
-
-                if (isFinite(x) && isFinite(y) && (Math.abs(x) > 180 || Math.abs(y) > 90)) {
-                    __lastStopXY = [x, y];
-                    return;
-                }
-
-                // lon/lat인 경우
-                var lat2 = parseFloat(s.gpslati || s.gpsLati || s.lat || s.latitude);
-                var lon2 = parseFloat(s.gpslong || s.gpsLong || s.lon || s.longitude);
-
-                if (isFinite(lon2) && isFinite(lat2) && Math.abs(lon2) <= 180 && Math.abs(lat2) <= 90 && proj) {
-                    __lastStopXY = ol.proj.transform([lon2, lat2], 'EPSG:4326', proj);
-                } else {
-                    __lastStopXY = null;
-                }
-            } catch (e) {
-                __lastStopXY = null;
-            }
-        }
-
-        // =========================================================
-        // (7) stop+bus 같이 fit
-        // =========================================================
+        // ===============================
+        // (5) stop + bus 같이 fit
+        // ===============================
         function __fitStopAndBus(map, stopXY, busXY) {
             try {
                 if (!map || !busXY) return false;
@@ -5054,17 +6149,14 @@
                 }
 
                 var extent = ol.extent.boundingExtent([stopXY, busXY]);
-
                 var w = extent[2] - extent[0];
                 var h = extent[3] - extent[1];
                 var pad = Math.max(w, h) * 0.35;
-                if (isFinite(pad) && pad > 0) {
-                    extent = [extent[0] - pad, extent[1] - pad, extent[2] + pad, extent[3] + pad];
-                }
+                if (isFinite(pad) && pad > 0) extent = [extent[0] - pad, extent[1] - pad, extent[2] + pad, extent[3] + pad];
 
                 view.fit(extent, {
                     duration: 240,
-                    padding: [90, 420, 90, 40],
+                    padding: [90, 420, 90, 40], // 오른쪽 패널 고려
                     maxZoom: 19,
                 });
                 return true;
@@ -5073,14 +6165,13 @@
             }
         }
 
-        // =========================================================
-        // ✅✅✅ (7.5) lockFit (되돌림 방지)
-        // =========================================================
+        // ===============================
+        // (6) lockFit (되돌림 방지)
+        // ===============================
         function __lockFit(map, stopXY, busXY) {
             if (!map || !busXY) return;
 
             __cancelAllFitTimers();
-
             __focusBusFitToken++;
             var myToken = __focusBusFitToken;
 
@@ -5099,10 +6190,9 @@
             sched(2300);
         }
 
-        // =========================================================
-        // ✅✅✅ (A) busVectorLayer(얇은 화살표) ON/OFF 제어 추가
-        // - 버스번호 클릭 시 얇은 화살표 숨기고(nearest만 남김)
-        // =========================================================
+        // ===============================
+        // (7) busVectorLayer 얇은 화살표 ON/OFF
+        // ===============================
         function __setBusLayerVisible(v) {
             try {
                 if (typeof busVectorLayer !== 'undefined' && busVectorLayer && busVectorLayer.setVisible) {
@@ -5112,391 +6202,468 @@
         }
 
         // =========================================================
-        // ✅✅✅ (B) nearest bus layer 보장 (두꺼운 화살표 1대)
+        // ✅✅✅ (REPLACE) ensureNearestBusLayer
+        // - /bus_arrow.svg 아이콘 + 번호 Text
+        // - 줌에 따른 크기 자동 조절(resolution 기반)
         // =========================================================
-        function __makeArrowIconDataUrl(fill) {
-            fill = fill || '#2563eb';
-            var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">' + '<path d="M6 30h32V20l20 12-20 12V34H6z" fill="' + fill + '"/>' + '</svg>';
-            var encoded = btoa(unescape(encodeURIComponent(svg)));
-            return 'data:image/svg+xml;base64,' + encoded;
-        }
-
-        // =========================================================
-        // ✅✅✅ [PASTE ONCE - CLEAN FINAL]
-        // Common Utils + NearestBusLayer + lockFit + (필수 전역 상태)
-        // - 이 블록은 파일에 "1번만" 있어야 함
-        // - ES5 호환
-        // =========================================================
-
-        // ---------------------------------------------------------
-        // (0) Global State (딱 1번만)
-        // ---------------------------------------------------------
-        var __lastStopXY = null;
-        var __stopFilterOn = false;
-
-        // nearest bus (두꺼운 화살표 1대)
-        var __nearestBusSource = null;
-        var __nearestBusLayer = null;
-
-        // lockFit token/timers
-        var __focusBusFitToken = 0;
-        var __focusBusFitTimers = [];
-
-        // $timeout 사용 여부
-        var __useNgTimeout = typeof $timeout === 'function';
-
-        // ---------------------------------------------------------
-        // (1) schedule / cancel wrappers
-        // ---------------------------------------------------------
-        function __schedule(ms, fn) {
-            try {
-                if (__useNgTimeout) return $timeout(fn, ms);
-            } catch (e1) {}
-            return setTimeout(fn, ms);
-        }
-
-        function __cancelScheduled(t) {
-            try {
-                if (__useNgTimeout) {
-                    $timeout.cancel(t);
-                    return;
-                }
-            } catch (e1) {}
-            try {
-                clearTimeout(t);
-            } catch (e2) {}
-        }
-
-        function __cancelAllFitTimers() {
-            try {
-                if (__focusBusFitTimers && __focusBusFitTimers.length) {
-                    for (var i = 0; i < __focusBusFitTimers.length; i++) {
-                        __cancelScheduled(__focusBusFitTimers[i]);
-                    }
-                }
-            } catch (e) {}
-            __focusBusFitTimers = [];
-            __focusBusFitToken++; // ✅ 이전 lock 무효화
-        }
-
-        // ---------------------------------------------------------
-        // (2) map getter (프로젝트별 안전)
-        // ---------------------------------------------------------
-        function __getMapSafe() {
-            try {
-                if (typeof getInnerOlMap === 'function') {
-                    var m = getInnerOlMap();
-                    if (m) return m;
-                }
-            } catch (e) {}
-            return window.__olMap || window.olMap || window.map || window.ngiiMap || null;
-        }
-
-        // ---------------------------------------------------------
-        // (3) normalize routeNo
-        // ---------------------------------------------------------
-        function __normRouteNo(v) {
-            return String(v || '')
-                .replace(/\s+/g, '')
-                .replace(/번/g, '')
-                .trim();
-        }
-
-        // ---------------------------------------------------------
-        // (4) XY normalize: lon/lat -> map projection
-        // ---------------------------------------------------------
-        function __toMapXY(map, xyOrLonLat) {
-            try {
-                if (!map || !xyOrLonLat || xyOrLonLat.length < 2) return null;
-
-                var x = Number(xyOrLonLat[0]);
-                var y = Number(xyOrLonLat[1]);
-                if (!isFinite(x) || !isFinite(y)) return null;
-
-                // lon/lat처럼 보이면 transform
-                var looksLonLat = Math.abs(x) <= 180 && Math.abs(y) <= 90;
-                if (looksLonLat && window.ol && ol.proj && ol.proj.transform) {
-                    var view = map.getView && map.getView();
-                    var proj = view && view.getProjection && view.getProjection();
-                    if (proj) return ol.proj.transform([x, y], 'EPSG:4326', proj);
-                }
-
-                return [x, y];
-            } catch (e) {
-                return null;
-            }
-        }
-
-        // ---------------------------------------------------------
-        // (5) fit stop + bus
-        // ---------------------------------------------------------
-        function __fitStopAndBus(map, stopXY, busXY) {
-            try {
-                if (!map || !busXY) return false;
-                var view = map.getView && map.getView();
-                if (!view) return false;
-
-                if (!stopXY || !window.ol || !ol.extent) {
-                    view.animate({ center: busXY, zoom: 18, duration: 220 });
-                    return true;
-                }
-
-                var extent = ol.extent.boundingExtent([stopXY, busXY]);
-
-                var w = extent[2] - extent[0];
-                var h = extent[3] - extent[1];
-                var pad = Math.max(w, h) * 0.35;
-
-                if (isFinite(pad) && pad > 0) {
-                    extent = [extent[0] - pad, extent[1] - pad, extent[2] + pad, extent[3] + pad];
-                }
-
-                view.fit(extent, {
-                    duration: 240,
-                    padding: [90, 420, 90, 40],
-                    maxZoom: 19,
-                });
-                return true;
-            } catch (e) {
-                return false;
-            }
-        }
-
-        // ---------------------------------------------------------
-        // (6) 되돌림 방지 lockFit (여러 타이밍 재-fit)
-        // ---------------------------------------------------------
-        function __lockFit(map, stopXY, busXY) {
-            if (!map || !busXY) return;
-
-            __focusBusFitToken++;
-            var myToken = __focusBusFitToken;
-
-            __cancelAllFitTimers();
-            __focusBusFitToken = myToken; // cancel이 token++ 했으니 되돌림
-
-            function sched(ms) {
-                var t = __schedule(ms, function () {
-                    if (myToken !== __focusBusFitToken) return;
-                    __fitStopAndBus(map, stopXY, busXY);
-                });
-                __focusBusFitTimers.push(t);
-            }
-
-            sched(0);
-            sched(250);
-            sched(900);
-            sched(1600);
-            sched(2300);
-        }
-
-        // ---------------------------------------------------------
-        // (7) SVG 화살표 아이콘 DataURL
-        // - base64가 안 먹는 환경이 있으면 utf8 data url로 fallback
-        // ---------------------------------------------------------
-        function __makeArrowSvgUtf8(fill) {
-            fill = fill || '#2563eb';
-            return 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 64 64">' + '<path d="M6 30h30V18l22 14-22 14V34H6z" fill="' + fill + '"/>' + '</svg>');
-        }
-
-        function __makeArrowIconDataUrl(fill) {
-            fill = fill || '#2563eb';
-            try {
-                var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 64 64">' + '<path d="M6 30h30V18l22 14-22 14V34H6z" fill="' + fill + '"/>' + '</svg>';
-
-                var encoded = btoa(unescape(encodeURIComponent(svg)));
-                return 'data:image/svg+xml;base64,' + encoded;
-            } catch (e) {
-                return __makeArrowSvgUtf8(fill);
-            }
-        }
-
-        // ---------------------------------------------------------
-        // (8) ✅✅✅ nearest bus 레이어(두꺼운 화살표 1대만 + 번호 텍스트)
-        // - ✅ __makeArrowIconDataUrl 없어도 "원+번호"로 무조건 보이게 fallback
-        // - ✅ Style/Icon/Text 캐싱(성능/안정성)
-        // - ✅ routeNo 키 다양 흡수 + 글자 정규화
-        // - ✅ 이미 있으면 현재 map에 재-add 보장
-        // ---------------------------------------------------------
         function ensureNearestBusLayer(map) {
-            map = map || (typeof __getMapSafe === 'function' ? __getMapSafe() : null);
-            if (!map || !window.ol || !ol.layer || !ol.source || !ol.style) return false;
+            map = map || __getMapSafe();
+            if (!map || !window.ol || !ol.layer || !ol.source || !ol.style || !ol.geom) return false;
 
-            // 이미 있으면 map에 재-add만
+            var arrowSrc = '/bus_arrow.svg';
+
+            // SVG preload
+            if (!window.__nearestBusArrowImg) {
+                window.__nearestBusArrowImg = new Image();
+                window.__nearestBusArrowImgState = 1; // 1 LOADING, 2 LOADED, 3 ERROR
+
+                window.__nearestBusArrowImg.onload = function () {
+                    window.__nearestBusArrowImgState = 2;
+                    try {
+                        if (window.__nearestBusLayer && window.__nearestBusLayer.changed) window.__nearestBusLayer.changed();
+                        map.renderSync ? map.renderSync() : map.render && map.render();
+                    } catch (e) {}
+                };
+                window.__nearestBusArrowImg.onerror = function () {
+                    window.__nearestBusArrowImgState = 3;
+                    try {
+                        if (window.__nearestBusLayer && window.__nearestBusLayer.changed) window.__nearestBusLayer.changed();
+                        map.renderSync ? map.renderSync() : map.render && map.render();
+                    } catch (e) {}
+                };
+
+                try {
+                    window.__nearestBusArrowImg.src = arrowSrc;
+                } catch (e0) {
+                    window.__nearestBusArrowImgState = 3;
+                }
+            }
+
+            // 이미 존재하면 map에 보장
             if (window.__nearestBusLayer && window.__nearestBusSource) {
                 try {
                     var arr = map.getLayers && map.getLayers().getArray ? map.getLayers().getArray() : [];
                     if (arr && arr.indexOf(window.__nearestBusLayer) === -1) map.addLayer(window.__nearestBusLayer);
-                } catch (e0) {}
+                    window.__nearestBusLayer.setVisible(true);
+                    window.__nearestBusLayer.setZIndex && window.__nearestBusLayer.setZIndex(99999);
+                    window.__nearestBusLayer.changed && window.__nearestBusLayer.changed();
+                } catch (e1) {}
                 return true;
             }
 
             window.__nearestBusSource = new ol.source.Vector();
 
-            // ✅ 방향 보정(네 프로젝트 화살표 기준)
-            var rotOffsetRad = Math.PI / 2;
+            var styleCache = {};
+            var rotOffsetRad = Math.PI / 2; // 네 프로젝트 기존 유지용(필요 없으면 0으로)
 
-            // ---------------------------------------------------------
-            // ✅ 아이콘 src 만들기(가능하면) + 실패하면 fallback로 원형 마커
-            // ---------------------------------------------------------
-            var arrowSrc = null;
-            try {
-                if (typeof __makeArrowIconDataUrl === 'function') arrowSrc = __makeArrowIconDataUrl('#2563eb');
-            } catch (eA) {
-                arrowSrc = null;
-            }
-            // dataURL 형태가 아니거나 너무 짧으면 실패로 간주
-            if (!arrowSrc || typeof arrowSrc !== 'string' || arrowSrc.length < 30) arrowSrc = null;
-
-            // ---------------------------------------------------------
-            // ✅ 스타일 캐시(회전 값/번호별로 재사용)
-            // ---------------------------------------------------------
-            var __styleCache = Object.create(null);
-
-            function _normRouteNo(v) {
-                return String(v || '')
+            function normRno(v) {
+                return String(v == null ? '' : v)
                     .replace(/\s+/g, '')
-                    .replace(/번/g, '')
-                    .trim();
+                    .replace(/번/g, '');
             }
 
-            function _pickRouteNoFromFeature(feature) {
-                if (!feature || !feature.get) return '';
-                var v = '';
-                try {
-                    v =
-                        feature.get('routeNo') ||
-                        feature.get('routeno') ||
-                        feature.get('route_no') ||
-                        feature.get('routeNoNm') ||
-                        feature.get('route_no_nm') ||
-                        feature.get('label') ||
-                        (feature.get('bus') && (feature.get('bus').routeno || feature.get('bus').routeNo || feature.get('bus').route_no || feature.get('bus').routeNoNm)) ||
-                        '';
-                } catch (e) {
-                    v = '';
-                }
-                return _normRouteNo(v);
+            function computeScaleByResolution(res) {
+                if (!res || !isFinite(res)) res = 1;
+                var baseRes = 2.0;
+                var baseScale = 0.5;
+                var k = Math.sqrt(baseRes / Math.max(0.000001, res));
+                var s = baseScale * k;
+                if (s < 0.22) s = 0.22;
+                if (s > 0.75) s = 0.75;
+                return s;
             }
 
-            // ✅ fallback marker(아이콘 실패해도 무조건 보이는 원형+번호 배지)
-            function _makeFallbackStyle(rno) {
-                return new ol.style.Style({
-                    image: new ol.style.Circle({
-                        radius: 11,
-                        fill: new ol.style.Fill({ color: '#2563eb' }),
-                        stroke: new ol.style.Stroke({ color: '#ffffff', width: 2 }),
-                    }),
-                    text: rno
-                        ? new ol.style.Text({
-                              text: rno,
-                              font: 'bold 12px sans-serif',
-                              offsetY: 0,
-                              fill: new ol.style.Fill({ color: '#ffffff' }),
-                              stroke: new ol.style.Stroke({ color: 'rgba(0,0,0,0.45)', width: 3 }),
-                          })
-                        : undefined,
-                });
-            }
-
-            // ✅ arrow + text style
-            function _makeArrowStyle(rot, rno) {
-                // 아이콘은 캐시해서 재사용 (회전만 다르게)
-                return new ol.style.Style({
+            function buildBundle(rot, rno, scale) {
+                var iconStyle = new ol.style.Style({
                     image: new ol.style.Icon({
                         src: arrowSrc,
-                        scale: 0.95,
+                        scale: scale,
                         rotation: rot,
                         rotateWithView: true,
                         anchor: [0.5, 0.5],
                         anchorXUnits: 'fraction',
                         anchorYUnits: 'fraction',
                     }),
-                    text: rno
-                        ? new ol.style.Text({
-                              text: rno,
-                              font: 'bold 13px sans-serif',
-                              // ✅ 화살표 중심에 잘 보이게(묻히면 -10~-2 사이로 조절)
-                              offsetY: -2,
-                              fill: new ol.style.Fill({ color: '#ffffff' }),
-                              stroke: new ol.style.Stroke({ color: 'rgba(0,0,0,0.45)', width: 3 }),
-                          })
-                        : undefined,
                 });
+
+                var triStyle = new ol.style.Style({
+                    image: new ol.style.RegularShape({
+                        points: 3,
+                        radius: Math.max(7, Math.round(12 * scale)),
+                        rotation: rot,
+                        rotateWithView: true,
+                        fill: new ol.style.Fill({ color: 'rgba(37,99,235,0.95)' }),
+                        stroke: new ol.style.Stroke({ color: 'rgba(255,255,255,0.95)', width: 2 }),
+                    }),
+                });
+
+                var textStyle = new ol.style.Style({
+                    text: new ol.style.Text({
+                        text: rno || '',
+                        font: 'bold 13px sans-serif',
+                        offsetY: -Math.max(14, Math.round(18 * scale)),
+                        fill: new ol.style.Fill({ color: '#111' }),
+                        stroke: new ol.style.Stroke({ color: 'rgba(255,255,255,0.95)', width: 4 }),
+                    }),
+                });
+
+                return { iconStyle: iconStyle, triStyle: triStyle, textStyle: textStyle };
             }
 
             window.__nearestBusLayer = new ol.layer.Vector({
                 source: window.__nearestBusSource,
-                zIndex: 9999,
-                style: function (feature) {
-                    // rot
+                zIndex: 99999,
+                declutter: true,
+                style: function (feature, resolution) {
                     var rot = 0;
                     try {
-                        rot = Number(feature && feature.get && feature.get('rot'));
-                    } catch (e1) {
-                        rot = 0;
-                    }
+                        rot = Number(feature.get('rot'));
+                        if (!isFinite(rot)) rot = Number(feature.get('headingRad'));
+                    } catch (e2) {}
                     if (!isFinite(rot)) rot = 0;
                     rot = rot + rotOffsetRad;
 
-                    // routeNo
-                    var rno = _pickRouteNoFromFeature(feature);
+                    var rno = '';
+                    try {
+                        rno = normRno(feature.get('routeNo') || feature.get('routeno') || feature.get('label') || '');
+                    } catch (e3) {}
 
-                    // 캐시 키(회전은 너무 세분화되면 캐시 폭발하니까 반올림)
-                    var rotKey = Math.round(rot * 100) / 100; // 0.01rad 단위
-                    var key = (arrowSrc ? 'A|' : 'F|') + rotKey + '|' + rno;
+                    var scale = computeScaleByResolution(resolution);
 
-                    if (__styleCache[key]) return __styleCache[key];
+                    var rotBucket = Math.round(rot * 10) / 10;
+                    var scaleBucket = Math.round(scale * 20) / 20;
+                    var key = (rno || 'BUS') + '|' + rotBucket + '|' + scaleBucket;
 
-                    // arrowSrc 없으면 fallback
-                    var st = arrowSrc ? _makeArrowStyle(rotKey, rno) : _makeFallbackStyle(rno);
-                    __styleCache[key] = st;
-                    return st;
+                    if (!styleCache[key]) styleCache[key] = buildBundle(rot, rno, scale);
+                    var b = styleCache[key];
+
+                    var st = window.__nearestBusArrowImgState; // 1/2/3
+                    if (st === 2) return [b.iconStyle, b.textStyle];
+                    if (st === 3) return [b.triStyle, b.textStyle];
+                    return [b.triStyle, b.textStyle]; // LOADING도 삼각형으로 우선 표시
                 },
             });
 
             try {
                 window.__nearestBusLayer.set('tag', 'nearest-bus');
-            } catch (e3) {}
-
-            // ✅ map에 확실히 add
+            } catch (e4) {}
             try {
                 map.addLayer(window.__nearestBusLayer);
-            } catch (e4) {}
-
-            // ✅ 강제 리렌더
-            try {
-                window.__nearestBusSource.changed && window.__nearestBusSource.changed();
-            } catch (e5) {}
-            try {
+                window.__nearestBusLayer.setVisible(true);
+                window.__nearestBusLayer.setZIndex && window.__nearestBusLayer.setZIndex(99999);
                 window.__nearestBusLayer.changed && window.__nearestBusLayer.changed();
-            } catch (e6) {}
-            try {
                 map.renderSync ? map.renderSync() : map.render && map.render();
-            } catch (e7) {}
+            } catch (e5) {}
 
             return true;
         }
+        window.ensureNearestBusLayer = ensureNearestBusLayer;
+
+        // =========================================================
+        // ✅✅✅ (ADD) showNearestBusArrow(stopMapXY, opt)
+        // - stop 기준으로 busVectorSource에서 가장 가까운 버스 1대 pick
+        // - nearest 소스에 1개만 유지
+        // - opt.routeId/routeNo를 주면 해당 노선만 필터 가능
+        // - opt.fit=true면: 폴리라인 fit 후 버스 중앙(별도 함수 연결 가능)
+        // =========================================================
+        function showNearestBusArrow(stopMapXY, opt) {
+            opt = opt || {};
+
+            try {
+                var map = __getMapSafe();
+                if (!map) return false;
+
+                if (!stopMapXY || stopMapXY.length < 2) return false;
+                if (!ensureNearestBusLayer(map)) return false;
+
+                // ✅ 실시간 버스 점 소스 (프로젝트 변수명에 맞춰 최대한 흡수)
+                var src = window.busVectorSource || (typeof busVectorSource !== 'undefined' ? busVectorSource : null) || (window.busVectorLayer && window.busVectorLayer.getSource ? window.busVectorLayer.getSource() : null);
+
+                if (!src || !src.getFeatures) return false;
+
+                var feats = src.getFeatures() || [];
+                if (!feats.length) return false;
+
+                var wantRid = String(opt.routeId || window.__selectedBus.routeId || '').trim();
+                var wantRno = __normRouteNo(opt.routeNo || window.__selectedBus.routeNo || '');
+
+                var best = null;
+                var bestD2 = Infinity;
+
+                for (var i = 0; i < feats.length; i++) {
+                    var f = feats[i];
+                    var g = f && f.getGeometry && f.getGeometry();
+                    if (!g || !g.getCoordinates) continue;
+
+                    // route 필터(있을 때만)
+                    var rid = String(f.get('routeId') || f.get('routeid') || f.get('busRouteId') || (f.get('bus') && (f.get('bus').routeid || f.get('bus').routeId || f.get('bus').busRouteId)) || '').trim();
+
+                    var rno = __normRouteNo(f.get('routeNo') || f.get('routeno') || f.get('route_no') || (f.get('bus') && (f.get('bus').routeNo || f.get('bus').routeno || f.get('bus').route_no)) || '');
+
+                    var match = true;
+                    if (wantRid) match = rid && rid === wantRid;
+                    else if (wantRno) match = rno && rno === wantRno;
+
+                    if (!match) continue;
+
+                    var xy = g.getCoordinates();
+                    if (!xy || xy.length < 2) continue;
+
+                    var dx = xy[0] - stopMapXY[0];
+                    var dy = xy[1] - stopMapXY[1];
+                    var d2 = dx * dx + dy * dy;
+
+                    if (d2 < bestD2) {
+                        bestD2 = d2;
+                        best = f;
+                    }
+                }
+
+                // 필터로 못 찾았으면: 그냥 가장 가까운 버스 1대라도
+                if (!best) {
+                    for (var j = 0; j < feats.length; j++) {
+                        var f2 = feats[j];
+                        var g2 = f2 && f2.getGeometry && f2.getGeometry();
+                        if (!g2 || !g2.getCoordinates) continue;
+                        var xy2 = g2.getCoordinates();
+                        if (!xy2 || xy2.length < 2) continue;
+                        var dx2 = xy2[0] - stopMapXY[0],
+                            dy2 = xy2[1] - stopMapXY[1];
+                        var d22 = dx2 * dx2 + dy2 * dy2;
+                        if (d22 < bestD2) {
+                            bestD2 = d22;
+                            best = f2;
+                        }
+                    }
+                }
+
+                if (!best) return false;
+
+                // nearest 소스에는 1개만
+                window.__nearestBusSource.clear(true);
+
+                var bg = best.getGeometry();
+                var busXY = bg.getCoordinates();
+
+                var nf = new ol.Feature({ geometry: new ol.geom.Point(busXY) });
+
+                // ✅ headingRad/heading 지원
+                var hdg = best.get('headingRad');
+                if (!isFinite(Number(hdg))) {
+                    var h = best.get('heading') || best.get('hdg') || best.get('dir') || best.get('angle') || (best.get('bus') && (best.get('bus').heading || best.get('bus').hdg || best.get('bus').dir || best.get('bus').angle));
+                    hdg = Number(h);
+                    if (!isFinite(hdg)) hdg = 0;
+                    // degree면 rad로
+                    if (Math.abs(hdg) > 6.283) hdg = (hdg * Math.PI) / 180;
+                }
+
+                var rno2 = best.get('routeNo') || best.get('routeno') || (best.get('bus') && best.get('bus').routeNo) || '';
+                rno2 = __normRouteNo(rno2);
+
+                var rid2 = String(best.get('routeId') || best.get('routeid') || best.get('busRouteId') || (best.get('bus') && (best.get('bus').routeid || best.get('bus').routeId || best.get('bus').busRouteId)) || '').trim();
+
+                nf.set('rot', Number(hdg) || 0);
+                nf.set('headingRad', Number(hdg) || 0);
+                nf.set('routeNo', rno2);
+                nf.set('routeno', rno2);
+                nf.set('label', rno2 || 'BUS');
+                nf.set('routeId', rid2);
+                nf.set('routeid', rid2);
+                nf.set('bus', best.get('bus') || null);
+
+                window.__nearestBusSource.addFeature(nf);
+
+                // 선택 버스 상태 저장(실시간 중앙 유지/추적에 유용)
+                window.__selectedBus.routeId = rid2 || window.__selectedBus.routeId;
+                window.__selectedBus.routeNo = rno2 || window.__selectedBus.routeNo;
+                window.__selectedBus.lastXY = busXY;
+                window.__selectedBus.lastTs = Date.now();
+
+                // ✅ “사용자 시점 중앙”으로 보이게: stop+bus lockFit (원하면 stop만/버스만으로 변경 가능)
+                __lockFit(map, stopMapXY, busXY);
+
+                try {
+                    map.renderSync ? map.renderSync() : map.render && map.render();
+                } catch (eR) {}
+                return true;
+            } catch (e) {
+                console.warn('[showNearestBusArrow] error', e);
+                return false;
+            }
+        }
+        window.showNearestBusArrow = showNearestBusArrow;
+
+        // =========================================================
+        // ✅✅✅ (ADD) route fit -> then bus center
+        // - 폴리라인 feature(extent)로 fit 한 뒤, busXY로 center animate
+        // - focusBus 성공 draw 이후에 호출하면 됨
+        // =========================================================
+        function __fitRouteThenCenterBus(map, routeLineFeature, busXY) {
+            try {
+                if (!map || !map.getView) return;
+                var view = map.getView();
+
+                if (routeLineFeature && routeLineFeature.getGeometry) {
+                    var g = routeLineFeature.getGeometry();
+                    if (g && g.getExtent) {
+                        view.fit(g.getExtent(), {
+                            padding: [40, 360, 40, 40],
+                            duration: 200,
+                            maxZoom: 17,
+                        });
+                    }
+                }
+
+                if (busXY && busXY.length === 2) {
+                    setTimeout(function () {
+                        try {
+                            view.animate({ center: busXY, duration: 220 });
+                        } catch (e2) {}
+                    }, 220);
+                }
+            } catch (e) {}
+        }
+        window.__fitRouteThenCenterBus = __fitRouteThenCenterBus;
 
         // ---------------------------------------------------------
-        // (11) ✅ 같은 노선 후보 중 "정류장에 가장 가까운 1대" 선택
+        // ✅✅✅ (REPLACE) __pickNearestBusFeature
+        // - 1순위: window.busVectorSource (단, feature가 실제로 있을 때만)
+        // - 2순위: map 레이어(tag='bus')에서 REAL source 찾아 사용 (너 로그의 feats=3087 여기)
+        // - ClusterSource면 내부 source/feature 풀기
         // ---------------------------------------------------------
         function __pickNearestBusFeature(map, routeId, routeNoNorm, stopXY) {
             try {
                 if (!map) return null;
 
-                // ✅ busVectorSource 확보(window/로컬 혼용)
+                // -------------------------
+                // map projection code
+                // -------------------------
+                function __getMapProjCode() {
+                    try {
+                        var view = map.getView && map.getView();
+                        var proj = view && view.getProjection && view.getProjection();
+                        return (proj && proj.getCode && proj.getCode()) || 'EPSG:3857';
+                    } catch (e) {}
+                    return 'EPSG:3857';
+                }
+                var mapProj = __getMapProjCode();
+
+                // -------------------------
+                // unwrap cluster/source variants
+                // -------------------------
+                function __unwrapSource(src) {
+                    try {
+                        if (!src) return null;
+
+                        // ClusterSource: getSource()
+                        if (typeof src.getSource === 'function') {
+                            var inner = src.getSource();
+                            if (inner && typeof inner.getFeatures === 'function') return inner;
+                        }
+
+                        // custom wrappers: getInnerSource/getClusterSource 등
+                        if (typeof src.getInnerSource === 'function') {
+                            var inner2 = src.getInnerSource();
+                            if (inner2 && typeof inner2.getFeatures === 'function') return inner2;
+                        }
+                        if (typeof src.getClusterSource === 'function') {
+                            var inner3 = src.getClusterSource();
+                            if (inner3 && typeof inner3.getFeatures === 'function') return inner3;
+                        }
+                    } catch (e0) {}
+                    return src;
+                }
+
+                // -------------------------
+                // find REAL bus source from map layer(tag='bus')
+                // -------------------------
+                function __findBusSourceFromMap() {
+                    try {
+                        var layers = map.getLayers && map.getLayers().getArray ? map.getLayers().getArray() : [];
+                        if (!layers || !layers.length) return null;
+
+                        for (var i = layers.length - 1; i >= 0; i--) {
+                            var ly = layers[i];
+                            if (!ly || !ly.get || !ly.getSource) continue;
+
+                            var tag = String(ly.get('tag') || '').toLowerCase();
+                            if (tag !== 'bus') continue;
+
+                            var s = ly.getSource();
+                            s = __unwrapSource(s);
+
+                            if (s && typeof s.getFeatures === 'function') return s;
+                        }
+                    } catch (e1) {}
+                    return null;
+                }
+
+                // -------------------------
+                // ✅ 1) src 결정: window.busVectorSource는 "feature가 있을 때만" 사용
+                // -------------------------
                 var src = null;
                 try {
-                    if (window && window.busVectorSource && window.busVectorSource.getFeatures) src = window.busVectorSource;
-                } catch (e0) {}
-                try {
-                    if (!src && typeof busVectorSource !== 'undefined' && busVectorSource && busVectorSource.getFeatures) src = busVectorSource;
-                } catch (e1) {}
+                    if (window.busVectorSource && typeof window.busVectorSource.getFeatures === 'function') {
+                        var n0 = (window.busVectorSource.getFeatures() || []).length;
+                        if (n0 > 0) src = window.busVectorSource;
+                    }
+                } catch (e2) {}
 
-                if (!src || !src.getFeatures) return null;
+                // ✅ 2) fallback: REAL bus layer source (너가 feats=3087 찍힌 그거)
+                if (!src) src = __findBusSourceFromMap();
+
+                src = __unwrapSource(src);
+
+                if (!src || typeof src.getFeatures !== 'function') {
+                    console.warn('[__pickNearestBusFeature] bus source missing (no usable source)');
+                    return null;
+                }
 
                 var feats = src.getFeatures() || [];
+                if (!feats.length) {
+                    console.warn('[__pickNearestBusFeature] bus features empty (src ok, but 0 feats)');
+                    return null;
+                }
+
+                // -------------------------
+                // cluster feature.get('features') flatten
+                // -------------------------
+                function __flatten(list) {
+                    var out = [];
+                    for (var i = 0; i < list.length; i++) {
+                        var f = list[i];
+                        if (!f || !f.get) continue;
+
+                        var inner = null;
+                        try {
+                            inner = f.get('features');
+                        } catch (e) {}
+
+                        if (Array.isArray(inner) && inner.length) {
+                            for (var k = 0; k < inner.length; k++) {
+                                if (inner[k] && inner[k].get) out.push(inner[k]);
+                            }
+                        } else {
+                            out.push(f);
+                        }
+                    }
+                    return out;
+                }
+
+                feats = __flatten(feats);
                 if (!feats.length) return null;
+
+                // -------------------------
+                // normalize helpers
+                // -------------------------
+                function __normNo(v) {
+                    try {
+                        if (typeof __normRouteNo === 'function') return __normRouteNo(v);
+                    } catch (e0) {}
+                    return String(v == null ? '' : v)
+                        .replace(/\s+/g, '')
+                        .replace(/번/g, '');
+                }
 
                 var rid = String(routeId || '').trim();
                 var rno = String(routeNoNorm || '').trim();
@@ -5507,16 +6674,8 @@
                     try {
                         bus = f.get('bus');
                     } catch (e) {}
-                    var v =
-                        f.get('routeid') ||
-                        f.get('routeId') ||
-                        f.get('busRouteId') ||
-                        f.get('route_id') ||
-                        f.get('busrouteid') ||
-                        f.get('bus_route_id') ||
-                        (bus && (bus.routeid || bus.routeId || bus.busRouteId || bus.route_id || bus.busrouteid || bus.bus_route_id)) ||
-                        '';
-                    return String(v || '').trim();
+                    var v = f.get('routeId') || f.get('routeid') || f.get('busRouteId') || f.get('route_id') || (bus && (bus.routeId || bus.routeid || bus.busRouteId || bus.route_id)) || '';
+                    return String(v == null ? '' : v).trim();
                 }
 
                 function getFeatureRouteNoNorm(f) {
@@ -5525,82 +6684,90 @@
                     try {
                         bus = f.get('bus');
                     } catch (e) {}
-                    var v = f.get('routeNo') || f.get('routeno') || f.get('route_no') || f.get('routeNoNm') || f.get('route_no_nm') || (bus && (bus.routeno || bus.routeNo || bus.route_no || bus.routeNoNm || bus.route_no_nm)) || '';
-                    try {
-                        if (typeof __normRouteNo === 'function') return __normRouteNo(v);
-                    } catch (e2) {}
-                    return String(v || '')
-                        .replace(/\s+/g, '')
-                        .replace(/번/g, '');
+                    var v = f.get('routeNo') || f.get('routeno') || f.get('route_no') || f.get('routeNoNm') || (bus && (bus.routeNo || bus.routeno || bus.route_no || bus.routeNoNm)) || '';
+                    return __normNo(v);
                 }
 
-                function toMapXYSafe(map, rawXY) {
+                // -------------------------
+                // coords → map coords
+                // -------------------------
+                function toMapXY(rawXY) {
                     if (!rawXY || rawXY.length < 2) return null;
-                    var x = Number(rawXY[0]);
-                    var y = Number(rawXY[1]);
+                    var x = Number(rawXY[0]),
+                        y = Number(rawXY[1]);
                     if (!isFinite(x) || !isFinite(y)) return null;
 
+                    // lon/lat로 보이면 변환
                     var looksLonLat = Math.abs(x) <= 180 && Math.abs(y) <= 90;
-                    if (!looksLonLat) return [x, y];
-
-                    try {
-                        var view = map.getView && map.getView();
-                        var proj = view && view.getProjection && view.getProjection();
-                        var code = (proj && proj.getCode ? proj.getCode() : 'EPSG:3857') || 'EPSG:3857';
-                        if (window.ol && ol.proj && ol.proj.transform) {
-                            return ol.proj.transform([x, y], 'EPSG:4326', code);
-                        }
-                    } catch (e3) {}
+                    if (looksLonLat) {
+                        try {
+                            if (window.ol && ol.proj && ol.proj.transform) {
+                                return ol.proj.transform([x, y], 'EPSG:4326', mapProj);
+                            }
+                        } catch (e1) {}
+                    }
                     return [x, y];
                 }
 
-                // ✅ 후보 수집
+                var stopXYMap = stopXY ? toMapXY(stopXY) : null;
+
+                function __getFeatureXY(f) {
+                    try {
+                        var g = f.getGeometry && f.getGeometry();
+                        var raw = g && g.getCoordinates ? g.getCoordinates() : null;
+                        return toMapXY(raw);
+                    } catch (e) {
+                        return null;
+                    }
+                }
+
+                // -------------------------
+                // 후보 수집 (routeId 우선, 없으면 routeNo)
+                // -------------------------
                 var candidates = [];
                 for (var i = 0; i < feats.length; i++) {
                     var f = feats[i];
                     if (!f || !f.get) continue;
 
-                    var fRouteId = getFeatureRouteId(f);
-                    var fRouteNo = getFeatureRouteNoNorm(f);
+                    var fRid = getFeatureRouteId(f);
+                    var fRno = getFeatureRouteNoNorm(f);
 
                     var ok = false;
-                    if (rid && fRouteId) ok = fRouteId === rid;
-                    else if (rno && fRouteNo) ok = fRouteNo === rno;
+                    if (rid) ok = fRid && String(fRid) === String(rid);
+                    else if (rno) ok = fRno && String(fRno) === String(rno);
 
                     if (ok) candidates.push(f);
                 }
-                if (!candidates.length) return null;
 
-                // stopXY 없으면 첫번째 후보
-                if (!stopXY) {
-                    var g0 = candidates[0].getGeometry && candidates[0].getGeometry();
-                    var raw0 = g0 && g0.getCoordinates ? g0.getCoordinates() : null;
-                    var xy0 = null;
+                if (!candidates.length) {
+                    // 디버그 힌트
                     try {
-                        if (typeof __toMapXY === 'function') xy0 = __toMapXY(map, raw0);
-                    } catch (e4) {}
-                    if (!xy0) xy0 = toMapXYSafe(map, raw0);
-                    return { feat: candidates[0], xy: xy0 };
+                        var s0 = feats[0];
+                        console.warn('[__pickNearestBusFeature] no candidates', {
+                            rid: rid,
+                            rno: rno,
+                            sample_routeId: s0 ? getFeatureRouteId(s0) : null,
+                            sample_routeNo: s0 ? getFeatureRouteNoNorm(s0) : null,
+                            totalFeats: feats.length,
+                        });
+                    } catch (eDbg) {}
+                    return null;
                 }
 
-                // ✅ nearest 계산
-                var best = null;
-                var bestD2 = Infinity;
+                if (!stopXYMap) return { feat: candidates[0], xy: __getFeatureXY(candidates[0]) };
 
+                // -------------------------
+                // nearest 계산
+                // -------------------------
+                var best = null,
+                    bestD2 = Infinity;
                 for (var j = 0; j < candidates.length; j++) {
                     var cf = candidates[j];
-                    var g = cf.getGeometry && cf.getGeometry();
-                    var raw = g && g.getCoordinates ? g.getCoordinates() : null;
-
-                    var xy = null;
-                    try {
-                        if (typeof __toMapXY === 'function') xy = __toMapXY(map, raw);
-                    } catch (e5) {}
-                    if (!xy) xy = toMapXYSafe(map, raw);
+                    var xy = __getFeatureXY(cf);
                     if (!xy) continue;
 
-                    var dx = xy[0] - stopXY[0];
-                    var dy = xy[1] - stopXY[1];
+                    var dx = xy[0] - stopXYMap[0];
+                    var dy = xy[1] - stopXYMap[1];
                     var d2 = dx * dx + dy * dy;
 
                     if (d2 < bestD2) {
@@ -6008,16 +7175,33 @@
         };
 
         // =========================================================
-        // ✅✅✅ [REPLACE] focusBus (INDEX 캐시 + routeSource sync + boolean draw + FAST PATH)
-        // - FIX1: "두 줄" 방지 => 다른 경로 레이어들 무조건 clear
-        // - FIX2: nearest 파란 화살표 + 번호 라벨 강제 표시
-        // - FIX3: busXY가 lonlat(4326)로 들어오면 mapProj(5179)로 변환 후 표시
-        // - FIX4: in-flight + coords 0 캐시 덮어쓰기 방지 유지
+        // ✅✅✅ [REPLACE] focusBus (bus-route 전용 레이어 호환 + "항상 1개" 강제 최종 FIX v2)
+        // - ✅ bus-route(__busRouteVectorSource) 기준 draw/clear/count
+        // - ✅ keepOld=false 기본: "성공한 클릭"일 때만 기존 라인 교체 (실패시 유지)
+        // - ✅ out-of-order 방지 토큰
+        // - ✅ nearest(파란 화살표)도 busXY 있을 때만 clear+갱신 (없으면 기존 유지)
+        // - ✅ outside면 자동 fit
         // =========================================================
         $scope.focusBus = function (arrival, opts) {
             if (!arrival) return;
             opts = opts || {};
             if (opts.showNearest === undefined) opts.showNearest = true;
+            if (opts.keepOld === undefined) opts.keepOld = false; // 기본: 항상 1개(성공 시)
+
+            // ✅ 마지막 클릭만 유효
+            window.__focusBusClickToken = (window.__focusBusClickToken || 0) + 1;
+            var __myClickToken = window.__focusBusClickToken;
+
+            function __isStaleClick() {
+                return window.__focusBusClickToken !== __myClickToken;
+            }
+
+            // ✅ 전역 ensureNearestBusLayer 보장
+            try {
+                if (typeof window.ensureNearestBusLayer !== 'function' && typeof ensureNearestBusLayer === 'function') {
+                    window.ensureNearestBusLayer = ensureNearestBusLayer;
+                }
+            } catch (eG) {}
 
             function __sched(ms, fn) {
                 try {
@@ -6032,16 +7216,54 @@
             var OL = typeof ol !== 'undefined' ? ol : window && window.ol ? window.ol : null;
             if (!OL) return;
 
-            // ✅ 얇은 화살표(busVectorLayer) 끄기
+            // ✅ 얇은 화살표(busVectorLayer) 끄기(프로젝트에 있으면)
             try {
                 if (typeof __setBusLayerVisible === 'function') __setBusLayerVisible(false);
             } catch (eHideBus) {}
 
             // ---------------------------------------------------------
-            // ✅ FIX1) "두 줄" 원인: 다른 경로 레이어가 남아있음 → BUS 단일 클릭이면 싹 clear
+            // ✅ bus-route source 확보
             // ---------------------------------------------------------
-            function __clearOtherPathLayersWhenBusSingle() {
-                // 네 프로젝트에서 쓰는 소스 이름들이 섞여 있어서 가능한 범위 넓게 방어
+            function __ensureBusRouteSource() {
+                try {
+                    if (window.__busRouteVectorSource && window.__busRouteVectorSource.getFeatures) return window.__busRouteVectorSource;
+
+                    if (typeof __busRouteVectorSource !== 'undefined' && __busRouteVectorSource && __busRouteVectorSource.getFeatures) {
+                        window.__busRouteVectorSource = __busRouteVectorSource;
+                        return window.__busRouteVectorSource;
+                    }
+                    if (typeof busRouteVectorSource !== 'undefined' && busRouteVectorSource && busRouteVectorSource.getFeatures) {
+                        window.__busRouteVectorSource = busRouteVectorSource;
+                        return window.__busRouteVectorSource;
+                    }
+                } catch (e0) {}
+                return window.__busRouteVectorSource || null;
+            }
+
+            function __getBusRouteSource() {
+                var src = null;
+                try {
+                    src = __ensureBusRouteSource();
+                } catch (e) {
+                    src = null;
+                }
+                return src && src.getFeatures ? src : null;
+            }
+
+            function __countBusRouteFeatures() {
+                try {
+                    var src = __getBusRouteSource();
+                    if (!src) return 0;
+                    return (src.getFeatures() || []).length;
+                } catch (e) {
+                    return 0;
+                }
+            }
+
+            // ---------------------------------------------------------
+            // ✅ 다른 레이어들 정리 (bus-route는 옵션)
+            // ---------------------------------------------------------
+            function __clearOtherPathLayers(clearBusRouteToo) {
                 try {
                     if (window.pathVectorSource && window.pathVectorSource.clear) window.pathVectorSource.clear(true);
                 } catch (e1) {}
@@ -6058,7 +7280,6 @@
                     if (window.mixedTransferSource && window.mixedTransferSource.clear) window.mixedTransferSource.clear(true);
                 } catch (e5) {}
 
-                // single segment(hover용) 레이어가 따로 있으면 이것도 지워야 "두 줄"이 안 남음
                 try {
                     if (window.singleSegSource && window.singleSegSource.clear) window.singleSegSource.clear(true);
                 } catch (e6) {}
@@ -6066,10 +7287,21 @@
                     if (window.__singleSegSource && window.__singleSegSource.clear) window.__singleSegSource.clear(true);
                 } catch (e7) {}
 
-                // 혹시 "routeStops" 라인/레이어가 polyline으로 그려지는 케이스 방어(있으면)
                 try {
                     if (window.routeStopsSource && window.routeStopsSource.clear) window.routeStopsSource.clear(true);
                 } catch (e8) {}
+                try {
+                    if (window.routeStopSource && window.routeStopSource.clear) window.routeStopSource.clear(true);
+                } catch (e9) {}
+
+                if (clearBusRouteToo) {
+                    try {
+                        var src = __getBusRouteSource();
+                        if (src && src.clear) src.clear(true);
+                    } catch (e10) {}
+                    // ✅ 캐시 리셋은 "진짜 필요할 때만" (여기서는 하지 않음)
+                    // window.__routeLineFeatureById = Object.create(null);
+                }
             }
 
             // ---------------------------------------------------------
@@ -6078,6 +7310,7 @@
             var routeId = String(arrival.routeid || arrival.routeId || arrival.busRouteId || arrival.route_id || (arrival._raw && (arrival._raw.routeid || arrival._raw.routeId || arrival._raw.busRouteId || arrival._raw.route_id)) || '').trim();
 
             var routeNoRaw = arrival.routeno || arrival.routeNo || arrival.route_no || arrival.routeNoNm || arrival.routenm || arrival.routeNm || arrival.lineNo || '';
+
             var routeNoNorm =
                 typeof __normRouteNo === 'function'
                     ? __normRouteNo(routeNoRaw)
@@ -6093,153 +7326,19 @@
             var stopXY = typeof __lastStopXY !== 'undefined' && __lastStopXY && __lastStopXY.length === 2 ? __lastStopXY : null;
 
             // ---------------------------------------------------------
-            // ✅ route layer/source 보장 + route globals sync
-            // ---------------------------------------------------------
-            function __ensureRouteLayerSafe() {
-                var ok = false;
-                try {
-                    if (typeof ensureRouteLayer === 'function') ok = !!ensureRouteLayer();
-                } catch (e0) {}
-                if (!ok) {
-                    try {
-                        if (window && typeof window.ensureRouteLayer === 'function') ok = !!window.ensureRouteLayer();
-                    } catch (e1) {}
-                }
-                if (!ok) console.warn('[focusBus] ensureRouteLayer not found/failed');
-                return ok;
-            }
-
-            function __syncRouteGlobalsSafe() {
-                try {
-                    if (typeof __syncRouteGlobals === 'function') __syncRouteGlobals();
-                    else if (window && typeof window.__syncRouteGlobals === 'function') window.__syncRouteGlobals();
-                } catch (e) {}
-            }
-
-            function __getRouteSourceSafeWinOnly() {
-                __syncRouteGlobalsSafe();
-
-                try {
-                    if (window.__routeVectorSource && window.__routeVectorSource.getFeatures) return window.__routeVectorSource;
-                } catch (e0) {}
-                try {
-                    if (window.routeVectorSource && window.routeVectorSource.getFeatures) return window.routeVectorSource;
-                } catch (e1) {}
-
-                // tag='path' 레이어에서 끌어오기
-                try {
-                    var layersArr = map.getLayers && map.getLayers().getArray ? map.getLayers().getArray() : [];
-                    for (var i = 0; i < layersArr.length; i++) {
-                        var ly = layersArr[i];
-                        if (!ly || !ly.get) continue;
-                        if (ly.get('tag') === 'path') {
-                            var src = ly.getSource && ly.getSource();
-                            if (src && src.getFeatures) {
-                                window.__routeVectorSource = src;
-                                window.routeVectorSource = src;
-                                return src;
-                            }
-                        }
-                    }
-                } catch (e2) {}
-
-                return null;
-            }
-
-            __ensureRouteLayerSafe();
-
-            // ---------------------------------------------------------
-            // ✅ routePathIndex 캐시 유틸
-            // - coords<2면 캐시 덮어쓰기 금지(0개 캐시 때문에 느려지는 문제 방지)
-            // ---------------------------------------------------------
-            function __cacheRoutePathToIndex(rid, payload, cityCode) {
-                try {
-                    var ridNorm = String(rid || '').trim();
-                    if (!ridNorm) return false;
-
-                    var cc = cityCode || (typeof CITY_CODE !== 'undefined' && CITY_CODE ? CITY_CODE : 25);
-                    var idx = window.routePathIndex || (window.routePathIndex = {});
-
-                    var prev =
-                        (idx[ridNorm] && idx[ridNorm].coords && idx[ridNorm].coords.length >= 2 && idx[ridNorm]) ||
-                        (idx[String(cc) + '|' + ridNorm] && idx[String(cc) + '|' + ridNorm].coords && idx[String(cc) + '|' + ridNorm].coords.length >= 2 && idx[String(cc) + '|' + ridNorm]) ||
-                        null;
-
-                    var d = payload;
-                    if (d && typeof d === 'object' && d.data !== undefined) d = d.data;
-
-                    var items = [];
-                    try {
-                        if (typeof extractRoutePathItems === 'function') {
-                            items = extractRoutePathItems({ data: d }) || extractRoutePathItems(d) || [];
-                        }
-                    } catch (e0) {}
-
-                    if (!items.length) {
-                        if (Array.isArray(d)) items = d;
-                        else if (d && Array.isArray(d.items)) items = d.items;
-                        else if (d && Array.isArray(d.itemList)) items = d.itemList;
-                        else if (d && d.response && d.response.body && d.response.body.items) {
-                            var it = d.response.body.items.item;
-                            if (Array.isArray(it)) items = it;
-                            else if (it) items = [it];
-                        }
-                    }
-
-                    var coords = [];
-                    for (var i = 0; i < items.length; i++) {
-                        var it2 = items[i] || {};
-                        var lon = it2.gpslong || it2.gpsLong || it2.gpsx || it2.gpsX || it2.lon || it2.lng || it2.x;
-                        var lat = it2.gpslati || it2.gpsLati || it2.gpsy || it2.gpsY || it2.lat || it2.y;
-                        lon = Number(lon);
-                        lat = Number(lat);
-                        if (isFinite(lon) && isFinite(lat)) coords.push([lon, lat]);
-                    }
-
-                    if (!coords || coords.length < 2) {
-                        if (prev) {
-                            console.warn('[routePathIndex] skip caching (coords too short, keep prev)', ridNorm, 'coords=', coords ? coords.length : 0);
-                            return false;
-                        }
-                        console.warn('[routePathIndex] skip caching (coords too short)', ridNorm, 'coords=', coords ? coords.length : 0);
-                        return false;
-                    }
-
-                    var stopIds = [];
-                    for (var k = 0; k < items.length; k++) {
-                        var nid = String((items[k] && (items[k].nodeid || items[k].nodeId || items[k].node_id || items[k].node || items[k].stopId || items[k].stop_id || items[k].id || '')) || '').trim();
-                        if (nid) stopIds.push(nid);
-                    }
-
-                    var info = { routeId: ridNorm, cityCode: cc, proj: 'EPSG:4326', coords: coords, stopIds: stopIds, raw: d || null };
-                    idx[ridNorm] = info;
-                    idx[String(cc) + '|' + ridNorm] = info;
-
-                    console.log('[routePathIndex] cached', ridNorm, 'coords=', coords.length, 'stopIds=', stopIds.length);
-
-                    // PERF: 변환 예열
-                    try {
-                        if (coords.length >= 2 && typeof window.__prewarmBusRouteProj === 'function') window.__prewarmBusRouteProj(ridNorm);
-                    } catch (eWarm) {}
-
-                    return true;
-                } catch (e) {
-                    console.warn('[routePathIndex] cache fail', e);
-                    return false;
-                }
-            }
-
-            // ---------------------------------------------------------
-            // 1) nearest bus 선택
+            // 1) nearest bus 선택 (있으면)
             // ---------------------------------------------------------
             var picked = null;
             try {
-                if (typeof __pickNearestBusFeature === 'function') picked = __pickNearestBusFeature(map, routeId, routeNoNorm, stopXY);
+                if (typeof __pickNearestBusFeature === 'function') {
+                    picked = __pickNearestBusFeature(map, routeId, routeNoNorm, stopXY);
+                }
             } catch (ePick) {}
 
             var busXY = picked && picked.xy ? picked.xy : null;
             var busFeat = picked && picked.feat ? picked.feat : null;
 
+            // ✅ routeId 보정(가능하면)
             if (!routeId) {
                 try {
                     routeId = String(
@@ -6251,9 +7350,9 @@
             }
 
             // ---------------------------------------------------------
-            // ✅ FIX3) busXY가 lonlat(4326)로 들어오면 map proj로 변환
+            // busXY가 lonlat이면 map proj로 변환
             // ---------------------------------------------------------
-            function __ensureMapXY(map, xy) {
+            function __ensureMapXY(xy) {
                 try {
                     if (!xy || xy.length < 2) return null;
                     var x = Number(xy[0]),
@@ -6272,62 +7371,62 @@
                     return xy;
                 }
             }
-            busXY = __ensureMapXY(map, busXY);
+            busXY = __ensureMapXY(busXY);
 
             // ---------------------------------------------------------
-            // 2) nearest marker(파란 화살표 + 번호)
+            // 2) nearest marker (굵은 화살표 + 번호)
+            // ✅ busXY 있을 때만 clear+갱신
             // ---------------------------------------------------------
             function __readHeadingRadFromFeature(f) {
                 if (!f || !f.get) return 0;
+
                 var v = f.get('headingRad');
                 if (v != null) {
                     var r0 = Number(v);
                     if (isFinite(r0)) return r0;
                 }
+
                 var h = f.get('heading') || f.get('hdg') || f.get('dir') || f.get('angle') || (f.get('bus') && (f.get('bus').heading || f.get('bus').hdg || f.get('bus').dir || f.get('bus').angle));
+
                 if (h == null) return 0;
                 var hv = Number(h);
                 if (!isFinite(hv)) return 0;
                 return Math.abs(hv) > 6.283 ? (hv * Math.PI) / 180 : hv;
             }
 
-            function __getNearestSourceSafeWinOnly() {
-                try {
-                    if (window.__nearestBusSource && window.__nearestBusSource.getFeatures) return window.__nearestBusSource;
-                } catch (e0) {}
-                return null;
-            }
+            function __drawNearestArrow_ONLY_IF_XY(xy) {
+                if (!opts.showNearest) return;
+                if (__isStaleClick()) return;
 
-            // ✅ FIX2) ensureNearestBusLayer가 "아이콘 문제" 있더라도 번호가 무조건 보이게:
-            // - 아이콘이 안되면 Circle+Text만으로도 보이게 만드는 걸 recommend
-            function __drawNearestArrow(xy) {
-                if (!xy) return;
+                if (!xy || xy.length < 2) {
+                    console.warn('[nearest] skip draw (xy null) -> keep previous arrow');
+                    return;
+                }
 
                 try {
-                    if (typeof ensureNearestBusLayer === 'function') ensureNearestBusLayer(map);
-                    // ensureNearestBusLayer가 다른 map에 붙는 경우 방지: tag로 다시 확인
-                    try {
-                        var arr = map.getLayers && map.getLayers().getArray ? map.getLayers().getArray() : [];
-                        var hasNearest = false;
-                        for (var i = 0; i < arr.length; i++) {
-                            if (arr[i] && arr[i].get && arr[i].get('tag') === 'nearest-bus') {
-                                hasNearest = true;
-                                break;
-                            }
-                        }
-                        if (!hasNearest && window.__nearestBusLayer) map.addLayer(window.__nearestBusLayer);
-                    } catch (eAdd) {}
+                    if (window && typeof window.ensureNearestBusLayer === 'function') window.ensureNearestBusLayer(map);
                 } catch (e0) {}
 
-                var src = __getNearestSourceSafeWinOnly();
-                if (!src || !src.clear) return;
+                if (!window.__nearestBusLayer || !window.__nearestBusSource) {
+                    console.warn('[nearest] layer/source missing after ensureNearestBusLayer');
+                    return;
+                }
 
+                var src = window.__nearestBusSource;
+
+                // ✅ busXY 있을 때만 clear
                 try {
                     src.clear(true);
                 } catch (e1) {}
 
-                var rot = __readHeadingRadFromFeature(busFeat);
+                var rot = 0;
+                try {
+                    rot = __readHeadingRadFromFeature(busFeat);
+                } catch (eRot) {}
+                if (!isFinite(rot)) rot = 0;
+
                 var f2 = new OL.Feature({ geometry: new OL.geom.Point(xy) });
+                var label = String(routeNoNorm || routeNoRaw || 'BUS');
 
                 try {
                     f2.set('rot', rot);
@@ -6336,136 +7435,94 @@
                     f2.set('routeId', routeId);
                 } catch (e3) {}
                 try {
-                    f2.set('routeNo', routeNoNorm || routeNoRaw || '');
+                    f2.set('routeNo', label);
                 } catch (e4) {}
+                try {
+                    f2.set('label', label);
+                } catch (e4c) {}
 
                 try {
                     src.addFeature(f2);
                 } catch (e5) {}
 
-                // 렌더 강제 (추가 즉시 안 보이는 케이스 방지)
                 try {
-                    if (src.changed) src.changed();
-                } catch (eC0) {}
-                try {
-                    if (window.__nearestBusLayer && window.__nearestBusLayer.changed) window.__nearestBusLayer.changed();
-                } catch (eC1) {}
-                try {
-                    map.renderSync ? map.renderSync() : map.render && map.render();
-                } catch (eC2) {}
-            }
+                    window.__nearestBusLayer.setVisible && window.__nearestBusLayer.setVisible(true);
+                    window.__nearestBusLayer.setZIndex && window.__nearestBusLayer.setZIndex(99999);
+                } catch (eV) {}
 
-            if (opts.showNearest === true) {
-                try {
-                    if (busXY) __drawNearestArrow(busXY);
-                    else {
-                        var s0 = __getNearestSourceSafeWinOnly();
-                        if (s0 && s0.clear) s0.clear(true);
-                    }
-                } catch (eNearest) {
-                    console.warn('[focusBus] draw nearest bus fail:', eNearest);
-                }
-            } else {
-                try {
-                    var s1 = __getNearestSourceSafeWinOnly();
-                    if (s1 && s1.clear) s1.clear(true);
-                } catch (eClr) {}
-            }
-
-            // ---------------------------------------------------------
-            // 3) fit + lock
-            // ---------------------------------------------------------
-            if (busXY) {
-                try {
-                    if (typeof __fitStopAndBus === 'function') __fitStopAndBus(map, stopXY, busXY);
-                } catch (e2) {}
-                try {
-                    if (typeof __lockFit === 'function') __lockFit(map, stopXY, busXY);
-                } catch (e3) {}
-            }
-
-            // ---------------------------------------------------------
-            // snap helpers
-            // ---------------------------------------------------------
-            function __snapXYToCurrentRouteLine(xy) {
-                try {
-                    if (!xy) return xy;
-                    var src = __getRouteSourceSafeWinOnly();
-                    if (!src) return xy;
-
-                    var feats = src.getFeatures() || [];
-                    if (!feats.length) return xy;
-
-                    var bestPt = null,
-                        bestD2 = Infinity;
-                    for (var i = 0; i < feats.length; i++) {
-                        var g = feats[i] && feats[i].getGeometry && feats[i].getGeometry();
-                        if (!g || !g.getType || g.getType() !== 'LineString') continue;
-                        if (!g.getClosestPoint) continue;
-
-                        var p = g.getClosestPoint(xy);
-                        if (!p) continue;
-                        var dx = p[0] - xy[0],
-                            dy = p[1] - xy[1];
-                        var d2 = dx * dx + dy * dy;
-                        if (d2 < bestD2) {
-                            bestD2 = d2;
-                            bestPt = p;
-                        }
-                    }
-                    return bestPt || xy;
-                } catch (e) {
-                    return xy;
-                }
-            }
-
-            function __snapArrowToRouteIfPossible() {
-                try {
-                    if (!opts.showNearest) return;
-                    if (!busXY) return;
-
-                    var src = __getNearestSourceSafeWinOnly();
-                    if (!src || !src.getFeatures) return;
-
-                    var snapped = __snapXYToCurrentRouteLine(busXY);
-                    if (!snapped) return;
-
-                    var arr = src.getFeatures();
-                    if (!arr || !arr.length) return;
-
-                    var nf = arr[0];
-                    var g = nf.getGeometry && nf.getGeometry();
-                    if (g && g.setCoordinates) g.setCoordinates(snapped);
-
+                __sched(0, function () {
+                    if (__isStaleClick()) return;
                     try {
-                        if (typeof __fitStopAndBus === 'function') __fitStopAndBus(map, stopXY, snapped);
-                        if (typeof __lockFit === 'function') __lockFit(map, stopXY, snapped);
-                    } catch (eFit3) {}
-                } catch (eSnap) {}
+                        map.renderSync ? map.renderSync() : map.render && map.render();
+                    } catch (eC) {}
+                });
             }
 
             // ---------------------------------------------------------
-            // route draw helpers
+            // ✅ outside면 자동 fit
             // ---------------------------------------------------------
-            function __countRouteFeaturesWinOnly() {
+            function __fitIfOutside(feature) {
                 try {
-                    var src = __getRouteSourceSafeWinOnly();
-                    if (!src || !src.getFeatures) return 0;
-                    return (src.getFeatures() || []).length;
+                    if (!map || !feature || !feature.getGeometry) return;
+                    var geom = feature.getGeometry();
+                    if (!geom || !geom.getExtent) return;
+
+                    var ext = geom.getExtent();
+                    var viewExt = map.getView().calculateExtent(map.getSize());
+
+                    var outside = ext[2] < viewExt[0] || ext[0] > viewExt[2] || ext[3] < viewExt[1] || ext[1] > viewExt[3];
+
+                    if (outside) {
+                        map.getView().fit(ext, { padding: [40, 40, 40, 40], duration: 180, maxZoom: 17 });
+                    }
+                } catch (e) {}
+            }
+
+            // ---------------------------------------------------------
+            // routePathIndex 존재 여부
+            // ---------------------------------------------------------
+            function __hasIndexOK(rid0) {
+                try {
+                    var cc = typeof CITY_CODE !== 'undefined' && CITY_CODE ? CITY_CODE : 25;
+                    var idx = window.routePathIndex || {};
+                    var info = idx[rid0] || idx[String(cc) + '|' + rid0];
+                    return !!(info && info.coords && info.coords.length >= 2);
                 } catch (e) {
-                    return 0;
+                    return false;
                 }
             }
 
-            function __drawFromIndex(rid) {
+            // ---------------------------------------------------------
+            // ✅ draw: "성공할 때만 교체"
+            // ---------------------------------------------------------
+            function __drawFromIndex_SUCCESS_REPLACE(ridNorm) {
+                if (__isStaleClick()) return false;
+                if (!ridNorm) return false;
+                if (typeof window.drawBusRouteFromIndex !== 'function') return false;
+
+                // ✅ (중요) 여기서 bus-route만 clear (캐시는 유지)
+                if (!opts.keepOld) {
+                    try {
+                        var src = __getBusRouteSource();
+                        if (src && src.clear) src.clear(true);
+                    } catch (e0) {}
+                }
+
+                var ok = false;
                 try {
-                    if (typeof window.drawBusRouteFromIndex === 'function') {
-                        return !!window.drawBusRouteFromIndex(rid, { clear: false, fit: false });
-                    }
-                } catch (e0) {}
-                return false;
+                    ok = !!window.drawBusRouteFromIndex(ridNorm, { keepOld: !!opts.keepOld, fit: false });
+                } catch (e1) {
+                    ok = false;
+                }
+
+                // ✅ 실제로 features가 생겼는지 확인
+                var cnt = __countBusRouteFeatures();
+                return ok && cnt > 0;
             }
 
+            // ---------------------------------------------------------
+            // ✅ route 로드(네 프로젝트 safeLoadRoutePath + 후보 API)
+            // ---------------------------------------------------------
             function __warmByApiCandidates(rid, cc) {
                 var ridNorm = String(rid || '').trim();
                 if (!ridNorm) return Promise.reject('rid empty');
@@ -6484,10 +7541,12 @@
                 function next() {
                     if (i >= apiCandidates.length) return Promise.reject('all candidates failed');
                     var url = apiCandidates[i++];
+
                     return $http
                         .get(url)
                         .then(function (res) {
-                            __cacheRoutePathToIndex(ridNorm, res, cc);
+                            if (__isStaleClick()) return res;
+                            if (typeof __cacheRoutePathToIndex === 'function') __cacheRoutePathToIndex(ridNorm, res, cc);
                             return res;
                         })
                         .catch(next);
@@ -6495,7 +7554,6 @@
                 return next();
             }
 
-            // ✅✅✅ routeId별 중복 로딩 방지(in-flight)
             window.__routeLoadInFlight = window.__routeLoadInFlight || {};
 
             function __ensureRouteLoadedThenDraw(rid, done) {
@@ -6505,37 +7563,24 @@
 
                 var cc = typeof CITY_CODE !== 'undefined' && CITY_CODE ? CITY_CODE : 25;
 
-                function __hasIndexOK(rid0) {
-                    try {
-                        var idx = window.routePathIndex || {};
-                        var info = idx[rid0] || idx[String(cc) + '|' + rid0];
-                        return !!(info && info.coords && info.coords.length >= 2);
-                    } catch (e) {
-                        return false;
-                    }
+                // ✅ 1) 캐시가 이미 OK면 바로 "성공 교체 draw"
+                if (__hasIndexOK(ridNorm)) {
+                    var okDraw = __drawFromIndex_SUCCESS_REPLACE(ridNorm);
+                    return done(okDraw);
                 }
 
-                function __drawAndCheck() {
-                    // ✅ FIX1) draw 직전에 다른 경로 레이어 제거 → 무조건 한 줄만 남게
-                    __clearOtherPathLayersWhenBusSingle();
-
-                    var ok1 = __drawFromIndex(ridNorm);
-                    var cnt1 = __countRouteFeaturesWinOnly();
-                    return !!ok1 && cnt1 > 0;
-                }
-
-                if (__hasIndexOK(ridNorm)) return done(__drawAndCheck());
-
+                // ✅ 2) in-flight 공유
                 if (window.__routeLoadInFlight[ridNorm]) {
                     return window.__routeLoadInFlight[ridNorm]
                         .then(function () {
-                            done(__drawAndCheck());
+                            done(__hasIndexOK(ridNorm) ? __drawFromIndex_SUCCESS_REPLACE(ridNorm) : false);
                         })
                         .catch(function () {
-                            done(__drawAndCheck());
+                            done(__hasIndexOK(ridNorm) ? __drawFromIndex_SUCCESS_REPLACE(ridNorm) : false);
                         });
                 }
 
+                // ✅ 3) 실제 로드
                 window.__routeLoadInFlight[ridNorm] = new Promise(function (resolve, reject) {
                     var p = null;
                     try {
@@ -6546,37 +7591,23 @@
                     }
 
                     function finishOk(payload) {
-                        __cacheRoutePathToIndex(ridNorm, payload, cc);
+                        if (typeof __cacheRoutePathToIndex === 'function') __cacheRoutePathToIndex(ridNorm, payload, cc);
                         if (__hasIndexOK(ridNorm)) return resolve(true);
 
                         __warmByApiCandidates(ridNorm, cc)
                             .then(function (res2) {
-                                __cacheRoutePathToIndex(ridNorm, res2, cc);
+                                if (typeof __cacheRoutePathToIndex === 'function') __cacheRoutePathToIndex(ridNorm, res2, cc);
                                 resolve(true);
                             })
-                            .catch(function (e2) {
-                                reject(e2);
-                            });
+                            .catch(reject);
                     }
 
                     if (p && typeof p.then === 'function') {
                         p.then(finishOk).catch(function () {
-                            __warmByApiCandidates(ridNorm, cc)
-                                .then(function (res3) {
-                                    finishOk(res3);
-                                })
-                                .catch(function (e3) {
-                                    reject(e3);
-                                });
+                            __warmByApiCandidates(ridNorm, cc).then(finishOk).catch(reject);
                         });
                     } else {
-                        __warmByApiCandidates(ridNorm, cc)
-                            .then(function (res4) {
-                                finishOk(res4);
-                            })
-                            .catch(function (e4) {
-                                reject(e4);
-                            });
+                        __warmByApiCandidates(ridNorm, cc).then(finishOk).catch(reject);
                     }
                 }).finally(function () {
                     delete window.__routeLoadInFlight[ridNorm];
@@ -6584,46 +7615,62 @@
 
                 return window.__routeLoadInFlight[ridNorm]
                     .then(function () {
-                        done(__drawAndCheck());
+                        done(__hasIndexOK(ridNorm) ? __drawFromIndex_SUCCESS_REPLACE(ridNorm) : false);
                     })
                     .catch(function () {
-                        done(__drawAndCheck());
+                        done(__hasIndexOK(ridNorm) ? __drawFromIndex_SUCCESS_REPLACE(ridNorm) : false);
                     });
             }
 
-            function __afterRouteDraw() {
+            // ---------------------------------------------------------
+            // after draw
+            // ---------------------------------------------------------
+            function __afterRouteDraw(okDraw) {
+                if (__isStaleClick()) return;
+
                 try {
-                    try {
-                        window.__stopFilterOn = true;
-                    } catch (e0) {}
-                    try {
-                        if (typeof __stopFilterOn !== 'undefined') __stopFilterOn = true;
-                    } catch (e1) {}
-
-                    try {
-                        if (typeof __lockHideAllStops === 'function') __lockHideAllStops();
-                    } catch (eL) {}
-
-                    try {
-                        if (routeId && typeof window.drawRouteStopsByRouteId === 'function') {
-                            window.drawRouteStopsByRouteId(routeId, { mode: 'BUS', clear: true, fit: false, $scope: $scope });
-                        } else if (routeId && typeof window.applyRouteStopFilter === 'function') {
-                            window.applyRouteStopFilter(routeId);
-                        }
-                    } catch (eStops) {}
-
-                    var tries = 0;
-                    function trySnap() {
-                        tries++;
-                        var cnt = __countRouteFeaturesWinOnly();
-                        if (cnt > 0) __snapArrowToRouteIfPossible();
-                        if (cnt <= 0 && tries < 8) return __sched(110, trySnap);
-                        if (tries < 3) __sched(80, __snapArrowToRouteIfPossible);
+                    // ✅ 성공했을 때만: 다른 레이어 정리 + route-stops 갱신
+                    if (okDraw && !opts.keepOld) {
+                        __clearOtherPathLayers(false); // 다른 것만 정리, bus-route는 이미 교체됨
                     }
-                    __sched(0, trySnap);
+
+                    if (okDraw) {
+                        // ✅ route-stops 표시(있으면)
+                        try {
+                            if (routeId && typeof window.drawRouteStopsByRouteId === 'function') {
+                                window.drawRouteStopsByRouteId(routeId, { mode: 'BUS', clear: true, fit: false, $scope: $scope });
+                            } else if (routeId && typeof window.applyRouteStopFilter === 'function') {
+                                window.applyRouteStopFilter(routeId);
+                            }
+                        } catch (eStops) {}
+
+                        // ✅ 밖이면 fit (최상단 원인 해결)
+                        try {
+                            var src = __getBusRouteSource();
+                            var f = src && src.getFeatures && src.getFeatures()[0];
+                            if (f) __fitIfOutside(f);
+                        } catch (eFit) {}
+                    }
+
+                    // ✅ nearest: busXY 있을 때만 갱신, 없으면 유지
+                    try {
+                        __drawNearestArrow_ONLY_IF_XY(busXY);
+                    } catch (eNB0) {}
+
+                    __sched(0, function () {
+                        if (__isStaleClick()) return;
+                        try {
+                            map.renderSync ? map.renderSync() : map.render && map.render();
+                        } catch (eR) {}
+                    });
                 } catch (eAfter) {
                     console.warn('[focusBus] afterRouteDraw err:', eAfter);
                 }
+
+                // ✅ 디버그
+                try {
+                    console.log('[focusBus]', 'routeId=', routeId, 'routeNo=', routeNoNorm, 'drawOK=', !!okDraw, 'busRouteFeatures=', __countBusRouteFeatures(), 'busXY=', busXY ? 'OK' : 'NULL', 'token=', __myClickToken);
+                } catch (eDbg) {}
             }
 
             // ---------------------------------------------------------
@@ -6631,31 +7678,15 @@
             // ---------------------------------------------------------
             if (routeId) {
                 __ensureRouteLoadedThenDraw(routeId, function (okDraw) {
-                    try {
-                        var cc = typeof CITY_CODE !== 'undefined' && CITY_CODE ? CITY_CODE : 25;
-                        var hasIndex = !!(
-                            window.routePathIndex &&
-                            ((window.routePathIndex[routeId] && window.routePathIndex[routeId].coords && window.routePathIndex[routeId].coords.length >= 2) ||
-                                (window.routePathIndex[String(cc) + '|' + routeId] && window.routePathIndex[String(cc) + '|' + routeId].coords && window.routePathIndex[String(cc) + '|' + routeId].coords.length >= 2))
-                        );
-                        var fcnt = __countRouteFeaturesWinOnly();
-                        console.log('[focusBus] routeId=', routeId, 'drawOK=', okDraw, 'hasIndex=', hasIndex, 'routeFeatures=', fcnt);
-                    } catch (eDbg) {}
-                    __afterRouteDraw();
+                    if (__isStaleClick()) return;
+                    __afterRouteDraw(!!okDraw);
                 });
                 return;
             }
 
-            // routeNo fallback
-            if (routeNoNorm) {
-                try {
-                    console.warn('[focusBus] routeId empty -> routeNo fallback only:', routeNoNorm);
-                } catch (e0) {}
-                __afterRouteDraw();
-                return;
-            }
-
-            __afterRouteDraw();
+            // routeId 끝까지 못 구한 경우: 실패 → 기존 라인 유지 + nearest 유지
+            console.warn('[focusBus] routeId unresolved. keep previous drawings. routeNo=', routeNoNorm);
+            __afterRouteDraw(false);
         };
 
         // =========================================================
@@ -12970,7 +14001,9 @@
         // =========================================================
         // ✅ "경로만 보기" 모드
         // - stops/walk/버스(포인트 대량 레이어)는 숨기고
-        // - path + (mixed line들) + (route-stops)는 남긴다 ✅
+        // - path + (mixed line들) + (route-stops) + (nearest-bus)는 남긴다 ✅✅✅
+        // - ✅ FIX: hideAllPointLayersOnMap()가 nearest-bus까지 숨길 수 있어서 호출 제거
+        // - ✅ 보강: tag 변형/렌더 갱신/안전한 토글
         // =========================================================
         $scope.onlyPathMode = false;
 
@@ -12979,29 +14012,83 @@
             if (!map || !map.getLayers) return;
 
             var layers = map.getLayers().getArray ? map.getLayers().getArray() : [];
+
+            // ✅ 숨길 태그(포인트 대량)
+            var hideTags = new Set(['stops', 'stop', 'walk', 'bus', 'buses', 'bus-points', 'stop-points']);
+
+            // ✅ 보여줄 태그(경로/혼합/정류장/nearest)
+            var showTags = new Set([
+                'path',
+                'route-stops',
+                'route_stops',
+                'routestops',
+                'route-stops-layer',
+                'nearest-bus',
+                'nearestbus',
+                'mixed-bus',
+                'mixed-tram',
+                'mixed-walk',
+                'mixed-transfer',
+                'mixedbus',
+                'mixedtram',
+                'mixedwalk',
+                'mixedtransfer',
+            ]);
+
             for (var i = 0; i < layers.length; i++) {
                 var ly = layers[i];
                 if (!ly || !ly.setVisible) continue;
 
-                var tag = ly.get && ly.get('tag') ? String(ly.get('tag')) : '';
-                tag = tag.toLowerCase();
+                var tag = '';
+                try {
+                    tag = ly.get && ly.get('tag') ? String(ly.get('tag')) : '';
+                } catch (e0) {
+                    tag = '';
+                }
+                tag = String(tag || '')
+                    .toLowerCase()
+                    .trim();
+
+                // ✅ tag 없는 레이어는 건드리지 않음(베이스맵/타일/기타 UI 레이어 보호)
+                if (!tag) continue;
 
                 if (onlyPath) {
-                    if (tag === 'stops' || tag === 'walk' || tag === 'bus') ly.setVisible(false);
-                    if (tag === 'path') ly.setVisible(true);
+                    // ✅ 포인트 대량은 숨김
+                    if (hideTags.has(tag)) {
+                        ly.setVisible(false);
+                    }
 
-                    // ✅✅✅ 추가: 경로 정류장만 마킹 레이어는 보여주기
-                    if (tag === 'route-stops') ly.setVisible(true);
+                    // ✅ 경로/혼합/정류장/nearest는 표시
+                    if (showTags.has(tag)) {
+                        ly.setVisible(true);
+
+                        // 혹시 zIndex 낮아서 안 보이는 케이스 방지(특히 nearest-bus)
+                        try {
+                            if (tag === 'nearest-bus' || tag === 'nearestbus') {
+                                if (ly.setZIndex) ly.setZIndex(99999);
+                            }
+                        } catch (eZ) {}
+                    }
+
+                    // ✅ 그 외 tag는 유지(네 의도대로 불필요한 레이어를 건드리지 않음)
                 } else {
-                    if (tag === 'stops' || tag === 'walk' || tag === 'bus' || tag === 'path' || tag === 'route-stops') ly.setVisible(true);
+                    // ✅ 기본 모드로 복구: 우리가 관리하는 태그는 모두 표시
+                    if (hideTags.has(tag) || showTags.has(tag)) {
+                        ly.setVisible(true);
+                    }
                 }
+
+                // ✅ 레이어 자체 갱신(visible만 바꿔도 반영 늦는 경우 방지)
+                try {
+                    if (ly.changed) ly.changed();
+                } catch (eCh) {}
             }
 
-            if (onlyPath) {
-                try {
-                    if (typeof hideAllPointLayersOnMap === 'function') hideAllPointLayersOnMap();
-                } catch (e) {}
-            }
+            // ✅ 렌더 강제(가끔 visible 토글 후 즉시 반영 안 되는 케이스 방지)
+            try {
+                if (map.renderSync) map.renderSync();
+                else if (map.render) map.render();
+            } catch (e) {}
         }
 
         // =========================================================
@@ -13510,6 +14597,108 @@
             $scope.collecting = false;
         });
     });
+
+    // =========================================================
+    // ✅✅✅ nearest-bus layer: GLOBAL INSTALLER (무조건 전역에 심기)
+    // - 어디 스코프에 있든 window.ensureNearestBusLayer 가 생기도록 강제
+    // =========================================================
+    (function installNearestBusLayerGlobal() {
+        if (window.ensureNearestBusLayer) return; // 이미 있으면 끝
+
+        window.ensureNearestBusLayer = function (map) {
+            try {
+                map = map || (typeof __getMapSafe === 'function' ? __getMapSafe() : null) || (typeof getInnerOlMap === 'function' ? getInnerOlMap() : null);
+                if (!map || !window.ol || !ol.layer || !ol.source || !ol.style) return false;
+
+                // 이미 있으면 map에 재-add만
+                if (window.__nearestBusLayer && window.__nearestBusSource) {
+                    try {
+                        var arr = map.getLayers && map.getLayers().getArray ? map.getLayers().getArray() : [];
+                        if (arr && arr.indexOf(window.__nearestBusLayer) === -1) map.addLayer(window.__nearestBusLayer);
+                    } catch (e0) {}
+                    return true;
+                }
+
+                window.__nearestBusSource = new ol.source.Vector();
+
+                // ✅ 화살표 아이콘(너 기존 함수 사용)
+                var arrowSrc = typeof __makeArrowIconDataUrl === 'function' ? __makeArrowIconDataUrl('#2563eb') : null;
+                if (!arrowSrc) {
+                    console.warn('[nearest-bus] __makeArrowIconDataUrl missing');
+                    return false;
+                }
+
+                var rotOffsetRad = Math.PI / 2;
+
+                window.__nearestBusLayer = new ol.layer.Vector({
+                    source: window.__nearestBusSource,
+                    zIndex: 9999,
+                    style: function (feature) {
+                        var rot = 0;
+                        try {
+                            rot = Number(feature && feature.get && feature.get('rot'));
+                        } catch (e1) {}
+                        if (!isFinite(rot)) rot = 0;
+                        rot = rot + rotOffsetRad;
+
+                        var rno = '';
+                        try {
+                            rno = String((feature && feature.get && (feature.get('routeNo') || feature.get('routeno') || feature.get('label'))) || '');
+                        } catch (e2) {}
+                        rno = String(rno || '')
+                            .replace(/\s+/g, '')
+                            .replace(/번/g, '');
+
+                        return new ol.style.Style({
+                            image: new ol.style.Icon({
+                                src: arrowSrc,
+                                scale: 0.95,
+                                rotation: rot,
+                                rotateWithView: true,
+                                anchor: [0.5, 0.5],
+                                anchorXUnits: 'fraction',
+                                anchorYUnits: 'fraction',
+                            }),
+                            text: rno
+                                ? new ol.style.Text({
+                                      text: rno,
+                                      font: 'bold 13px sans-serif',
+                                      offsetY: -2,
+                                      fill: new ol.style.Fill({ color: '#ffffff' }),
+                                      stroke: new ol.style.Stroke({ color: 'rgba(0,0,0,0.45)', width: 3 }),
+                                  })
+                                : undefined,
+                        });
+                    },
+                });
+
+                try {
+                    window.__nearestBusLayer.set('tag', 'nearest-bus');
+                } catch (e3) {}
+                try {
+                    map.addLayer(window.__nearestBusLayer);
+                } catch (e4) {}
+
+                try {
+                    window.__nearestBusSource.changed && window.__nearestBusSource.changed();
+                } catch (e5) {}
+                try {
+                    window.__nearestBusLayer.changed && window.__nearestBusLayer.changed();
+                } catch (e6) {}
+                try {
+                    map.renderSync ? map.renderSync() : map.render && map.render();
+                } catch (e7) {}
+
+                console.log('[nearest-bus] installed ✅');
+                return true;
+            } catch (e) {
+                console.warn('[nearest-bus] install fail', e);
+                return false;
+            }
+        };
+
+        console.log('[nearest-bus] global function ready ✅');
+    })();
 
     // ────────────────────────────────────────────────────────────────
     // ───────────────── 게시판 공통 (페이지네이션 + 서버 검색) ─────────────────
