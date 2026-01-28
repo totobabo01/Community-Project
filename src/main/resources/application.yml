@@ -12,7 +12,8 @@ spring:
     # ✅ DataSource 표준 설정(스프링이 JdbcTemplate/트랜잭션 자동 구성)
     datasource:
         driver-class-name: org.mariadb.jdbc.Driver
-        url: jdbc:mariadb://localhost:3306/demo
+        # ✅ 배포/이관 DB로 접속 (192.168.44.128 / ipp_db)
+        url: jdbc:mariadb://192.168.44.128:3306/ipp_db
         username: demo_user
         password: '0000'
 
@@ -23,10 +24,12 @@ logging:
     level:
         org.springframework.security: DEBUG # 로그인/인증 문제 추적용 디버그 로그
 
-# 커스텀 네임스페이스(애플리케이션 내부에서 @ConfigurationProperties로 바인딩해 사용 가능)
+# 커스텀 네임스페이스(애플리케이션 내부에서 @ConfigurationProperties 또는 @Value로 사용 가능)
+# ✅ (중요) 프로젝트 일부 DAO가 spring.datasource가 아니라 app.db.*를 직접 읽을 수 있으니
+# ✅ spring.datasource와 완전히 동일하게 맞춰서 "설정 불일치"로 인한 Access denied를 방지
 app:
     db:
-        url: jdbc:mariadb://localhost:3306/demo # 참고용(실제 연결은 spring.datasource 사용)
+        url: jdbc:mariadb://192.168.44.128:3306/ipp_db
         username: demo_user
         password: '0000'
 
